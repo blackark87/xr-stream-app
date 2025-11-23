@@ -19,6 +19,7 @@ fun XRPlaybackControls(
 ) {
     var showSpeedMenu by remember { mutableStateOf(false) }
     var showVolumeSlider by remember { mutableStateOf(false) }
+    var showFormatMenu by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -114,6 +115,11 @@ fun XRPlaybackControls(
             TextButton(onClick = { showVolumeSlider = !showVolumeSlider }) {
                 Text("Volume: ${(playerState.volume * 100).roundToInt()}%")
             }
+            
+            // Format control (New)
+            TextButton(onClick = { showFormatMenu = !showFormatMenu }) {
+                Text("Format")
+            }
 
             // Hide controls
             TextButton(onClick = onToggleControls) {
@@ -150,6 +156,69 @@ fun XRPlaybackControls(
                                 }
                             ) {
                                 Text("${speed}x")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Format Menu (New)
+        if (showFormatMenu) {
+             Card(
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        text = "Video Format",
+                        style = MaterialTheme.typography.titleSmall,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+                    
+                    // Depth 1: Video Type
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        com.example.myapplication.ui.viewmodel.VideoFormat.values().forEach { format ->
+                            Button(
+                                onClick = { videoPlayerViewModel.setVideoFormat(format) },
+                                colors = if (playerState.videoFormat == format) {
+                                    ButtonDefaults.buttonColors()
+                                } else {
+                                    ButtonDefaults.outlinedButtonColors()
+                                },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text(format.name.replace("Format", ""))
+                            }
+                        }
+                    }
+                    
+                    Spacer(modifier = Modifier.height(16.dp))
+                    
+                    Text(
+                        text = "Stereo Mode",
+                        style = MaterialTheme.typography.titleSmall,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+                    
+                    // Depth 2: Stereo Mode
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        com.example.myapplication.ui.viewmodel.StereoMode.values().forEach { mode ->
+                            Button(
+                                onClick = { videoPlayerViewModel.setStereoMode(mode) },
+                                colors = if (playerState.stereoMode == mode) {
+                                    ButtonDefaults.buttonColors()
+                                } else {
+                                    ButtonDefaults.outlinedButtonColors()
+                                },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text(mode.name)
                             }
                         }
                     }

@@ -34,9 +34,21 @@ data class VideoPlayerState(
     val isLoading: Boolean = false,
     val error: String? = null,
     val videoFile: SMBFileItem? = null,
-    val isStereoVideo: Boolean = false,  // True if video is SBS/stereo format
-    val userStereoOverride: Boolean? = null  // Manual override: null=auto, true=force stereo, false=force 2D
+    val videoFormat: VideoFormat = VideoFormat.Format2D,
+    val stereoMode: StereoMode = StereoMode.Mono
 )
+
+enum class VideoFormat {
+    Format2D,
+    Format180,
+    Format360
+}
+
+enum class StereoMode {
+    Mono,
+    SideBySide,
+    TopBottom
+}
 
 @UnstableApi
 class VideoPlayerViewModel(
@@ -55,47 +67,50 @@ class VideoPlayerViewModel(
     /**
      * Detect if video is SBS/stereo based on filename patterns
      */
-    private fun detectStereoFromFilename(filename: String): Boolean {
+    private fun detectStereoFromFilename(filename: String): StereoMode {
         val lowerFilename = filename.lowercase()
+        
+        // Check for Top-Bottom patterns
+        val tbPatterns = listOf(
+            "_tb", ".tb", "tb.", "_topbottom", "top-bottom", "top_bottom", "over-under"
+        )
+        if (tbPatterns.any { pattern -> lowerFilename.contains(pattern) }) {
+            return StereoMode.TopBottom
+        }
+
+        // Check for Side-by-Side patterns
         val sbsPatterns = listOf(
             "_lr", "_sbs", ".sbs", "lr.", "sbs.",
             "_3d", ".3d", "3d.", "_sidebyside",
             "[lr]", "[sbs]", "(lr)", "(sbs)",
             "side-by-side", "side_by_side"
         )
-        return sbsPatterns.any { pattern -> lowerFilename.contains(pattern) }
+        if (sbsPatterns.any { pattern -> lowerFilename.contains(pattern) }) {
+            return StereoMode.SideBySide
+        }
+        
+        // Check for 180/360 patterns (defaults to Mono unless stereo is also detected)
+        // Ideally we'd detect format too, but for now let's stick to stereo mode detection
+        
+        return StereoMode.Mono
     }
 
     /**
-     * Toggle stereo mode manually (for UI control)
+     * Detect video format from filename
      */
-    fun toggleStereoMode() {
-        val currentOverride = _state.value.userStereoOverride
-        val newOverride = when (currentOverride) {
-            null -> true  // From auto to force stereo
-            true -> false  // From force stereo to force 2D
-            false -> null  // From force 2D back to auto
-        }
-        _state.value = _state.value.copy(userStereoOverride = newOverride)
-        updateStereoState()
+    private fun detectFormatFromFilename(filename: String): VideoFormat {
+        val lowerFilename = filename.lowercase()
+        if (lowerFilename.contains("180")) return VideoFormat.Format180
+        if (lowerFilename.contains("360")) return VideoFormat.Format360
+        return VideoFormat.Format2D
     }
 
-    /**
-     * Update the effective stereo state based on detection and user override
-     */
-    private fun updateStereoState() {
-        val override = _state.value.userStereoOverride
-        if (override != null) {
-            // User has manually overridden, use that value
-            _state.value = _state.value.copy(isStereoVideo = override)
-        } else {
-            // Auto-detect from filename if no override
-            val videoFile = _state.value.videoFile
-            if (videoFile != null) {
-                val detectedStereo = detectStereoFromFilename(videoFile.name)
-                _state.value = _state.value.copy(isStereoVideo = detectedStereo)
-            }
-        }
+    fun setVideoFormat(format: VideoFormat) {
+        _state.value = _state.value.copy(videoFormat = format)
+    }
+
+    fun setStereoMode(mode: StereoMode) {
+        _state.value = _state.value.copy(stereoMode = mode)
     }
 
     fun initializePlayer(
@@ -107,15 +122,17 @@ class VideoPlayerViewModel(
         
         viewModelScope.launch {
             try {
-                // Detect stereo from filename initially
-                val initialStereoDetection = detectStereoFromFilename(videoFile.name)
-                Log.d("VideoPlayerViewModel", "Filename-based stereo detection: $initialStereoDetection for ${videoFile.name}")
+                // Detect stereo and format from filename initially
+                val initialStereoMode = detectStereoFromFilename(videoFile.name)
+                val initialVideoFormat = detectFormatFromFilename(videoFile.name)
+                Log.d("VideoPlayerViewModel", "Filename detection - Stereo: $initialStereoMode, Format: $initialVideoFormat")
 
                 _state.value = _state.value.copy(
                     isLoading = true,
                     error = null,
                     videoFile = videoFile,
-                    isStereoVideo = initialStereoDetection  // Start with filename-based detection
+                    stereoMode = initialStereoMode,
+                    videoFormat = initialVideoFormat
                 )
 
                 // Release existing player if any
@@ -170,14 +187,14 @@ class VideoPlayerViewModel(
                         }
                         
                         override fun onTracksChanged(tracks: androidx.media3.common.Tracks) {
-                            // Only auto-detect if user hasn't manually overridden
-                            if (_state.value.userStereoOverride != null) {
-                                Log.d("VideoPlayerViewModel", "User override active, skipping track-based stereo detection")
+                            // Check video track for stereo mode metadata if currently Mono
+                            // We don't override if we already detected something from filename
+                            if (_state.value.stereoMode != StereoMode.Mono) {
                                 return
                             }
 
                             // Check video track for stereo mode metadata
-                            var metadataStereo = false
+                            var detectedMode = StereoMode.Mono
                             for (trackGroup in tracks.groups) {
                                 if (trackGroup.type == androidx.media3.common.C.TRACK_TYPE_VIDEO) {
                                     for (i in 0 until trackGroup.length) {
@@ -185,24 +202,22 @@ class VideoPlayerViewModel(
                                         val stereoMode = format.stereoMode
                                         Log.d("VideoPlayerViewModel", "Video track stereoMode: $stereoMode")
 
-                                        // Check for side-by-side stereo modes
                                         if (stereoMode == androidx.media3.common.C.STEREO_MODE_LEFT_RIGHT ||
                                             stereoMode == androidx.media3.common.C.STEREO_MODE_STEREO_MESH) {
-                                            metadataStereo = true
-                                            Log.d("VideoPlayerViewModel", "Detected SBS stereo from metadata")
+                                            detectedMode = StereoMode.SideBySide
+                                            break
+                                        } else if (stereoMode == androidx.media3.common.C.STEREO_MODE_TOP_BOTTOM) {
+                                            detectedMode = StereoMode.TopBottom
                                             break
                                         }
                                     }
                                 }
-                                if (metadataStereo) break
+                                if (detectedMode != StereoMode.Mono) break
                             }
 
-                            // If metadata indicates stereo, use that. Otherwise keep filename-based detection
-                            if (metadataStereo) {
-                                _state.value = _state.value.copy(isStereoVideo = true)
+                            if (detectedMode != StereoMode.Mono) {
+                                _state.value = _state.value.copy(stereoMode = detectedMode)
                             }
-                            // If metadata doesn't indicate stereo, keep the filename-based detection
-                            // (already set in initializePlayer)
                         }
 
                         override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
