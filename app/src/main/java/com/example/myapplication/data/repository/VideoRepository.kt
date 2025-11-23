@@ -41,4 +41,17 @@ class VideoRepository(private val videoDao: VideoDao) {
     suspend fun clearAllVideos() {
         videoDao.clearAllVideos()
     }
+
+    // Favorites support
+    fun getFavoriteVideos(): Flow<List<RecentVideo>> {
+        return videoDao.getFavoriteVideos()
+    }
+
+    suspend fun toggleFavorite(videoId: Long, isFavorite: Boolean) {
+        videoDao.updateFavoriteStatus(videoId, isFavorite)
+    }
+
+    suspend fun toggleFavoriteByPath(filePath: String, isFavorite: Boolean) {
+        videoDao.updateFavoriteStatusByPath(filePath, isFavorite)
+    }
 }

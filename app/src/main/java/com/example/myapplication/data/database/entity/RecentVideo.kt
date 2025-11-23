@@ -13,5 +13,6 @@ data class RecentVideo(
     val shareName: String,
     val lastPlayed: Long = System.currentTimeMillis(),
     val lastPosition: Long = 0, // Last playback position in milliseconds
-    val duration: Long = 0 // Video duration in milliseconds
+    val duration: Long = 0, // Video duration in milliseconds
+    val isFavorite: Boolean = false // Mark as favorite for quick access
 )

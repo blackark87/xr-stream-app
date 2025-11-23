@@ -17,7 +17,10 @@ class MainActivity : ComponentActivity() {
         setContent {
             MyApplicationTheme {
                 val navController = rememberNavController()
-                AppNavigation(navController = navController)
+                AppNavigation(
+                    navController = navController,
+                    context = this
+                )
             }
         }
     }
