@@ -8,6 +8,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import com.example.myapplication.data.database.entity.RecentVideo
@@ -21,6 +22,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import androidx.core.net.toUri
 
 data class VideoPlayerState(
     val isPlaying: Boolean = false,
@@ -31,9 +33,12 @@ data class VideoPlayerState(
     val volume: Float = 1.0f,
     val isLoading: Boolean = false,
     val error: String? = null,
-    val videoFile: SMBFileItem? = null
+    val videoFile: SMBFileItem? = null,
+    val isStereoVideo: Boolean = false,  // True if video is SBS/stereo format
+    val userStereoOverride: Boolean? = null  // Manual override: null=auto, true=force stereo, false=force 2D
 )
 
+@UnstableApi
 class VideoPlayerViewModel(
     private val videoRepository: VideoRepository
 ) : ViewModel() {
@@ -47,25 +52,95 @@ class VideoPlayerViewModel(
     private var exoPlayer: ExoPlayer? = null
     private var currentVideoId: Long? = null
 
+    /**
+     * Detect if video is SBS/stereo based on filename patterns
+     */
+    private fun detectStereoFromFilename(filename: String): Boolean {
+        val lowerFilename = filename.lowercase()
+        val sbsPatterns = listOf(
+            "_lr", "_sbs", ".sbs", "lr.", "sbs.",
+            "_3d", ".3d", "3d.", "_sidebyside",
+            "[lr]", "[sbs]", "(lr)", "(sbs)",
+            "side-by-side", "side_by_side"
+        )
+        return sbsPatterns.any { pattern -> lowerFilename.contains(pattern) }
+    }
+
+    /**
+     * Toggle stereo mode manually (for UI control)
+     */
+    fun toggleStereoMode() {
+        val currentOverride = _state.value.userStereoOverride
+        val newOverride = when (currentOverride) {
+            null -> true  // From auto to force stereo
+            true -> false  // From force stereo to force 2D
+            false -> null  // From force 2D back to auto
+        }
+        _state.value = _state.value.copy(userStereoOverride = newOverride)
+        updateStereoState()
+    }
+
+    /**
+     * Update the effective stereo state based on detection and user override
+     */
+    private fun updateStereoState() {
+        val override = _state.value.userStereoOverride
+        if (override != null) {
+            // User has manually overridden, use that value
+            _state.value = _state.value.copy(isStereoVideo = override)
+        } else {
+            // Auto-detect from filename if no override
+            val videoFile = _state.value.videoFile
+            if (videoFile != null) {
+                val detectedStereo = detectStereoFromFilename(videoFile.name)
+                _state.value = _state.value.copy(isStereoVideo = detectedStereo)
+            }
+        }
+    }
+
     fun initializePlayer(
         context: Context,
         smbConfig: SMBConfig,
         videoFile: SMBFileItem
     ) {
         Log.d("VideoPlayerViewModel", "initializePlayer called for ${videoFile.name}")
+        
         viewModelScope.launch {
             try {
+                // Detect stereo from filename initially
+                val initialStereoDetection = detectStereoFromFilename(videoFile.name)
+                Log.d("VideoPlayerViewModel", "Filename-based stereo detection: $initialStereoDetection for ${videoFile.name}")
+
                 _state.value = _state.value.copy(
                     isLoading = true,
                     error = null,
-                    videoFile = videoFile
+                    videoFile = videoFile,
+                    isStereoVideo = initialStereoDetection  // Start with filename-based detection
                 )
 
                 // Release existing player if any
                 releasePlayer()
 
-                // Create ExoPlayer instance
-                exoPlayer = ExoPlayer.Builder(context).build().apply {
+                // Create ExoPlayer instance with larger buffer for SMB streaming
+                // Use 1MB allocation size to match SMB buffer
+                val allocator = androidx.media3.exoplayer.upstream.DefaultAllocator(
+                    /* trimOnReset= */ true,
+                    /* individualAllocationSize= */ 1024 * 1024 * 10  // 10MB chunks
+                )
+                
+                val loadControl = androidx.media3.exoplayer.DefaultLoadControl.Builder()
+                    .setAllocator(allocator)
+                    .setBufferDurationsMs(
+                        /* minBufferMs = */ 60000,  // 30 seconds minimum buffer
+                        /* maxBufferMs = */ 120000, // 2 minutes maximum buffer
+                        /* bufferForPlaybackMs = */ 60000,  // Start playback after 5 seconds
+                        /* bufferForPlaybackAfterRebufferMs = */ 10000  // Resume after 10 seconds on rebuffer
+                    )
+                    .build()
+
+                exoPlayer = ExoPlayer.Builder(context)
+                    .setLoadControl(loadControl)
+                    .build().apply {
                     // Set up player listener
                     addListener(object : Player.Listener {
                         override fun onPlaybackStateChanged(playbackState: Int) {
@@ -93,6 +168,42 @@ class VideoPlayerViewModel(
                             Log.d("VideoPlayerViewModel", "ExoPlayer isPlaying changed: $isPlaying")
                             _state.value = _state.value.copy(isPlaying = isPlaying)
                         }
+                        
+                        override fun onTracksChanged(tracks: androidx.media3.common.Tracks) {
+                            // Only auto-detect if user hasn't manually overridden
+                            if (_state.value.userStereoOverride != null) {
+                                Log.d("VideoPlayerViewModel", "User override active, skipping track-based stereo detection")
+                                return
+                            }
+
+                            // Check video track for stereo mode metadata
+                            var metadataStereo = false
+                            for (trackGroup in tracks.groups) {
+                                if (trackGroup.type == androidx.media3.common.C.TRACK_TYPE_VIDEO) {
+                                    for (i in 0 until trackGroup.length) {
+                                        val format = trackGroup.getTrackFormat(i)
+                                        val stereoMode = format.stereoMode
+                                        Log.d("VideoPlayerViewModel", "Video track stereoMode: $stereoMode")
+
+                                        // Check for side-by-side stereo modes
+                                        if (stereoMode == androidx.media3.common.C.STEREO_MODE_LEFT_RIGHT ||
+                                            stereoMode == androidx.media3.common.C.STEREO_MODE_STEREO_MESH) {
+                                            metadataStereo = true
+                                            Log.d("VideoPlayerViewModel", "Detected SBS stereo from metadata")
+                                            break
+                                        }
+                                    }
+                                }
+                                if (metadataStereo) break
+                            }
+
+                            // If metadata indicates stereo, use that. Otherwise keep filename-based detection
+                            if (metadataStereo) {
+                                _state.value = _state.value.copy(isStereoVideo = true)
+                            }
+                            // If metadata doesn't indicate stereo, keep the filename-based detection
+                            // (already set in initializePlayer)
+                        }
 
                         override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
                             Log.e("VideoPlayerViewModel", "ExoPlayer error: ${error.message}", error)
@@ -107,11 +218,9 @@ class VideoPlayerViewModel(
                 // Create SMB data source
                 val dataSourceFactory = SMBDataSource.Factory(smbConfig)
 
-                // Extract file path for URI
-                val filePath = videoFile.path
-                    .substringAfter("/${smbConfig.shareName}")
-                val uri = Uri.parse("smb://${smbConfig.serverAddress}:${smbConfig.port}/${smbConfig.shareName}$filePath")
-            Log.d("VideoPlayerViewModel", "initializePlayer - Constructed URI: $uri")
+                // videoFile.path is already a complete SMB URL from jcifs (e.g., smb://192.168.1.105:445/downloads/file.mp4)
+                val uri = videoFile.path.toUri()
+            Log.d("VideoPlayerViewModel", "initializePlayer - Using URI from path: $uri")
             
             val mediaItem = MediaItem.fromUri(uri)
 
@@ -194,9 +303,7 @@ class VideoPlayerViewModel(
     }
 
     fun setPlaybackSpeed(speed: Float) {
-        exoPlayer?.setPlaybackParameters(
-            PlaybackParameters(speed)
-        )
+        exoPlayer?.playbackParameters = PlaybackParameters(speed)
         _state.value = _state.value.copy(playbackSpeed = speed)
     }
 

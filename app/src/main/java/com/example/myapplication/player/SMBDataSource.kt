@@ -44,6 +44,8 @@ class SMBDataSource(
                     setProperty("jcifs.smb.client.minVersion", "SMB202")
                     setProperty("jcifs.smb.client.maxVersion", "SMB311")
                     setProperty("jcifs.resolveOrder", "DNS")
+                    // Set SMB buffer size to 1MB (SMB 3.x default)
+                    setProperty("jcifs.smb.client.bufferSize", "1048576")  // 1MB
                 }
 
                 val baseContext = BaseContext(PropertyConfiguration(props))
@@ -132,7 +134,24 @@ class SMBDataSource(
 
         val bytesRead = try {
             randomAccessFile?.read(buffer, offset, bytesToRead) ?: C.RESULT_END_OF_INPUT
+        } catch (e: InterruptedException) {
+            // Player is being closed, return end of input gracefully
+            Log.d(TAG, "Read interrupted (player closing)")
+            return C.RESULT_END_OF_INPUT
+        } catch (e: jcifs.smb.SmbException) {
+            // Check if it's an interrupted exception wrapped in SmbException
+            if (e.cause is InterruptedException || e.message?.contains("InterruptedException") == true) {
+                Log.d(TAG, "Read interrupted via SmbException (player closing)")
+                return C.RESULT_END_OF_INPUT
+            }
+            Log.e(TAG, "SMB error reading stream: ${e.message}", e)
+            throw IOException("SMB error reading stream", e)
         } catch (e: IOException) {
+            // Check if it's an interrupted exception wrapped in IOException
+            if (e.cause is InterruptedException) {
+                Log.d(TAG, "Read interrupted via IOException (player closing)")
+                return C.RESULT_END_OF_INPUT
+            }
             Log.e(TAG, "Error reading from SMB stream: ${e.message}", e)
             throw IOException("Error reading from SMB stream", e)
         }
@@ -170,8 +189,20 @@ class SMBDataSource(
     override fun close() {
         try {
             randomAccessFile?.close()
+        } catch (e: jcifs.smb.SmbException) {
+            // Ignore interruption exceptions during close - they're expected
+            if (e.cause !is InterruptedException && e.message?.contains("InterruptedException") != true) {
+                throw IOException("Error closing SMB random access file", e)
+            } else {
+                Log.d(TAG, "Close interrupted (expected during shutdown)")
+            }
         } catch (e: IOException) {
-            throw IOException("Error closing SMB random access file", e)
+            // Ignore interruption exceptions during close - they're expected
+            if (e.cause !is InterruptedException) {
+                throw IOException("Error closing SMB random access file", e)
+            } else {
+                Log.d(TAG, "Close interrupted (expected during shutdown)")
+            }
         } finally {
             randomAccessFile = null
             smbFile = null

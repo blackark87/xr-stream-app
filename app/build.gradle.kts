@@ -59,11 +59,11 @@ dependencies {
     implementation(libs.androidx.compose.material3)
 
     // XR Libraries
-    implementation(libs.androidx.compose)
-    implementation(libs.androidx.runtime)
-    implementation(libs.androidx.scenecore)
-    implementation(libs.androidx.arcore)
-    implementation(libs.androidx.arcore.openxr)
+    implementation(libs.androidx.xr.compose)
+    implementation(libs.androidx.xr.runtime)
+    implementation(libs.androidx.xr.scenecore)
+    implementation(libs.androidx.xr.arcore)
+    implementation(libs.androidx.xr.arcore.openxr)
 
     // Media3 ExoPlayer
     implementation(libs.androidx.media3.exoplayer)

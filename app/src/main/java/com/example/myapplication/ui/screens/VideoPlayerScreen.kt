@@ -1,7 +1,6 @@
 package com.example.myapplication.ui.screens
 
-import android.content.pm.PackageManager
-import android.view.SurfaceView
+import android.view.ViewGroup
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -11,19 +10,14 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.media3.ui.PlayerView
 import androidx.xr.compose.platform.LocalSession
-import androidx.xr.compose.platform.LocalSpatialCapabilities
+import androidx.xr.compose.spatial.ContentEdge
 import androidx.xr.compose.spatial.Orbiter
 import androidx.xr.compose.spatial.Subspace
-import androidx.xr.compose.spatial.ContentEdge
-import androidx.xr.compose.subspace.SpatialPanel
-import androidx.xr.compose.subspace.layout.SubspaceModifier
-import androidx.xr.compose.subspace.layout.width
-import androidx.xr.compose.subspace.layout.height
 import com.example.myapplication.data.database.AppDatabase
 import com.example.myapplication.data.repository.VideoRepository
 import com.example.myapplication.ui.components.XRPlaybackControls
-import com.example.myapplication.ui.viewmodel.FileBrowserViewModel
 import com.example.myapplication.ui.viewmodel.VideoPlayerViewModel
 import com.example.myapplication.ui.viewmodel.VideoPlayerViewModelFactory
 
@@ -47,10 +41,6 @@ fun VideoPlayerScreen(
     val hasXrFeature = remember {
         context.packageManager.hasSystemFeature("android.software.xr.api.spatial")
     }
-
-    // Only access XR composables if feature is available
-    val session = if (hasXrFeature) LocalSession.current else null
-    val spatialCapabilities = if (hasXrFeature) LocalSpatialCapabilities.current else null
 
     // Initialize player when video file and SMB config are available
     LaunchedEffect(videoFilePath, videoFileName) {
@@ -79,15 +69,16 @@ fun VideoPlayerScreen(
         }
     }
 
-    if (hasXrFeature && spatialCapabilities?.isSpatialUiEnabled == true && session != null) {
-        // XR Immersive Mode - Side-by-side stereo video
+    if (hasXrFeature) {
+        // XR device detected - render spatial video content
+        // LocalSession will be available inside the Subspace
         SpatialVideoPlayerContent(
             videoPlayerViewModel = videoPlayerViewModel,
             playerState = playerState,
             onNavigateBack = onNavigateBack
         )
     } else {
-        // Fallback error message
+        // Non-XR device - show error message
         Box(
             modifier = Modifier.fillMaxSize(),
             contentAlignment = Alignment.Center
@@ -118,18 +109,7 @@ fun SpatialVideoPlayerContent(
     onNavigateBack: () -> Unit
 ) {
     val exoPlayer by videoPlayerViewModel.playerFlow.collectAsState()
-    var surfaceView by remember { mutableStateOf<SurfaceView?>(null) }
-    var showControls by remember { mutableStateOf(true) }
-
-    // Attach ExoPlayer surface when both are ready
-    LaunchedEffect(surfaceView, exoPlayer) {
-        val player = exoPlayer
-        val surface = surfaceView
-        if (player != null && surface != null) {
-            println("XR: Attaching ExoPlayer to SurfaceView")
-            player.setVideoSurfaceView(surface)
-        }
-    }
+    var showControls by remember { mutableStateOf(false) }  // Start with controls hidden
 
     // Auto-hide controls after 5 seconds
     LaunchedEffect(showControls, playerState.isPlaying) {
@@ -140,68 +120,131 @@ fun SpatialVideoPlayerContent(
     }
 
     Subspace {
-        // Close button at top
+        // Video player using Orbiter for spatial positioning
+        // We extract this to a separate composable to avoid recomposition on every playerState change
+        VideoPlayerOrbiter(
+            isStereoVideo = playerState.isStereoVideo,
+            exoPlayer = exoPlayer
+        )
+
+        // Top controls: Close button and Stereo toggle
         Orbiter(
             position = ContentEdge.Top,
             offset = 20.dp,
             alignment = Alignment.CenterHorizontally
         ) {
-            Surface(
-                shape = MaterialTheme.shapes.extraLarge,
-                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f)
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                IconButton(onClick = onNavigateBack) {
-                    Text("✕", style = MaterialTheme.typography.titleLarge)
+                // Close button
+                Surface(
+                    shape = MaterialTheme.shapes.extraLarge,
+                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f)
+                ) {
+                    IconButton(onClick = onNavigateBack) {
+                        Text("✕", style = MaterialTheme.typography.titleLarge)
+                    }
+                }
+
+                // Stereo mode toggle button
+                Surface(
+                    shape = MaterialTheme.shapes.extraLarge,
+                    color = if (playerState.isStereoVideo) {
+                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.8f)
+                    } else {
+                        MaterialTheme.colorScheme.surface.copy(alpha = 0.8f)
+                    }
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        IconButton(onClick = { videoPlayerViewModel.toggleStereoMode() }) {
+                            Text(
+                                text = if (playerState.isStereoVideo) "3D" else "2D",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = if (playerState.isStereoVideo) {
+                                    MaterialTheme.colorScheme.onPrimaryContainer
+                                } else {
+                                    MaterialTheme.colorScheme.onSurface
+                                }
+                            )
+                        }
+                        Text(
+                            text = when (playerState.userStereoOverride) {
+                                true -> "Forced"
+                                false -> "Disabled"
+                                null -> "Auto"
+                            },
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (playerState.isStereoVideo) {
+                                MaterialTheme.colorScheme.onPrimaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.onSurface
+                            }
+                        )
+                    }
                 }
             }
         }
-        // Main video panel - Large immersive video surface for side-by-side stereo
-        SpatialPanel(
-            modifier = SubspaceModifier
-                .width(2560.dp)  // Large width for immersive experience
-                .height(1440.dp)  // 16:9 aspect ratio
-        ) {
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center
-            ) {
-                // Video surface for side-by-side stereo playback
-                AndroidView(
-                    factory = { ctx ->
-                        SurfaceView(ctx).also {
-                            surfaceView = it
-                            println("XR: SurfaceView created")
-                        }
-                    },
-                    modifier = Modifier.fillMaxSize()
-                )
+        
+        // Log stereo mode for debugging
+        LaunchedEffect(playerState.isStereoVideo) {
+            if (playerState.isStereoVideo) {
+                println("XR: Stereo/SBS video detected")
+            } else {
+                println("XR: Regular 2D video")
+            }
+        }
 
-                // Loading overlay
-                if (playerState.isLoading) {
+        // Loading overlay (centered in space via Orbiter)
+        if (playerState.isLoading) {
+            Orbiter(
+                position = ContentEdge.Bottom,
+                offset = 200.dp,
+                alignment = Alignment.CenterHorizontally
+            ) {
+                Box(
+                    modifier = Modifier.size(200.dp),
+                    contentAlignment = Alignment.Center
+                ) {
                     Surface(
-                        modifier = Modifier.fillMaxSize(),
-                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.7f)
+                        shape = MaterialTheme.shapes.large,
+                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f)
                     ) {
                         Column(
-                            modifier = Modifier.fillMaxSize(),
+                            modifier = Modifier.padding(32.dp),
                             horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.Center
                         ) {
                             CircularProgressIndicator()
                             Spacer(modifier = Modifier.height(16.dp))
-                            Text("Loading video...", style = MaterialTheme.typography.bodyLarge)
+                            Text("Loading...", style = MaterialTheme.typography.bodyLarge)
                         }
                     }
                 }
+            }
+        }
 
-                // Error overlay
-                if (playerState.error != null) {
+        // Error overlay (centered in space via Orbiter)
+        if (playerState.error != null) {
+            Orbiter(
+                position = ContentEdge.Bottom,
+                offset = 200.dp,
+                alignment = Alignment.CenterHorizontally
+            ) {
+                Box(
+                    modifier = Modifier.width(400.dp),
+                    contentAlignment = Alignment.Center
+                ) {
                     Surface(
-                        modifier = Modifier.fillMaxSize(),
+                        shape = MaterialTheme.shapes.large,
                         color = MaterialTheme.colorScheme.errorContainer
                     ) {
                         Column(
-                            modifier = Modifier.fillMaxSize().padding(32.dp),
+                            modifier = Modifier.padding(32.dp),
                             horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.Center
                         ) {
@@ -270,6 +313,76 @@ fun SpatialVideoPlayerContent(
                     Text("Show Controls")
                 }
             }
+        }
+    }
+}
+
+@Composable
+fun VideoPlayerOrbiter(
+    isStereoVideo: Boolean,
+    exoPlayer: androidx.media3.exoplayer.ExoPlayer?
+) {
+    println("XR: Composing VideoPlayerOrbiter - Stereo: $isStereoVideo")
+    
+    // Main video display using Orbiter
+    Orbiter(
+        position = ContentEdge.Bottom,
+        offset = 200.dp,
+        alignment = Alignment.CenterHorizontally
+    ) {
+        Surface(
+            modifier = Modifier
+                .width(if (isStereoVideo) 800.dp else 600.dp)
+                .height(if (isStereoVideo) 450.dp else 338.dp),
+            shape = MaterialTheme.shapes.medium,
+            color = androidx.compose.ui.graphics.Color.Red, // DEBUG: Red background to check visibility
+            tonalElevation = 8.dp
+        ) {
+            // Display video using AndroidView with TextureView
+            AndroidView(
+                factory = { context ->
+                    android.view.TextureView(context).apply {
+                        layoutParams = ViewGroup.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.MATCH_PARENT
+                        )
+                        keepScreenOn = true
+                        
+                        surfaceTextureListener = object : android.view.TextureView.SurfaceTextureListener {
+                            override fun onSurfaceTextureAvailable(surface: android.graphics.SurfaceTexture, width: Int, height: Int) {
+                                println("XR: TextureView Surface available: ${width}x${height}")
+                            }
+                            override fun onSurfaceTextureSizeChanged(surface: android.graphics.SurfaceTexture, width: Int, height: Int) {
+                                println("XR: TextureView Surface resized: ${width}x${height}")
+                            }
+                            override fun onSurfaceTextureDestroyed(surface: android.graphics.SurfaceTexture): Boolean {
+                                println("XR: TextureView Surface destroyed")
+                                return true
+                            }
+                            override fun onSurfaceTextureUpdated(surface: android.graphics.SurfaceTexture) {
+                                // Too noisy to log every frame
+                            }
+                        }
+                    }
+                },
+                update = { textureView ->
+                    if (exoPlayer != null) {
+                        if (textureView.surfaceTexture != null) {
+                             // Ensure we set the texture view only when available or just set it (ExoPlayer handles null checks)
+                             println("XR: Setting ExoPlayer VideoTextureView. Video Format: ${exoPlayer.videoFormat}")
+                             exoPlayer.setVideoTextureView(textureView)
+                        } else {
+                             println("XR: TextureView surfaceTexture is null during update")
+                             exoPlayer.setVideoTextureView(textureView) // Set it anyway, ExoPlayer waits for surface
+                        }
+                    }
+                },
+                onRelease = { textureView ->
+                    println("XR: Releasing TextureView")
+                    exoPlayer?.clearVideoTextureView(textureView)
+                },
+                modifier = Modifier.fillMaxSize()
+            )
         }
     }
 }
