@@ -1,6 +1,8 @@
 package com.example.myapplication.ui.screens
 
 import android.view.ViewGroup
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -15,6 +17,9 @@ import androidx.xr.compose.platform.LocalSession
 import androidx.xr.compose.spatial.ContentEdge
 import androidx.xr.compose.spatial.Orbiter
 import androidx.xr.compose.spatial.Subspace
+import androidx.xr.compose.subspace.SpatialExternalSurface
+import androidx.xr.compose.subspace.StereoMode
+import androidx.xr.compose.subspace.layout.SubspaceModifier
 import androidx.xr.scenecore.SurfaceEntity
 import androidx.xr.runtime.math.Pose
 import com.example.myapplication.data.database.AppDatabase
@@ -73,34 +78,42 @@ fun VideoPlayerScreen(
         }
     }
 
-    if (hasXrFeature) {
-        // XR device detected - render spatial video content
-        // LocalSession will be available inside the Subspace
-        println("XR: Rendering SpatialVideoPlayerContent")
-        SpatialVideoPlayerContent(
-            videoPlayerViewModel = videoPlayerViewModel,
-            playerState = playerState,
-            onNavigateBack = onNavigateBack
-        )
-    } else {
-        // Non-XR device - show error message
-        Box(
-            modifier = Modifier.fillMaxSize(),
-            contentAlignment = Alignment.Center
-        ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(
-                    text = "XR Mode Required",
-                    style = MaterialTheme.typography.headlineMedium
-                )
-                Spacer(modifier = Modifier.height(16.dp))
-                Text(
-                    text = "This app requires an XR-capable device",
-                    style = MaterialTheme.typography.bodyMedium
-                )
-                Spacer(modifier = Modifier.height(16.dp))
-                Button(onClick = onNavigateBack) {
-                    Text("Go Back")
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(androidx.compose.ui.graphics.Color.Black)
+    ) {
+        if (hasXrFeature) {
+            // XR device detected - render spatial video content
+            // LocalSession will be available inside the Subspace
+            println("XR: Rendering SpatialVideoPlayerContent")
+            SpatialVideoPlayerContent(
+                videoPlayerViewModel = videoPlayerViewModel,
+                playerState = playerState,
+                onNavigateBack = onNavigateBack
+            )
+        } else {
+            // Non-XR device - show error message
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text = "XR Mode Required",
+                        style = MaterialTheme.typography.headlineMedium,
+                        color = androidx.compose.ui.graphics.Color.White
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(
+                        text = "This app requires an XR-capable device",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = androidx.compose.ui.graphics.Color.White
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Button(onClick = onNavigateBack) {
+                        Text("Go Back")
+                    }
                 }
             }
         }
@@ -298,7 +311,21 @@ fun SpatialVideoPlayer(
             )
         } else {
             // Fallback if no session (shouldn't happen in XR)
-            Text("No XR Session")
+            Orbiter(
+                position = ContentEdge.Bottom,
+                offset = 0.dp
+            ) {
+                Surface(
+                    shape = MaterialTheme.shapes.medium,
+                    color = MaterialTheme.colorScheme.errorContainer
+                ) {
+                    Text(
+                        text = "No XR Session Available",
+                        modifier = Modifier.padding(16.dp),
+                        color = MaterialTheme.colorScheme.onErrorContainer
+                    )
+                }
+            }
         }
     }
 }
@@ -308,43 +335,28 @@ fun VideoPlayerOrbiter(
     isStereo: Boolean,
     exoPlayer: androidx.media3.exoplayer.ExoPlayer?
 ) {
-    println("XR: VideoPlayerOrbiter composed. isStereo: $isStereo, Player: ${exoPlayer.hashCode()}")
-    // Main video display using Orbiter
-    Orbiter(
-        position = ContentEdge.Bottom,
-        offset = 200.dp,
-        alignment = Alignment.CenterHorizontally
-    ) {
-        Surface(
-            modifier = Modifier
-                .width(if (isStereo) 800.dp else 600.dp)
-                .height(if (isStereo) 450.dp else 338.dp),
-            shape = MaterialTheme.shapes.medium,
-            color = androidx.compose.ui.graphics.Color.Black, 
-            tonalElevation = 8.dp
+    println("XR: VideoPlayerSurface composed. isStereo: $isStereo, Player: ${exoPlayer?.hashCode()}")
+    
+    // Only create surface when player is ready
+    if (exoPlayer != null) {
+        // Use SpatialExternalSurface - the official XR API for video rendering
+        SpatialExternalSurface(
+            stereoMode = if (isStereo) StereoMode.SideBySide else StereoMode.Mono
         ) {
-            // Display video using AndroidView with TextureView
-            AndroidView(
-                factory = { context ->
-                    android.view.TextureView(context).apply {
-                        layoutParams = ViewGroup.LayoutParams(
-                            ViewGroup.LayoutParams.MATCH_PARENT,
-                            ViewGroup.LayoutParams.MATCH_PARENT
-                        )
-                        keepScreenOn = true
-                    }
-                },
-                update = { textureView ->
-                    if (exoPlayer != null) {
-                        exoPlayer.setVideoTextureView(textureView)
-                    }
-                },
-                onRelease = { textureView ->
-                    exoPlayer?.clearVideoTextureView(textureView)
-                },
-                modifier = Modifier.fillMaxSize()
-            )
+            // onSurfaceCreated is called when the Surface is ready
+            onSurfaceCreated { surface ->
+                println("XR: SpatialExternalSurface created, attaching to ExoPlayer")
+                exoPlayer.setVideoSurface(surface)
+            }
+            
+            // onSurfaceDestroyed is called when the Surface is destroyed
+            onSurfaceDestroyed {
+                println("XR: SpatialExternalSurface destroyed, clearing ExoPlayer surface")
+                exoPlayer.clearVideoSurface()
+            }
         }
+    } else {
+        println("XR: Waiting for ExoPlayer to be ready...")
     }
 }
 

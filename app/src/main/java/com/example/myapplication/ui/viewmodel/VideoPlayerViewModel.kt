@@ -122,10 +122,11 @@ class VideoPlayerViewModel(
         
         viewModelScope.launch {
             try {
-                // Detect stereo and format from filename initially
-                val initialStereoMode = detectStereoFromFilename(videoFile.name)
-                val initialVideoFormat = detectFormatFromFilename(videoFile.name)
-                Log.d("VideoPlayerViewModel", "Filename detection - Stereo: $initialStereoMode, Format: $initialVideoFormat")
+                // Default to 2D/Mono as requested ("play first, then toggle")
+                // We no longer use filename detection for initial state
+                val initialStereoMode = StereoMode.Mono
+                val initialVideoFormat = VideoFormat.Format2D
+                Log.d("VideoPlayerViewModel", "Initializing with defaults - Stereo: $initialStereoMode, Format: $initialVideoFormat")
 
                 _state.value = _state.value.copy(
                     isLoading = true,
@@ -148,10 +149,10 @@ class VideoPlayerViewModel(
                 val loadControl = androidx.media3.exoplayer.DefaultLoadControl.Builder()
                     .setAllocator(allocator)
                     .setBufferDurationsMs(
-                        /* minBufferMs = */ 60000,  // 30 seconds minimum buffer
-                        /* maxBufferMs = */ 120000, // 2 minutes maximum buffer
-                        /* bufferForPlaybackMs = */ 60000,  // Start playback after 5 seconds
-                        /* bufferForPlaybackAfterRebufferMs = */ 10000  // Resume after 10 seconds on rebuffer
+                        /* minBufferMs = */ 15000,  // 15 seconds minimum buffer
+                        /* maxBufferMs = */ 50000, // 50 seconds maximum buffer
+                        /* bufferForPlaybackMs = */ 2500,  // Start playback after 2.5 seconds
+                        /* bufferForPlaybackAfterRebufferMs = */ 5000  // Resume after 5 seconds on rebuffer
                     )
                     .build()
 

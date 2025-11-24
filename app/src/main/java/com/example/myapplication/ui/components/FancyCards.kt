@@ -13,7 +13,15 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Movie
+import androidx.compose.material.icons.filled.Storage
+import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -91,7 +99,7 @@ fun LocalStorageCard(
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
-                    imageVector = Icons.Default.Phone,
+                    imageVector = Icons.Filled.Home, // Changed from Phone to Home
                     contentDescription = "Local Storage",
                     tint = StreamingBlack,
                     modifier = Modifier.size(32.dp)
@@ -124,7 +132,7 @@ fun LocalStorageCard(
             // Selected indicator
             if (isSelected) {
                 Icon(
-                    imageVector = Icons.Default.CheckCircle,
+                    imageVector = Icons.Filled.CheckCircle,
                     contentDescription = "Selected",
                     tint = SuccessGreen,
                     modifier = Modifier.size(24.dp)
@@ -196,7 +204,7 @@ fun FancyServerCard(
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
-                    imageVector = Icons.Default.Storage,
+                    imageVector = Icons.Filled.Storage,
                     contentDescription = "Server",
                     tint = TextPrimary,
                     modifier = Modifier.size(32.dp)
@@ -232,7 +240,7 @@ fun FancyServerCard(
                 modifier = Modifier.size(40.dp)
             ) {
                 Icon(
-                    imageVector = Icons.Default.Delete,
+                    imageVector = Icons.Filled.Delete,
                     contentDescription = "Delete Server",
                     tint = TextSecondary
                 )
@@ -307,7 +315,7 @@ fun FancyMovieCard(
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
-                        imageVector = Icons.Default.Movie,
+                        imageVector = Icons.Filled.Movie,
                         contentDescription = "Movie",
                         tint = TextSecondary,
                         modifier = Modifier.size(48.dp)
@@ -369,7 +377,7 @@ fun FancyMovieCard(
                     modifier = Modifier.size(40.dp)
                 ) {
                     Icon(
-                        imageVector = if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                        imageVector = if (isFavorite) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
                         contentDescription = if (isFavorite) "Remove from favorites" else "Add to favorites",
                         tint = if (isFavorite) NetflixRed else TextSecondary
                     )
@@ -423,9 +431,9 @@ fun FancyFileCard(
             // File Icon
             Icon(
                 imageVector = when {
-                    isDirectory -> Icons.Default.Folder
-                    isVideoFile -> Icons.Default.Movie
-                    else -> Icons.Default.InsertDriveFile
+                    isDirectory -> Icons.Filled.Folder
+                    isVideoFile -> Icons.Filled.Movie
+                    else -> Icons.Filled.Description
                 },
                 contentDescription = null,
                 tint = when {
@@ -459,11 +467,11 @@ fun FancyFileCard(
 
             // Arrow for directories
             if (isDirectory) {
-                Icon(
-                    imageVector = Icons.Default.ChevronRight,
-                    contentDescription = null,
-                    tint = TextTertiary,
-                    modifier = Modifier.size(24.dp)
+                Text(
+                    text = ">",
+                    style = MaterialTheme.typography.titleLarge,
+                    color = TextTertiary,
+                    modifier = Modifier.padding(horizontal = 8.dp)
                 )
             }
         }

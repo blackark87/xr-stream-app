@@ -1,21 +1,26 @@
 package com.example.myapplication.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavController
+import com.example.myapplication.ui.navigation.Screen
 import com.example.myapplication.data.database.entity.RecentVideo
 import com.example.myapplication.data.database.entity.SavedServer
 import com.example.myapplication.network.SMBClient
@@ -57,7 +62,7 @@ fun MainDashboardScreen(
                 title = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(
-                            imageVector = Icons.Default.Movie,
+                            imageVector = Icons.Filled.Movie,
                             contentDescription = null,
                             tint = NetflixRed,
                             modifier = Modifier.size(32.dp)
@@ -86,7 +91,7 @@ fun MainDashboardScreen(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Icon(
-                                    imageVector = Icons.Default.CheckCircle,
+                                    imageVector = Icons.Filled.CheckCircle,
                                     contentDescription = null,
                                     tint = StreamingBlack,
                                     modifier = Modifier.size(16.dp)
@@ -144,7 +149,7 @@ fun MainDashboardScreen(
                         viewModel.navigateBack()
                     },
                     onPlayVideo = { filePath, fileName ->
-                        navController.navigate("video_player/${filePath}/${fileName}")
+                        navController.navigate(Screen.VideoPlayer.createRoute(filePath, fileName))
                     },
                     modifier = Modifier
                         .weight(0.5f)
@@ -257,7 +262,7 @@ private fun ServerListPanel(
                     enabled = !isConnecting
                 ) {
                     Icon(
-                        imageVector = Icons.Default.Add,
+                        imageVector = Icons.Filled.Add,
                         contentDescription = "Add Server",
                         tint = NetflixRed
                     )
@@ -349,7 +354,7 @@ private fun FileBrowserPanel(
                 if (currentPath.isNotEmpty() && currentPath != "/") {
                     IconButton(onClick = onBackClick) {
                         Icon(
-                            imageVector = Icons.Default.ArrowBack,
+                            imageVector = Icons.Filled.ArrowBack,
                             contentDescription = "Back",
                             tint = TextSecondary
                         )
@@ -365,7 +370,7 @@ private fun FileBrowserPanel(
             when {
                 !isConnected -> {
                     EmptyState(
-                        icon = Icons.Default.Cloud,
+                        icon = Icons.Filled.Cloud,
                         message = "Connect to a server to browse files"
                     )
                 }
@@ -387,7 +392,7 @@ private fun FileBrowserPanel(
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         Icon(
-                            imageVector = Icons.Default.Error,
+                            imageVector = Icons.Filled.Error,
                             contentDescription = null,
                             tint = ErrorRed,
                             modifier = Modifier.size(64.dp)
@@ -403,7 +408,7 @@ private fun FileBrowserPanel(
                 }
                 files.isEmpty() -> {
                     EmptyState(
-                        icon = Icons.Default.FolderOpen,
+                        icon = Icons.Filled.FolderOpen,
                         message = "No files in this directory"
                     )
                 }
@@ -417,7 +422,7 @@ private fun FileBrowserPanel(
                                 fileName = file.name,
                                 isDirectory = file.isDirectory,
                                 isVideoFile = isVideoFile,
-                                fileSize = if (!file.isDirectory) formatFileSize(file.size) else null,
+                                fileSize = if (!file.isDirectory) formatFileSizeHelper(file.size) else null,
                                 onClick = {
                                     if (isVideoFile) {
                                         onPlayVideo(file.path, file.name)
@@ -469,7 +474,7 @@ private fun FavoritesPanel(
                     color = TextPrimary
                 )
                 Icon(
-                    imageVector = Icons.Default.Favorite,
+                    imageVector = Icons.Filled.Favorite,
                     contentDescription = null,
                     tint = NetflixRed,
                     modifier = Modifier.size(24.dp)
@@ -484,13 +489,13 @@ private fun FavoritesPanel(
             when {
                 !isConnected -> {
                     EmptyState(
-                        icon = Icons.Default.FavoriteBorder,
+                        icon = Icons.Outlined.FavoriteBorder,
                         message = "Connect to view favorites"
                     )
                 }
                 favorites.isEmpty() -> {
                     EmptyState(
-                        icon = Icons.Default.FavoriteBorder,
+                        icon = Icons.Outlined.FavoriteBorder,
                         message = "No favorites yet"
                     )
                 }
@@ -528,20 +533,33 @@ private fun AddServerDialog(
     var password by remember { mutableStateOf("") }
     var domain by remember { mutableStateOf("") }
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = {
-            Text(
-                text = "Add Server",
-                style = MaterialTheme.typography.headlineSmall,
-                color = TextPrimary
-            )
-        },
-        text = {
-            LazyColumn(
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+    // Use standard Dialog composable
+    androidx.compose.ui.window.Dialog(
+        onDismissRequest = onDismiss
+    ) {
+        Card(
+            modifier = Modifier
+                .width(500.dp)
+                .padding(16.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = CardBackground
+            ),
+            shape = RoundedCornerShape(16.dp),
+            elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
+        ) {
+            Column(
+                modifier = Modifier.padding(24.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                item {
+                Text(
+                    text = "Add Server",
+                    style = MaterialTheme.typography.headlineSmall,
+                    color = TextPrimary
+                )
+
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
                     OutlinedTextField(
                         value = name,
                         onValueChange = { name = it },
@@ -549,8 +567,6 @@ private fun AddServerDialog(
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true
                     )
-                }
-                item {
                     OutlinedTextField(
                         value = address,
                         onValueChange = { address = it },
@@ -559,18 +575,14 @@ private fun AddServerDialog(
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true
                     )
-                }
-                item {
                     OutlinedTextField(
                         value = shareName,
                         onValueChange = { shareName = it },
-                        label = { Text("Share Name") },
+                        label = { Text("Share Name (Optional)") },
                         placeholder = { Text("e.g., Videos") },
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true
                     )
-                }
-                item {
                     OutlinedTextField(
                         value = username,
                         onValueChange = { username = it },
@@ -578,17 +590,14 @@ private fun AddServerDialog(
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true
                     )
-                }
-                item {
                     OutlinedTextField(
                         value = password,
                         onValueChange = { password = it },
                         label = { Text("Password") },
                         modifier = Modifier.fillMaxWidth(),
-                        singleLine = true
+                        singleLine = true,
+                        visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation()
                     )
-                }
-                item {
                     OutlinedTextField(
                         value = domain,
                         onValueChange = { domain = it },
@@ -597,45 +606,51 @@ private fun AddServerDialog(
                         singleLine = true
                     )
                 }
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = {
-                    if (name.isNotBlank() && address.isNotBlank() && shareName.isNotBlank()) {
-                        onSave(
-                            SavedServer(
-                                serverName = name,
-                                serverAddress = address,
-                                shareName = shareName,
-                                username = username,
-                                password = password,
-                                domain = domain
-                            )
-                        )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    TextButton(onClick = onDismiss) {
+                        Text("Cancel", color = TextSecondary)
                     }
-                },
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = NetflixRed
-                ),
-                enabled = name.isNotBlank() && address.isNotBlank() && shareName.isNotBlank()
-            ) {
-                Text("Save")
+                    Spacer(modifier = Modifier.width(8.dp))
+                    
+                    val isSaveEnabled = name.isNotBlank() && address.isNotBlank()
+                    
+                    Button(
+                        onClick = {
+                            if (isSaveEnabled) {
+                                onSave(
+                                    SavedServer(
+                                        serverName = name,
+                                        serverAddress = address,
+                                        shareName = shareName, // Can be empty
+                                        username = username,
+                                        password = password,
+                                        domain = domain
+                                    )
+                                )
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = NetflixRed
+                        ),
+                        enabled = isSaveEnabled
+                    ) {
+                        Text("Save")
+                    }
+                }
             }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel", color = TextSecondary)
-            }
-        },
-        containerColor = CardBackground
-    )
+        }
+    }
 }
 
 /**
  * Helper function to format file size
  */
-private fun formatFileSize(bytes: Long): String {
+private fun formatFileSizeHelper(bytes: Long): String {
     if (bytes < 1024) return "$bytes B"
     val kb = bytes / 1024.0
     if (kb < 1024) return String.format("%.1f KB", kb)
