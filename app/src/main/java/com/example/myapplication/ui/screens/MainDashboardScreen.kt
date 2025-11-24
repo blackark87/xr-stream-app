@@ -268,16 +268,21 @@ private fun ServerListPanel(
             HorizontalDivider(color = DividerGray)
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Server List
-            if (servers.isEmpty()) {
-                EmptyState(
-                    icon = Icons.Default.Storage,
-                    message = "No servers added yet"
-                )
-            } else {
-                LazyColumn(
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
+            // Server List with Local Storage option
+            LazyColumn(
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                // Local Storage card (always first)
+                item {
+                    LocalStorageCard(
+                        onClick = { onServerClick(SavedServer.createLocalStorageServer()) },
+                        isSelected = selectedServer?.isLocalStorage == true,
+                        isConnecting = isConnecting
+                    )
+                }
+
+                // SMB servers
+                if (servers.isNotEmpty()) {
                     items(servers) { server ->
                         FancyServerCard(
                             server = server,

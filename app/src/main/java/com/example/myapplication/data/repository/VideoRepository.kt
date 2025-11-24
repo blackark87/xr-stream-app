@@ -47,6 +47,10 @@ class VideoRepository(private val videoDao: VideoDao) {
         return videoDao.getFavoriteVideos()
     }
 
+    fun getFavoriteVideosByServer(serverAddress: String): Flow<List<RecentVideo>> {
+        return videoDao.getFavoriteVideosByServer(serverAddress)
+    }
+
     suspend fun toggleFavorite(videoId: Long, isFavorite: Boolean) {
         videoDao.updateFavoriteStatus(videoId, isFavorite)
     }

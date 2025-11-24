@@ -11,7 +11,7 @@ import com.example.myapplication.data.database.entity.SavedServer
 
 @Database(
     entities = [SavedServer::class, RecentVideo::class],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {

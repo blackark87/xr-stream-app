@@ -37,6 +37,9 @@ interface VideoDao {
     @Query("SELECT * FROM recent_videos WHERE isFavorite = 1 ORDER BY fileName ASC")
     fun getFavoriteVideos(): Flow<List<RecentVideo>>
 
+    @Query("SELECT * FROM recent_videos WHERE isFavorite = 1 AND serverAddress = :serverAddress ORDER BY fileName ASC")
+    fun getFavoriteVideosByServer(serverAddress: String): Flow<List<RecentVideo>>
+
     @Query("UPDATE recent_videos SET isFavorite = :isFavorite WHERE id = :videoId")
     suspend fun updateFavoriteStatus(videoId: Long, isFavorite: Boolean)
 
