@@ -1,5 +1,6 @@
 package com.example.myapplication.ui.viewmodel
 
+import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.myapplication.AppState
@@ -7,6 +8,7 @@ import com.example.myapplication.data.database.entity.RecentVideo
 import com.example.myapplication.data.database.entity.SavedServer
 import com.example.myapplication.data.repository.ServerRepository
 import com.example.myapplication.data.repository.VideoRepository
+import com.example.myapplication.network.LocalFileClient
 import com.example.myapplication.network.SMBClient
 import com.example.myapplication.network.SMBConfig
 import com.example.myapplication.network.SMBFileItem
@@ -24,6 +26,7 @@ data class MainDashboardState(
 )
 
 class MainDashboardViewModel(
+    private val context: Context,
     private val serverRepository: ServerRepository,
     private val videoRepository: VideoRepository
 ) : ViewModel() {
@@ -43,8 +46,15 @@ class MainDashboardViewModel(
     private val _files = MutableStateFlow<List<SMBFileItem>>(emptyList())
     val files: StateFlow<List<SMBFileItem>> = _files.asStateFlow()
 
-    // Favorites from database
-    val favorites: StateFlow<List<RecentVideo>> = videoRepository.getFavoriteVideos()
+    // Favorites from database - filtered by currently connected server
+    val favorites: StateFlow<List<RecentVideo>> = _uiState
+        .flatMapLatest { state ->
+            if (state.isConnected && state.selectedServer != null) {
+                videoRepository.getFavoriteVideosByServer(state.selectedServer.serverAddress)
+            } else {
+                flowOf(emptyList())
+            }
+        }
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5000),
@@ -52,6 +62,7 @@ class MainDashboardViewModel(
         )
 
     private var smbClient: SMBClient? = null
+    private var localClient: LocalFileClient? = null
 
     /**
      * Add a new server to the database
@@ -77,7 +88,7 @@ class MainDashboardViewModel(
     }
 
     /**
-     * Connect to a selected server
+     * Connect to a selected server (local or SMB)
      */
     fun connectToServer(server: SavedServer) {
         viewModelScope.launch {
@@ -87,22 +98,37 @@ class MainDashboardViewModel(
             )
 
             try {
-                val config = SMBConfig(
-                    serverAddress = server.serverAddress,
-                    port = server.port,
-                    shareName = server.shareName,
-                    username = server.username,
-                    password = server.password,
-                    domain = server.domain
-                )
+                val result = if (server.isLocalStorage) {
+                    // Connect to local storage
+                    val client = LocalFileClient(context)
+                    val connectionResult = client.connect()
 
-                val client = SMBClient(config)
-                val result = client.connect()
+                    if (connectionResult.isSuccess) {
+                        localClient = client
+                    }
+                    connectionResult
+                } else {
+                    // Connect to SMB server
+                    val config = SMBConfig(
+                        serverAddress = server.serverAddress,
+                        port = server.port,
+                        shareName = server.shareName,
+                        username = server.username,
+                        password = server.password,
+                        domain = server.domain
+                    )
+
+                    val client = SMBClient(config)
+                    val connectionResult = client.connect()
+
+                    if (connectionResult.isSuccess) {
+                        smbClient = client
+                        AppState.setSMBClient(client, config)
+                    }
+                    connectionResult
+                }
 
                 if (result.isSuccess) {
-                    smbClient = client
-                    AppState.setSMBClient(client, config)
-
                     // Update last connected time
                     serverRepository.updateLastConnected(server.id)
 
@@ -135,11 +161,13 @@ class MainDashboardViewModel(
     }
 
     /**
-     * Disconnect from current server
+     * Disconnect from current server (local or SMB)
      */
     fun disconnect() {
         smbClient?.disconnect()
         smbClient = null
+        localClient?.disconnect()
+        localClient = null
         AppState.clear()
 
         _uiState.value = _uiState.value.copy(
@@ -152,7 +180,7 @@ class MainDashboardViewModel(
     }
 
     /**
-     * Load files from the specified path
+     * Load files from the specified path (local or SMB)
      */
     fun loadFiles(path: String) {
         viewModelScope.launch {
@@ -161,18 +189,20 @@ class MainDashboardViewModel(
                 errorMessage = null
             )
 
-            val client = smbClient
-            if (client == null) {
-                _uiState.value = _uiState.value.copy(
-                    isLoadingFiles = false,
-                    errorMessage = "No active connection"
-                )
-                return@launch
+            // Determine which client to use
+            val result = when {
+                localClient != null -> localClient!!.listFiles(path)
+                smbClient != null -> smbClient!!.listFiles(path)
+                else -> {
+                    _uiState.value = _uiState.value.copy(
+                        isLoadingFiles = false,
+                        errorMessage = "No active connection"
+                    )
+                    return@launch
+                }
             }
 
             try {
-                val result = client.listFiles(path)
-
                 if (result.isSuccess) {
                     val fileList = result.getOrNull() ?: emptyList()
 

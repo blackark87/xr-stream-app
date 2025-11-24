@@ -38,7 +38,7 @@ fun AppNavigation(navController: NavHostController, context: Context) {
 
             // Create ViewModel
             val viewModel: MainDashboardViewModel = viewModel(
-                factory = MainDashboardViewModelFactory(serverRepository, videoRepository)
+                factory = MainDashboardViewModelFactory(context, serverRepository, videoRepository)
             )
 
             MainDashboardScreen(

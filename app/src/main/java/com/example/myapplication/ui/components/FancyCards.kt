@@ -29,6 +29,112 @@ import com.example.myapplication.data.database.entity.SavedServer
 import com.example.myapplication.ui.theme.*
 
 /**
+ * Local Storage Card - Special card for device storage
+ */
+@Composable
+fun LocalStorageCard(
+    onClick: () -> Unit,
+    isSelected: Boolean,
+    isConnecting: Boolean,
+    modifier: Modifier = Modifier
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isHovered by interactionSource.collectIsHoveredAsState()
+
+    val elevation by animateDpAsState(
+        targetValue = if (isHovered) 12.dp else 4.dp,
+        animationSpec = tween(300),
+        label = "elevation"
+    )
+
+    val scale by animateFloatAsState(
+        targetValue = if (isHovered) 1.05f else 1f,
+        animationSpec = tween(300),
+        label = "scale"
+    )
+
+    Card(
+        modifier = modifier
+            .fillMaxWidth()
+            .scale(scale)
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = onClick,
+                enabled = !isConnecting
+            ),
+        colors = CardDefaults.cardColors(
+            containerColor = if (isSelected) CardBackgroundHover else CardBackground
+        ),
+        elevation = CardDefaults.cardElevation(
+            defaultElevation = elevation
+        ),
+        shape = RoundedCornerShape(12.dp),
+        border = if (isSelected || isHovered) BorderStroke(2.dp, AccentGold) else null
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Local Storage Icon
+            Box(
+                modifier = Modifier
+                    .size(56.dp)
+                    .clip(CircleShape)
+                    .background(
+                        brush = Brush.linearGradient(
+                            colors = listOf(AccentGold, AccentGold.copy(alpha = 0.7f))
+                        )
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Phone,
+                    contentDescription = "Local Storage",
+                    tint = StreamingBlack,
+                    modifier = Modifier.size(32.dp)
+                )
+            }
+
+            Spacer(modifier = Modifier.width(16.dp))
+
+            // Info
+            Column(
+                modifier = Modifier.weight(1f)
+            ) {
+                Text(
+                    text = "Local Storage",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = TextPrimary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "Device internal storage",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextSecondary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+
+            // Selected indicator
+            if (isSelected) {
+                Icon(
+                    imageVector = Icons.Default.CheckCircle,
+                    contentDescription = "Selected",
+                    tint = SuccessGreen,
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+        }
+    }
+}
+
+/**
  * Fancy Server Card - Netflix/Disney+ style
  */
 @Composable
