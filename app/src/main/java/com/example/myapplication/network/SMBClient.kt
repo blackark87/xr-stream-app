@@ -60,50 +60,51 @@ class SMBClient(private val config: SMBConfig) {
         }
     }
 
-    suspend fun listFiles(path: String = ""): Result<List<SMBFileItem>> = withContext(Dispatchers.IO) {
-        try {
-            val context = cifsContext ?: return@withContext Result.failure(
-                IllegalStateException("Not connected. Call connect() first.")
-            )
-
-            val url = buildSmbUrl(path)
-            println("SMBClient: Listing files at URL: $url")
-            val smbFile = SmbFile(url, context)
-
-            if (!smbFile.exists()) {
-                return@withContext Result.failure(
-                    IllegalArgumentException("Path does not exist: $path (URL: $url)")
+    suspend fun listFiles(path: String = ""): Result<List<SMBFileItem>> =
+        withContext(Dispatchers.IO) {
+            try {
+                val context = cifsContext ?: return@withContext Result.failure(
+                    IllegalStateException("Not connected. Call connect() first.")
                 )
-            }
 
-            if (!smbFile.isDirectory) {
-                return@withContext Result.failure(
-                    IllegalArgumentException("Path is not a directory: $path (URL: $url)")
-                )
-            }
+                val url = buildSmbUrl(path)
+                println("SMBClient: Listing files at URL: $url")
+                val smbFile = SmbFile(url, context)
 
-            val files = smbFile.listFiles()?.mapNotNull { file ->
-                try {
-                    SMBFileItem(
-                        name = file.name.removeSuffix("/"),
-                        path = file.path,
-                        isDirectory = file.isDirectory,
-                        size = if (file.isDirectory) 0 else file.length(),
-                        lastModified = file.lastModified()
+                if (!smbFile.exists()) {
+                    return@withContext Result.failure(
+                        IllegalArgumentException("Path does not exist: $path (URL: $url)")
                     )
-                } catch (e: Exception) {
-                    println("SMBClient: Error accessing file: ${e.message}")
-                    null // Skip files that can't be accessed
                 }
-            } ?: emptyList()
 
-            println("SMBClient: Found ${files.size} files")
-            Result.success(files)
-        } catch (e: Exception) {
-            println("SMBClient: Error listing files: ${e.message}")
-            Result.failure(e)
+                if (!smbFile.isDirectory) {
+                    return@withContext Result.failure(
+                        IllegalArgumentException("Path is not a directory: $path (URL: $url)")
+                    )
+                }
+
+                val files = smbFile.listFiles()?.mapNotNull { file ->
+                    try {
+                        SMBFileItem(
+                            name = file.name.removeSuffix("/"),
+                            path = file.path,
+                            isDirectory = file.isDirectory,
+                            size = if (file.isDirectory) 0 else file.length(),
+                            lastModified = file.lastModified()
+                        )
+                    } catch (e: Exception) {
+                        println("SMBClient: Error accessing file: ${e.message}")
+                        null // Skip files that can't be accessed
+                    }
+                } ?: emptyList()
+
+                println("SMBClient: Found ${files.size} files")
+                Result.success(files)
+            } catch (e: Exception) {
+                println("SMBClient: Error listing files: ${e.message}")
+                Result.failure(e)
+            }
         }
-    }
 
     suspend fun getInputStream(path: String): Result<InputStream> = withContext(Dispatchers.IO) {
         try {

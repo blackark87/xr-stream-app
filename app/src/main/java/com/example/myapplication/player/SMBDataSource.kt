@@ -35,7 +35,10 @@ class SMBDataSource(
 
     @Throws(IOException::class)
     override fun open(dataSpec: DataSpec): Long {
-        Log.d(TAG, "open() called for ${dataSpec.uri}, position: ${dataSpec.position}, length: ${dataSpec.length}")
+        Log.d(
+            TAG,
+            "open() called for ${dataSpec.uri}, position: ${dataSpec.position}, length: ${dataSpec.length}"
+        )
         currentUri = dataSpec.uri
         try {
             // Initialize CIFS context if not already done
@@ -173,7 +176,10 @@ class SMBDataSource(
         // Log every 1MB to show streaming progress
         val currentTime = System.currentTimeMillis()
         if (currentTime - lastLogTime > 1000) { // Log every second
-            Log.d(TAG, "Streaming... Read ${totalBytesRead / 1024}KB total (chunk: ${bytesRead / 1024}KB)")
+            Log.d(
+                TAG,
+                "Streaming... Read ${totalBytesRead / 1024}KB total (chunk: ${bytesRead / 1024}KB)"
+            )
             lastLogTime = currentTime
         }
 
