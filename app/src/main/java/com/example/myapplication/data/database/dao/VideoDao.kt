@@ -32,4 +32,14 @@ interface VideoDao {
 
     @Query("DELETE FROM recent_videos")
     suspend fun clearAllVideos()
+
+    // Favorites support
+    @Query("SELECT * FROM recent_videos WHERE isFavorite = 1 ORDER BY fileName ASC")
+    fun getFavoriteVideos(): Flow<List<RecentVideo>>
+
+    @Query("UPDATE recent_videos SET isFavorite = :isFavorite WHERE id = :videoId")
+    suspend fun updateFavoriteStatus(videoId: Long, isFavorite: Boolean)
+
+    @Query("UPDATE recent_videos SET isFavorite = :isFavorite WHERE filePath = :filePath")
+    suspend fun updateFavoriteStatusByPath(filePath: String, isFavorite: Boolean)
 }

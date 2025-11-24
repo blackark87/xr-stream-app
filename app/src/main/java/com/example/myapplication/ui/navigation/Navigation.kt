@@ -1,16 +1,21 @@
 package com.example.myapplication.ui.navigation
 
+import android.content.Context
 import androidx.compose.runtime.Composable
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
-import com.example.myapplication.ui.screens.FileBrowserScreen
-import com.example.myapplication.ui.screens.ServerConnectionScreen
+import com.example.myapplication.data.database.AppDatabase
+import com.example.myapplication.data.repository.ServerRepository
+import com.example.myapplication.data.repository.VideoRepository
+import com.example.myapplication.ui.screens.MainDashboardScreen
 import com.example.myapplication.ui.screens.VideoPlayerScreen
+import com.example.myapplication.ui.viewmodel.MainDashboardViewModel
+import com.example.myapplication.ui.viewmodel.MainDashboardViewModelFactory
 
 sealed class Screen(val route: String) {
-    object ServerConnection : Screen("server_connection")
-    object FileBrowser : Screen("file_browser")
+    object MainDashboard : Screen("main_dashboard")
     object VideoPlayer : Screen("video_player/{filePath}/{fileName}") {
         fun createRoute(filePath: String, fileName: String): String {
             val encodedPath = android.net.Uri.encode(filePath)
@@ -20,30 +25,25 @@ sealed class Screen(val route: String) {
 }
 
 @Composable
-fun AppNavigation(navController: NavHostController) {
+fun AppNavigation(navController: NavHostController, context: Context) {
     NavHost(
         navController = navController,
-        startDestination = Screen.ServerConnection.route
+        startDestination = Screen.MainDashboard.route
     ) {
-        composable(Screen.ServerConnection.route) {
-            ServerConnectionScreen(
-                onNavigateToFileBrowser = {
-                    navController.navigate(Screen.FileBrowser.route) {
-                        popUpTo(Screen.ServerConnection.route) { inclusive = false }
-                    }
-                }
-            )
-        }
+        composable(Screen.MainDashboard.route) {
+            // Create repositories
+            val database = AppDatabase.getDatabase(context)
+            val serverRepository = ServerRepository(database.serverDao())
+            val videoRepository = VideoRepository(database.videoDao())
 
-        composable(Screen.FileBrowser.route) {
-            FileBrowserScreen(
-                onNavigateBack = {
-                    navController.popBackStack()
-                },
-                onVideoSelected = { file ->
-                    val route = Screen.VideoPlayer.createRoute(file.path, file.name)
-                    navController.navigate(route)
-                }
+            // Create ViewModel
+            val viewModel: MainDashboardViewModel = viewModel(
+                factory = MainDashboardViewModelFactory(serverRepository, videoRepository)
+            )
+
+            MainDashboardScreen(
+                navController = navController,
+                viewModel = viewModel
             )
         }
 
@@ -56,7 +56,7 @@ fun AppNavigation(navController: NavHostController) {
         ) { backStackEntry ->
             val filePath = backStackEntry.arguments?.getString("filePath") ?: ""
             val fileName = backStackEntry.arguments?.getString("fileName") ?: ""
-            
+
             VideoPlayerScreen(
                 videoFilePath = filePath,
                 videoFileName = fileName,
