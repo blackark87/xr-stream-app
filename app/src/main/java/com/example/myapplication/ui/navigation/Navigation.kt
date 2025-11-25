@@ -50,8 +50,12 @@ fun AppNavigation(navController: NavHostController, context: Context) {
         composable(
             route = Screen.VideoPlayer.route,
             arguments = listOf(
-                androidx.navigation.navArgument("filePath") { type = androidx.navigation.NavType.StringType },
-                androidx.navigation.navArgument("fileName") { type = androidx.navigation.NavType.StringType }
+                androidx.navigation.navArgument("filePath") {
+                    type = androidx.navigation.NavType.StringType
+                },
+                androidx.navigation.navArgument("fileName") {
+                    type = androidx.navigation.NavType.StringType
+                }
             )
         ) { backStackEntry ->
             val filePath = backStackEntry.arguments?.getString("filePath") ?: ""

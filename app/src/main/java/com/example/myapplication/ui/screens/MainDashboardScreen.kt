@@ -1,32 +1,80 @@
 package com.example.myapplication.ui.screens
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.filled.Error
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.outlined.FavoriteBorder
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavController
-import com.example.myapplication.ui.navigation.Screen
 import com.example.myapplication.data.database.entity.RecentVideo
 import com.example.myapplication.data.database.entity.SavedServer
 import com.example.myapplication.network.SMBClient
 import com.example.myapplication.network.SMBFileItem
-import com.example.myapplication.ui.components.*
-import com.example.myapplication.ui.theme.*
+import com.example.myapplication.ui.components.EmptyState
+import com.example.myapplication.ui.components.FancyFileCard
+import com.example.myapplication.ui.components.FancyMovieCard
+import com.example.myapplication.ui.components.FancyServerCard
+import com.example.myapplication.ui.components.LocalStorageCard
+import com.example.myapplication.ui.navigation.Screen
+import com.example.myapplication.ui.theme.CardBackground
+import com.example.myapplication.ui.theme.DividerGray
+import com.example.myapplication.ui.theme.ErrorRed
+import com.example.myapplication.ui.theme.GradientEnd
+import com.example.myapplication.ui.theme.GradientStart
+import com.example.myapplication.ui.theme.NetflixRed
+import com.example.myapplication.ui.theme.StreamingBlack
+import com.example.myapplication.ui.theme.SuccessGreen
+import com.example.myapplication.ui.theme.TextPrimary
+import com.example.myapplication.ui.theme.TextSecondary
+import com.example.myapplication.ui.theme.TextTertiary
 import com.example.myapplication.ui.viewmodel.MainDashboardViewModel
 
 /**
@@ -374,6 +422,7 @@ private fun FileBrowserPanel(
                         message = "Connect to a server to browse files"
                     )
                 }
+
                 isLoading -> {
                     Box(
                         modifier = Modifier.fillMaxSize(),
@@ -385,6 +434,7 @@ private fun FileBrowserPanel(
                         )
                     }
                 }
+
                 errorMessage != null -> {
                     Column(
                         modifier = Modifier.fillMaxSize(),
@@ -406,12 +456,14 @@ private fun FileBrowserPanel(
                         )
                     }
                 }
+
                 files.isEmpty() -> {
                     EmptyState(
                         icon = Icons.Filled.FolderOpen,
                         message = "No files in this directory"
                     )
                 }
+
                 else -> {
                     LazyColumn(
                         verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -493,12 +545,14 @@ private fun FavoritesPanel(
                         message = "Connect to view favorites"
                     )
                 }
+
                 favorites.isEmpty() -> {
                     EmptyState(
                         icon = Icons.Outlined.FavoriteBorder,
                         message = "No favorites yet"
                     )
                 }
+
                 else -> {
                     LazyColumn(
                         verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -616,9 +670,9 @@ private fun AddServerDialog(
                         Text("Cancel", color = TextSecondary)
                     }
                     Spacer(modifier = Modifier.width(8.dp))
-                    
+
                     val isSaveEnabled = name.isNotBlank() && address.isNotBlank()
-                    
+
                     Button(
                         onClick = {
                             if (isSaveEnabled) {

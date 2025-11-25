@@ -1,8 +1,8 @@
 package com.example.myapplication.ui.viewmodel
 
 import android.content.Context
-import android.net.Uri
 import android.util.Log
+import androidx.core.net.toUri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.media3.common.MediaItem
@@ -22,7 +22,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import androidx.core.net.toUri
 
 data class VideoPlayerState(
     val isPlaying: Boolean = false,
@@ -69,7 +68,7 @@ class VideoPlayerViewModel(
      */
     private fun detectStereoFromFilename(filename: String): StereoMode {
         val lowerFilename = filename.lowercase()
-        
+
         // Check for Top-Bottom patterns
         val tbPatterns = listOf(
             "_tb", ".tb", "tb.", "_topbottom", "top-bottom", "top_bottom", "over-under"
@@ -88,10 +87,10 @@ class VideoPlayerViewModel(
         if (sbsPatterns.any { pattern -> lowerFilename.contains(pattern) }) {
             return StereoMode.SideBySide
         }
-        
+
         // Check for 180/360 patterns (defaults to Mono unless stereo is also detected)
         // Ideally we'd detect format too, but for now let's stick to stereo mode detection
-        
+
         return StereoMode.Mono
     }
 
@@ -119,14 +118,17 @@ class VideoPlayerViewModel(
         videoFile: SMBFileItem
     ) {
         Log.d("VideoPlayerViewModel", "initializePlayer called for ${videoFile.name}")
-        
+
         viewModelScope.launch {
             try {
                 // Default to 2D/Mono as requested ("play first, then toggle")
                 // We no longer use filename detection for initial state
                 val initialStereoMode = StereoMode.Mono
                 val initialVideoFormat = VideoFormat.Format2D
-                Log.d("VideoPlayerViewModel", "Initializing with defaults - Stereo: $initialStereoMode, Format: $initialVideoFormat")
+                Log.d(
+                    "VideoPlayerViewModel",
+                    "Initializing with defaults - Stereo: $initialStereoMode, Format: $initialVideoFormat"
+                )
 
                 _state.value = _state.value.copy(
                     isLoading = true,
@@ -145,100 +147,120 @@ class VideoPlayerViewModel(
                     /* trimOnReset= */ true,
                     /* individualAllocationSize= */ 1024 * 1024 * 10  // 10MB chunks
                 )
-                
+
                 val loadControl = androidx.media3.exoplayer.DefaultLoadControl.Builder()
                     .setAllocator(allocator)
                     .setBufferDurationsMs(
                         /* minBufferMs = */ 15000,  // 15 seconds minimum buffer
-                        /* maxBufferMs = */ 50000, // 50 seconds maximum buffer
-                        /* bufferForPlaybackMs = */ 2500,  // Start playback after 2.5 seconds
-                        /* bufferForPlaybackAfterRebufferMs = */ 5000  // Resume after 5 seconds on rebuffer
+                        /* maxBufferMs = */
+                        50000, // 50 seconds maximum buffer
+                        /* bufferForPlaybackMs = */
+                        2500,  // Start playback after 2.5 seconds
+                        /* bufferForPlaybackAfterRebufferMs = */
+                        5000  // Resume after 5 seconds on rebuffer
                     )
                     .build()
 
                 exoPlayer = ExoPlayer.Builder(context)
                     .setLoadControl(loadControl)
                     .build().apply {
-                    // Set up player listener
-                    addListener(object : Player.Listener {
-                        override fun onPlaybackStateChanged(playbackState: Int) {
-                            Log.d("VideoPlayerViewModel", "ExoPlayer state changed: $playbackState")
-                            when (playbackState) {
-                                Player.STATE_READY -> {
-                                    _state.value = _state.value.copy(
-                                        isLoading = false,
-                                        duration = this@apply.duration
-                                    )
-                                }
-                                Player.STATE_BUFFERING -> {
-                                    _state.value = _state.value.copy(isLoading = true)
-                                }
-                                Player.STATE_ENDED -> {
-                                    _state.value = _state.value.copy(isPlaying = false)
-                                }
-                                Player.STATE_IDLE -> {
-                                    _state.value = _state.value.copy(isLoading = false)
-                                }
-                            }
-                        }
+                        // Set up player listener
+                        addListener(object : Player.Listener {
+                            override fun onPlaybackStateChanged(playbackState: Int) {
+                                Log.d(
+                                    "VideoPlayerViewModel",
+                                    "ExoPlayer state changed: $playbackState"
+                                )
+                                when (playbackState) {
+                                    Player.STATE_READY -> {
+                                        _state.value = _state.value.copy(
+                                            isLoading = false,
+                                            duration = this@apply.duration
+                                        )
+                                    }
 
-                        override fun onIsPlayingChanged(isPlaying: Boolean) {
-                            Log.d("VideoPlayerViewModel", "ExoPlayer isPlaying changed: $isPlaying")
-                            _state.value = _state.value.copy(isPlaying = isPlaying)
-                        }
-                        
-                        override fun onTracksChanged(tracks: androidx.media3.common.Tracks) {
-                            // Check video track for stereo mode metadata if currently Mono
-                            // We don't override if we already detected something from filename
-                            if (_state.value.stereoMode != StereoMode.Mono) {
-                                return
-                            }
+                                    Player.STATE_BUFFERING -> {
+                                        _state.value = _state.value.copy(isLoading = true)
+                                    }
 
-                            // Check video track for stereo mode metadata
-                            var detectedMode = StereoMode.Mono
-                            for (trackGroup in tracks.groups) {
-                                if (trackGroup.type == androidx.media3.common.C.TRACK_TYPE_VIDEO) {
-                                    for (i in 0 until trackGroup.length) {
-                                        val format = trackGroup.getTrackFormat(i)
-                                        val stereoMode = format.stereoMode
-                                        Log.d("VideoPlayerViewModel", "Video track stereoMode: $stereoMode")
+                                    Player.STATE_ENDED -> {
+                                        _state.value = _state.value.copy(isPlaying = false)
+                                    }
 
-                                        if (stereoMode == androidx.media3.common.C.STEREO_MODE_LEFT_RIGHT ||
-                                            stereoMode == androidx.media3.common.C.STEREO_MODE_STEREO_MESH) {
-                                            detectedMode = StereoMode.SideBySide
-                                            break
-                                        } else if (stereoMode == androidx.media3.common.C.STEREO_MODE_TOP_BOTTOM) {
-                                            detectedMode = StereoMode.TopBottom
-                                            break
-                                        }
+                                    Player.STATE_IDLE -> {
+                                        _state.value = _state.value.copy(isLoading = false)
                                     }
                                 }
-                                if (detectedMode != StereoMode.Mono) break
                             }
 
-                            if (detectedMode != StereoMode.Mono) {
-                                _state.value = _state.value.copy(stereoMode = detectedMode)
+                            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                                Log.d(
+                                    "VideoPlayerViewModel",
+                                    "ExoPlayer isPlaying changed: $isPlaying"
+                                )
+                                _state.value = _state.value.copy(isPlaying = isPlaying)
                             }
-                        }
 
-                        override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
-                            Log.e("VideoPlayerViewModel", "ExoPlayer error: ${error.message}", error)
-                            _state.value = _state.value.copy(
-                                isLoading = false,
-                                error = error.message ?: "Playback error occurred"
-                            )
-                        }
-                    })
-                }
+                            override fun onTracksChanged(tracks: androidx.media3.common.Tracks) {
+                                // Check video track for stereo mode metadata if currently Mono
+                                // We don't override if we already detected something from filename
+                                if (_state.value.stereoMode != StereoMode.Mono) {
+                                    return
+                                }
+
+                                // Check video track for stereo mode metadata
+                                var detectedMode = StereoMode.Mono
+                                for (trackGroup in tracks.groups) {
+                                    if (trackGroup.type == androidx.media3.common.C.TRACK_TYPE_VIDEO) {
+                                        for (i in 0 until trackGroup.length) {
+                                            val format = trackGroup.getTrackFormat(i)
+                                            val stereoMode = format.stereoMode
+                                            Log.d(
+                                                "VideoPlayerViewModel",
+                                                "Video track stereoMode: $stereoMode"
+                                            )
+
+                                            if (stereoMode == androidx.media3.common.C.STEREO_MODE_LEFT_RIGHT ||
+                                                stereoMode == androidx.media3.common.C.STEREO_MODE_STEREO_MESH
+                                            ) {
+                                                detectedMode = StereoMode.SideBySide
+                                                break
+                                            } else if (stereoMode == androidx.media3.common.C.STEREO_MODE_TOP_BOTTOM) {
+                                                detectedMode = StereoMode.TopBottom
+                                                break
+                                            }
+                                        }
+                                    }
+                                    if (detectedMode != StereoMode.Mono) break
+                                }
+
+                                if (detectedMode != StereoMode.Mono) {
+                                    _state.value = _state.value.copy(stereoMode = detectedMode)
+                                }
+                            }
+
+                            override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                                Log.e(
+                                    "VideoPlayerViewModel",
+                                    "ExoPlayer error: ${error.message}",
+                                    error
+                                )
+                                _state.value = _state.value.copy(
+                                    isLoading = false,
+                                    error = error.message ?: "Playback error occurred"
+                                )
+                            }
+                        })
+                    }
 
                 // Create SMB data source
                 val dataSourceFactory = SMBDataSource.Factory(smbConfig)
 
                 // videoFile.path is already a complete SMB URL from jcifs (e.g., smb://192.168.1.105:445/downloads/file.mp4)
                 val uri = videoFile.path.toUri()
-            Log.d("VideoPlayerViewModel", "initializePlayer - Using URI from path: $uri")
-            
-            val mediaItem = MediaItem.fromUri(uri)
+                Log.d("VideoPlayerViewModel", "initializePlayer - Using URI from path: $uri")
+
+                val mediaItem = MediaItem.fromUri(uri)
 
                 // Create progressive media source
                 val mediaSource = ProgressiveMediaSource.Factory(dataSourceFactory)

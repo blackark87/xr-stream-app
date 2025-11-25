@@ -37,51 +37,52 @@ class LocalFileClient(private val context: Context) {
      * List files in the given directory path
      * @param path Relative path from the root directory, empty for common directories
      */
-    suspend fun listFiles(path: String = ""): Result<List<SMBFileItem>> = withContext(Dispatchers.IO) {
-        try {
-            val directory = if (path.isEmpty()) {
-                // Return common root directories
-                return@withContext Result.success(getCommonDirectories())
-            } else {
-                File(path)
-            }
-
-            if (!directory.exists()) {
-                return@withContext Result.failure(
-                    IllegalArgumentException("Directory does not exist: $path")
-                )
-            }
-
-            if (!directory.isDirectory) {
-                return@withContext Result.failure(
-                    IllegalArgumentException("Path is not a directory: $path")
-                )
-            }
-
-            val files = directory.listFiles()?.mapNotNull { file ->
-                try {
-                    // Skip hidden files
-                    if (file.isHidden) return@mapNotNull null
-
-                    SMBFileItem(
-                        name = file.name,
-                        path = file.absolutePath,
-                        isDirectory = file.isDirectory,
-                        size = if (file.isDirectory) 0 else file.length(),
-                        lastModified = file.lastModified()
-                    )
-                } catch (e: Exception) {
-                    println("LocalFileClient: Error accessing file: ${e.message}")
-                    null // Skip files that can't be accessed
+    suspend fun listFiles(path: String = ""): Result<List<SMBFileItem>> =
+        withContext(Dispatchers.IO) {
+            try {
+                val directory = if (path.isEmpty()) {
+                    // Return common root directories
+                    return@withContext Result.success(getCommonDirectories())
+                } else {
+                    File(path)
                 }
-            } ?: emptyList()
 
-            Result.success(files)
-        } catch (e: Exception) {
-            println("LocalFileClient: Error listing files: ${e.message}")
-            Result.failure(e)
+                if (!directory.exists()) {
+                    return@withContext Result.failure(
+                        IllegalArgumentException("Directory does not exist: $path")
+                    )
+                }
+
+                if (!directory.isDirectory) {
+                    return@withContext Result.failure(
+                        IllegalArgumentException("Path is not a directory: $path")
+                    )
+                }
+
+                val files = directory.listFiles()?.mapNotNull { file ->
+                    try {
+                        // Skip hidden files
+                        if (file.isHidden) return@mapNotNull null
+
+                        SMBFileItem(
+                            name = file.name,
+                            path = file.absolutePath,
+                            isDirectory = file.isDirectory,
+                            size = if (file.isDirectory) 0 else file.length(),
+                            lastModified = file.lastModified()
+                        )
+                    } catch (e: Exception) {
+                        println("LocalFileClient: Error accessing file: ${e.message}")
+                        null // Skip files that can't be accessed
+                    }
+                } ?: emptyList()
+
+                Result.success(files)
+            } catch (e: Exception) {
+                println("LocalFileClient: Error listing files: ${e.message}")
+                Result.failure(e)
+            }
         }
-    }
 
     /**
      * Get common root directories accessible to the app
@@ -118,7 +119,8 @@ class LocalFileClient(private val context: Context) {
         }
 
         // Add Downloads directory
-        val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+        val downloadsDir =
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
         if (downloadsDir.exists()) {
             directories.add(
                 SMBFileItem(
@@ -132,7 +134,8 @@ class LocalFileClient(private val context: Context) {
         }
 
         // Add Documents directory
-        val documentsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
+        val documentsDir =
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
         if (documentsDir != null && documentsDir.exists()) {
             directories.add(
                 SMBFileItem(
