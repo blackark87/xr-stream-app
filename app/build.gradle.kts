@@ -88,6 +88,10 @@ dependencies {
     // Coroutines
     implementation(libs.kotlinx.coroutines.android)
 
+    // Coil for image/video loading
+    implementation(libs.coil.compose)
+    implementation(libs.coil.video)
+
     // Testing
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)

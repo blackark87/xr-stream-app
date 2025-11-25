@@ -487,6 +487,7 @@ private fun FileBrowserPanel(
                                 isVideoFile = isVideoFile,
                                 fileSize = if (!file.isDirectory) formatFileSizeHelper(file.size) else null,
                                 isFavorite = isFavorite,
+                                videoPath = if (isVideoFile) file.path else null,
                                 onFavoriteToggle = if (isVideoFile) {
                                     { onFavoriteToggle(file.path, isFavorite) }
                                 } else null,
