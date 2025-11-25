@@ -1,19 +1,15 @@
 package com.example.myapplication.ui.screens
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.IconButton
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -34,20 +30,26 @@ import androidx.xr.compose.platform.LocalSession
 import androidx.xr.compose.spatial.ContentEdge
 import androidx.xr.compose.spatial.Orbiter
 import androidx.xr.compose.spatial.Subspace
+import androidx.xr.compose.subspace.SpatialBox
 import androidx.xr.compose.subspace.SpatialExternalSurface
 import androidx.xr.compose.subspace.StereoMode
-import androidx.xr.compose.subspace.SpatialPanel
+import androidx.xr.compose.subspace.layout.SpatialAlignment
 import androidx.xr.compose.subspace.layout.SubspaceModifier
+import androidx.xr.compose.subspace.layout.fillMaxSize
 import androidx.xr.compose.subspace.layout.height
 import androidx.xr.compose.subspace.layout.width
-import androidx.xr.compose.subspace.layout.fillMaxSize
+import androidx.xr.runtime.Config
+import androidx.xr.runtime.Session
+import androidx.xr.scenecore.SurfaceEntity
+import androidx.xr.runtime.math.FloatSize2d
+import androidx.xr.runtime.math.Pose
+import androidx.xr.runtime.math.Vector3
+import androidx.xr.scenecore.scene
 import com.example.myapplication.data.database.AppDatabase
 import com.example.myapplication.data.repository.VideoRepository
 import com.example.myapplication.ui.components.XRPlaybackControls
 import com.example.myapplication.ui.viewmodel.VideoPlayerViewModel
 import com.example.myapplication.ui.viewmodel.VideoPlayerViewModelFactory
-import androidx.xr.compose.subspace.SpatialBox
-import androidx.xr.compose.subspace.layout.SpatialAlignment
 
 @Composable
 fun VideoPlayerScreen(
@@ -152,80 +154,72 @@ fun SpatialVideoPlayerContent(
     var showControls by remember { mutableStateOf(true) }  // Start with controls visible
 
     // Auto-hide controls after 5 seconds
-    LaunchedEffect(showControls, playerState.isPlaying) {
-        if (showControls && playerState.isPlaying) {
-            kotlinx.coroutines.delay(5000)
-            showControls = false
-        }
-    }
+    // Auto-hide controls logic removed as per user request
+    // Controls will remain visible until explicitly hidden
+
 
 // ...
 
     Subspace {
-        // Use SpatialBox to layer content (Video + Controls)
-        // Set size to 16:9 aspect ratio (e.g., 1280.dp x 720.dp)
-        // Set alignment to BottomCenter so controls appear at the bottom
-        SpatialBox(
-            modifier = SubspaceModifier
-                .width(1280.dp)
-                .height(720.dp),
-            alignment = SpatialAlignment.BottomCenter
+        // Use SpatialColumn to stack Video
+        androidx.xr.compose.subspace.SpatialColumn(
+            modifier = SubspaceModifier.fillMaxSize(),
+            alignment = SpatialAlignment.Center
         ) {
-            // Video player logic based on format
-            SpatialVideoPlayer(
-                videoFormat = playerState.videoFormat,
-                stereoMode = playerState.stereoMode,
-                exoPlayer = exoPlayer,
-                modifier = SubspaceModifier.fillMaxSize()
-            )
+            // Video Player Container (16:9)
+            SpatialBox(
+                modifier = SubspaceModifier
+                    .width(1280.dp)
+                    .height(720.dp)
+            ) {
+                // Video player logic based on format
+                SpatialVideoPlayer(
+                    videoFormat = playerState.videoFormat,
+                    stereoMode = playerState.stereoMode,
+                    exoPlayer = exoPlayer,
+                    modifier = SubspaceModifier.fillMaxSize()
+                )
+            }
+        }
 
-            // Controls panel at bottom (Overlay)
-            if (showControls && !playerState.isLoading && playerState.error == null) {
-                // Using SpatialPanel as an overlay for controls
-                // We remove fixed height to allow expansion for menus (like Format)
-                SpatialPanel(
-                    modifier = SubspaceModifier
-                        .width(800.dp)
-                        //.height(400.dp) // Allow dynamic height
+        // Controls Orbiter
+        if (showControls && !playerState.isLoading && playerState.error == null) {
+            Orbiter(
+                position = ContentEdge.Bottom,
+                offset = 24.dp,
+                alignment = Alignment.CenterHorizontally
+            ) {
+                // Controls panel
+                Surface(
+                    color = androidx.compose.ui.graphics.Color.Transparent,
+                    modifier = Modifier.width(600.dp) // Fixed width for controls
                 ) {
-                    Surface(
-                        color = androidx.compose.ui.graphics.Color.Transparent, 
-                        modifier = Modifier.fillMaxSize()
-                    ) {
-                        XRPlaybackControls(
-                            videoPlayerViewModel = videoPlayerViewModel,
-                            playerState = playerState,
-                            onNavigateBack = onNavigateBack,
-                            onToggleControls = { showControls = !showControls }
-                        )
-                    }
-                }
-            } else if (!showControls && !playerState.isLoading && playerState.error == null) {
-                // Small button to show controls again
-                // We use SpatialPanel for this too to keep it within the SpatialBox layout
-                // Or we can keep using Orbiter if we want it floating independent of the box?
-                // User said "try under layer orbital" which implies they want it positioned better.
-                // If we put it in the SpatialBox with BottomCenter alignment, it will sit at the bottom of the 16:9 frame.
-                SpatialPanel(
-                     modifier = SubspaceModifier
-                        .width(200.dp)
-                        .height(60.dp)
-                ) {
-                    Surface(
-                        color = androidx.compose.ui.graphics.Color.Transparent,
-                        modifier = Modifier.fillMaxSize()
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Button(
-                                onClick = { showControls = true }
-                            ) {
-                                Text("Show Controls")
-                            }
-                        }
-                    }
+                    XRPlaybackControls(
+                        videoPlayerViewModel = videoPlayerViewModel,
+                        playerState = playerState,
+                        onNavigateBack = onNavigateBack,
+                        onToggleControls = { showControls = !showControls }
+                    )
                 }
             }
         }
+
+        // Show Controls Button (Orbiter) - Visible when controls are hidden
+        if (!showControls && !playerState.isLoading && playerState.error == null) {
+            Orbiter(
+                position = ContentEdge.Bottom,
+                offset = 24.dp,
+                alignment = Alignment.CenterHorizontally
+            ) {
+                Button(
+                    onClick = { showControls = true },
+                    colors = ButtonDefaults.buttonColors(containerColor = androidx.compose.ui.graphics.Color.Red)
+                ) {
+                    Text("Show Controls")
+                }
+            }
+        }
+
     }
 }
 
@@ -234,7 +228,7 @@ fun SpatialVideoPlayer(
     videoFormat: com.example.myapplication.ui.viewmodel.VideoFormat,
     stereoMode: com.example.myapplication.ui.viewmodel.StereoMode,
     exoPlayer: androidx.media3.exoplayer.ExoPlayer?,
-    modifier: androidx.xr.compose.subspace.layout.SubspaceModifier = androidx.xr.compose.subspace.layout.SubspaceModifier
+    modifier: SubspaceModifier = SubspaceModifier
 ) {
     if (videoFormat == com.example.myapplication.ui.viewmodel.VideoFormat.Format2D) {
         // 2D Flat Mode (Orbiter)
@@ -278,7 +272,7 @@ fun SpatialVideoPlayer(
 fun VideoPlayerOrbiter(
     isStereo: Boolean,
     exoPlayer: androidx.media3.exoplayer.ExoPlayer?,
-    modifier: androidx.xr.compose.subspace.layout.SubspaceModifier = androidx.xr.compose.subspace.layout.SubspaceModifier
+    modifier: SubspaceModifier = SubspaceModifier
 ) {
     println("XR: VideoPlayerSurface composed. isStereo: $isStereo, Player: ${exoPlayer?.hashCode()}")
 
@@ -308,55 +302,73 @@ fun VideoPlayerOrbiter(
 
 @Composable
 fun ImmersiveVideoPlayer(
-    session: Any, // Using Any to bypass unresolved reference for now
+    session: Session,
     videoFormat: com.example.myapplication.ui.viewmodel.VideoFormat,
     stereoMode: com.example.myapplication.ui.viewmodel.StereoMode,
     exoPlayer: androidx.media3.exoplayer.ExoPlayer?
 ) {
     DisposableEffect(videoFormat, stereoMode, exoPlayer) {
-        println("XR: Creating Immersive SurfaceEntity for $videoFormat / $stereoMode using session: ${session::class.simpleName}")
+        println("XR: Creating Immersive SurfaceEntity for $videoFormat / $stereoMode")
+
+        var entity: SurfaceEntity? = null
 
         try {
-            // Define Shape
-            // Note: CanvasShape.Vr180Hemisphere / Vr360Sphere might be the API
-            // If these are not available, we might need to use a different shape or API
+            val shape = when (videoFormat) {
+                com.example.myapplication.ui.viewmodel.VideoFormat.Format180 -> SurfaceEntity.Shape.Hemisphere(1.0f)
+                com.example.myapplication.ui.viewmodel.VideoFormat.Format360 -> SurfaceEntity.Shape.Sphere(1.0f)
+                else -> SurfaceEntity.Shape.Quad(FloatSize2d(1.5f, 1.5f))
+            }
 
-            // Placeholder for actual SurfaceEntity creation
-            // Since we don't have the exact API signature confirmed and previous attempts failed,
-            // we will log this. In a real implementation, we would call SurfaceEntity.create here.
+            val xrStereoMode = when (stereoMode) {
+                com.example.myapplication.ui.viewmodel.StereoMode.SideBySide -> SurfaceEntity.StereoMode.STEREO_MODE_SIDE_BY_SIDE
+                com.example.myapplication.ui.viewmodel.StereoMode.TopBottom -> SurfaceEntity.StereoMode.STEREO_MODE_TOP_BOTTOM
+                else -> SurfaceEntity.StereoMode.STEREO_MODE_MONO
+            }
 
-            // TODO: Implement SurfaceEntity creation when API is confirmed public
-            // val entity = SurfaceEntity.create(...)
-            // exoPlayer?.setVideoSurface(entity.surface)
+            val newConfig = session.config.copy(
+                headTracking = Config.HeadTrackingMode.LAST_KNOWN,
+            )
 
-            println("XR: Immersive mode requested but SurfaceEntity API is restricted. Falling back to log.")
+            session.configure(newConfig);
+
+            // Create the SurfaceEntity
+            // We use Identity pose in ActivitySpace for now. 
+            // Ideally, we might want to center it on the user's head, but Identity is a safe start.
+            entity = SurfaceEntity.create(
+                session = session,
+                shape = shape,
+                stereoMode = xrStereoMode,
+                pose = session.scene.spatialUser.head?.transformPoseTo(
+                    Pose.Identity,
+                    session.scene.activitySpace
+                )!!,
+            )
+
+            println("XR: SurfaceEntity created successfully. Attaching to player.")
+            exoPlayer?.setVideoSurface(entity.getSurface())
 
         } catch (e: Exception) {
             println("XR: Error creating immersive surface: ${e.message}")
+            e.printStackTrace()
         }
 
         onDispose {
-            // Cleanup
-            // entity.dispose()
+            println("XR: Disposing SurfaceEntity")
+            entity?.dispose()
             exoPlayer?.clearVideoSurface()
         }
     }
 
-    // Show a message to the user that immersive mode is experimental/WIP
+    // Informational text (Orbiter)
     Orbiter(
         position = ContentEdge.Bottom,
         offset = 300.dp,
         alignment = Alignment.CenterHorizontally
     ) {
         Surface(
-            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.7f),
+            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.6f),
             shape = MaterialTheme.shapes.medium
         ) {
-            Text(
-                text = "Immersive Mode (${videoFormat.name}) Selected\n(Rendering implementation pending API access)",
-                modifier = Modifier.padding(16.dp),
-                style = MaterialTheme.typography.bodyLarge
-            )
         }
     }
 }

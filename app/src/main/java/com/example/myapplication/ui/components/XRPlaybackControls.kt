@@ -1,17 +1,15 @@
 package com.example.myapplication.ui.components
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -34,9 +32,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.example.myapplication.ui.viewmodel.VideoPlayerState
 import com.example.myapplication.ui.viewmodel.VideoPlayerViewModel
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.Icon
 import kotlin.math.roundToInt
 
 @Composable
@@ -97,7 +92,7 @@ fun XRPlaybackControls(
                     modifier = Modifier.weight(1f), // Let title take available space
                     textAlign = androidx.compose.ui.text.style.TextAlign.Center // Center the title
                 )
-                
+
                 // Spacer to balance the row if needed, or just let title center
                 Spacer(modifier = Modifier.width(48.dp)) // Balance the back button width
             }
@@ -285,19 +280,20 @@ fun XRPlaybackControls(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            com.example.myapplication.ui.viewmodel.StereoMode.values().forEach { mode ->
-                                Button(
-                                    onClick = { videoPlayerViewModel.setStereoMode(mode) },
-                                    colors = if (playerState.stereoMode == mode) {
-                                        ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
-                                    } else {
-                                        ButtonDefaults.outlinedButtonColors(contentColor = Color.White)
-                                    },
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Text(mode.name)
+                            com.example.myapplication.ui.viewmodel.StereoMode.values()
+                                .forEach { mode ->
+                                    Button(
+                                        onClick = { videoPlayerViewModel.setStereoMode(mode) },
+                                        colors = if (playerState.stereoMode == mode) {
+                                            ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                                        } else {
+                                            ButtonDefaults.outlinedButtonColors(contentColor = Color.White)
+                                        },
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Text(mode.name)
+                                    }
                                 }
-                            }
                         }
                     }
                 }
