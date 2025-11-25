@@ -61,7 +61,7 @@ fun XRPlaybackControls(
             .fillMaxWidth()
             .padding(16.dp),
         colors = CardDefaults.cardColors(
-            containerColor = Color.Black.copy(alpha = 0.6f) // Semi-transparent overlay
+            containerColor = Color.Black.copy(alpha = 1f) // Semi-transparent overlay
         ),
         shape = RoundedCornerShape(16.dp)
     ) {

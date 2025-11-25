@@ -211,11 +211,15 @@ fun SpatialVideoPlayerContent(
                 offset = 24.dp,
                 alignment = Alignment.CenterHorizontally
             ) {
+                // Transparent button to show controls when clicked "somewhere"
                 Button(
                     onClick = { showControls = true },
-                    colors = ButtonDefaults.buttonColors(containerColor = androidx.compose.ui.graphics.Color.Red)
+                    colors = ButtonDefaults.buttonColors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
+                    modifier = Modifier
+                        .width(200.dp) // Make it wide enough to be easily clickable
+                        .height(100.dp)
                 ) {
-                    Text("Show Controls")
+                    // Empty content or invisible text
                 }
             }
         }
