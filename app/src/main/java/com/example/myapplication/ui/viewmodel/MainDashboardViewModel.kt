@@ -67,6 +67,14 @@ class MainDashboardViewModel(
             initialValue = emptyList()
         )
 
+    // All recent videos from database - for checking favorite status in file browser
+    val recentVideos: StateFlow<List<RecentVideo>> = videoRepository.getRecentVideos(limit = 1000)
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptyList()
+        )
+
     private var smbClient: SMBClient? = null
     private var localClient: LocalFileClient? = null
 

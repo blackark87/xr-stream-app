@@ -429,6 +429,8 @@ fun FancyFileCard(
     isDirectory: Boolean,
     isVideoFile: Boolean,
     fileSize: String? = null,
+    isFavorite: Boolean = false,
+    onFavoriteToggle: (() -> Unit)? = null,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -494,6 +496,20 @@ fun FancyFileCard(
                         text = fileSize,
                         style = MaterialTheme.typography.labelSmall,
                         color = TextTertiary
+                    )
+                }
+            }
+
+            // Favorite button for video files
+            if (isVideoFile && onFavoriteToggle != null) {
+                IconButton(
+                    onClick = onFavoriteToggle,
+                    modifier = Modifier.size(40.dp)
+                ) {
+                    Icon(
+                        imageVector = if (isFavorite) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
+                        contentDescription = if (isFavorite) "Remove from favorites" else "Add to favorites",
+                        tint = if (isFavorite) NetflixRed else TextSecondary
                     )
                 }
             }

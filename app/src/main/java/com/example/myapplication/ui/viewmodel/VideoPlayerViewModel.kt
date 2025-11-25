@@ -269,13 +269,29 @@ class VideoPlayerViewModel(
                 // Set media source and prepare
                 exoPlayer?.setMediaSource(mediaSource)
                 exoPlayer?.prepare()
+
+                // Check for saved progress and resume from last position
+                val savedVideo = videoRepository.getVideoByPath(videoFile.path)
+                val resumePosition = savedVideo?.lastPosition ?: 0L
+
+                if (resumePosition > 0 && savedVideo != null && savedVideo.duration > 0) {
+                    // Only resume if we're not near the end (within 5% of duration)
+                    val progressPercent = (resumePosition.toFloat() / savedVideo.duration.toFloat())
+                    if (progressPercent < 0.95f) {
+                        Log.d("VideoPlayerViewModel", "Resuming playback from position: ${resumePosition}ms (${(progressPercent * 100).toInt()}%)")
+                        exoPlayer?.seekTo(resumePosition)
+                    } else {
+                        Log.d("VideoPlayerViewModel", "Video was almost finished, starting from beginning")
+                    }
+                }
+
                 exoPlayer?.playWhenReady = true
 
                 // Expose player to UI
                 _playerFlow.value = exoPlayer
 
                 // Save to recent videos
-                saveToRecentVideos(videoFile, smbConfig)
+                saveToRecentVideos(videoFile, smbConfig, savedVideo)
 
                 // Start position tracking
                 startPositionTracking()
@@ -290,18 +306,31 @@ class VideoPlayerViewModel(
         }
     }
 
-    private suspend fun saveToRecentVideos(videoFile: SMBFileItem, smbConfig: SMBConfig) {
-        val recentVideo = RecentVideo(
-            fileName = videoFile.name,
-            filePath = videoFile.path,
-            serverAddress = smbConfig.serverAddress,
-            shareName = smbConfig.shareName,
-            lastPlayed = System.currentTimeMillis(),
-            lastPosition = 0,
-            duration = 0
-        )
-
-        currentVideoId = videoRepository.insertVideo(recentVideo)
+    private suspend fun saveToRecentVideos(videoFile: SMBFileItem, smbConfig: SMBConfig, existingVideo: RecentVideo?) {
+        if (existingVideo != null) {
+            // Update existing video - preserve favorite status and ID
+            val updatedVideo = existingVideo.copy(
+                fileName = videoFile.name,
+                lastPlayed = System.currentTimeMillis()
+            )
+            videoRepository.updateVideo(updatedVideo)
+            currentVideoId = existingVideo.id
+            Log.d("VideoPlayerViewModel", "Updated existing video record (ID: ${existingVideo.id}, isFavorite: ${existingVideo.isFavorite})")
+        } else {
+            // Create new video entry
+            val recentVideo = RecentVideo(
+                fileName = videoFile.name,
+                filePath = videoFile.path,
+                serverAddress = smbConfig.serverAddress,
+                shareName = smbConfig.shareName,
+                lastPlayed = System.currentTimeMillis(),
+                lastPosition = 0,
+                duration = 0,
+                isFavorite = false
+            )
+            currentVideoId = videoRepository.insertVideo(recentVideo)
+            Log.d("VideoPlayerViewModel", "Created new video record (ID: $currentVideoId)")
+        }
     }
 
     private fun startPositionTracking() {
@@ -314,10 +343,19 @@ class VideoPlayerViewModel(
                         bufferedPercentage = player.bufferedPercentage
                     )
 
-                    // Save position every 5 seconds
+                    // Save position and duration every 5 seconds
                     currentVideoId?.let { videoId ->
                         if (player.currentPosition % 5000 < 500) {
-                            videoRepository.updatePlaybackInfo(videoId, player.currentPosition)
+                            // Update both position and duration
+                            val currentVideo = videoRepository.getVideoById(videoId)
+                            currentVideo?.let { video ->
+                                val updatedVideo = video.copy(
+                                    lastPosition = player.currentPosition,
+                                    duration = if (player.duration > 0) player.duration else video.duration,
+                                    lastPlayed = System.currentTimeMillis()
+                                )
+                                videoRepository.updateVideo(updatedVideo)
+                            }
                         }
                     }
                 }
@@ -376,11 +414,20 @@ class VideoPlayerViewModel(
     }
 
     fun releasePlayer() {
-        // Save final position
+        // Save final position and duration
         viewModelScope.launch {
             currentVideoId?.let { videoId ->
                 exoPlayer?.let { player ->
-                    videoRepository.updatePlaybackInfo(videoId, player.currentPosition)
+                    val currentVideo = videoRepository.getVideoById(videoId)
+                    currentVideo?.let { video ->
+                        val updatedVideo = video.copy(
+                            lastPosition = player.currentPosition,
+                            duration = if (player.duration > 0) player.duration else video.duration,
+                            lastPlayed = System.currentTimeMillis()
+                        )
+                        videoRepository.updateVideo(updatedVideo)
+                        Log.d("VideoPlayerViewModel", "Saved final position: ${player.currentPosition}ms, duration: ${player.duration}ms")
+                    }
                 }
             }
         }
