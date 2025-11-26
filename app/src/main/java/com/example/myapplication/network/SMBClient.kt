@@ -156,6 +156,11 @@ class SMBClient(private val config: SMBConfig) {
         }
     }
 
+    fun getSmbFile(url: String): SmbFile {
+        val context = cifsContext ?: throw IllegalStateException("Not connected")
+        return SmbFile(url, context)
+    }
+
     private fun buildSmbUrl(path: String): String {
         val cleanPath = path.removePrefix("/").removeSuffix("/")
         val pathPart = if (cleanPath.isNotEmpty()) "/$cleanPath/" else "/"
