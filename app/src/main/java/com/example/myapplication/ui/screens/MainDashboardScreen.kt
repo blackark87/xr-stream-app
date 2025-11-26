@@ -90,6 +90,7 @@ fun MainDashboardScreen(
     val servers by viewModel.servers.collectAsStateWithLifecycle()
     val files by viewModel.files.collectAsStateWithLifecycle()
     val favorites by viewModel.favorites.collectAsStateWithLifecycle()
+    val recentVideos by viewModel.recentVideos.collectAsStateWithLifecycle()
 
     var showAddServerDialog by remember { mutableStateOf(false) }
 
@@ -186,6 +187,7 @@ fun MainDashboardScreen(
                 // CENTER PANEL: File Browser
                 FileBrowserPanel(
                     files = files,
+                    recentVideos = recentVideos,
                     currentPath = uiState.currentPath,
                     isConnected = uiState.isConnected,
                     isLoading = uiState.isLoadingFiles,
@@ -198,6 +200,9 @@ fun MainDashboardScreen(
                     },
                     onPlayVideo = { filePath, fileName ->
                         navController.navigate(Screen.VideoPlayer.createRoute(filePath, fileName))
+                    },
+                    onFavoriteToggle = { filePath, isFavorite ->
+                        viewModel.toggleFavoriteByPath(filePath, !isFavorite)
                     },
                     modifier = Modifier
                         .weight(0.5f)
@@ -355,6 +360,7 @@ private fun ServerListPanel(
 @Composable
 private fun FileBrowserPanel(
     files: List<SMBFileItem>,
+    recentVideos: List<RecentVideo>,
     currentPath: String,
     isConnected: Boolean,
     isLoading: Boolean,
@@ -362,6 +368,7 @@ private fun FileBrowserPanel(
     onFileClick: (SMBFileItem) -> Unit,
     onBackClick: () -> Unit,
     onPlayVideo: (String, String) -> Unit,
+    onFavoriteToggle: (String, Boolean) -> Unit,
     modifier: Modifier = Modifier
 ) {
     Card(
@@ -470,11 +477,20 @@ private fun FileBrowserPanel(
                     ) {
                         items(files) { file ->
                             val isVideoFile = SMBClient.isVideoFile(file.name)
+                            // Check if this file is in recent videos and get its favorite status
+                            val videoInDb = recentVideos.find { it.filePath == file.path }
+                            val isFavorite = videoInDb?.isFavorite ?: false
+
                             FancyFileCard(
                                 fileName = file.name,
                                 isDirectory = file.isDirectory,
                                 isVideoFile = isVideoFile,
                                 fileSize = if (!file.isDirectory) formatFileSizeHelper(file.size) else null,
+                                isFavorite = isFavorite,
+                                videoPath = if (isVideoFile) file.path else null,
+                                onFavoriteToggle = if (isVideoFile) {
+                                    { onFavoriteToggle(file.path, isFavorite) }
+                                } else null,
                                 onClick = {
                                     if (isVideoFile) {
                                         onPlayVideo(file.path, file.name)

@@ -47,8 +47,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import coil.compose.AsyncImage
 import com.example.myapplication.data.database.entity.RecentVideo
 import com.example.myapplication.data.database.entity.SavedServer
 import com.example.myapplication.ui.theme.AccentGold
@@ -429,6 +431,9 @@ fun FancyFileCard(
     isDirectory: Boolean,
     isVideoFile: Boolean,
     fileSize: String? = null,
+    isFavorite: Boolean = false,
+    videoPath: String? = null,
+    onFavoriteToggle: (() -> Unit)? = null,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -461,21 +466,56 @@ fun FancyFileCard(
                 .padding(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // File Icon
-            Icon(
-                imageVector = when {
-                    isDirectory -> Icons.Filled.Folder
-                    isVideoFile -> Icons.Filled.Movie
-                    else -> Icons.Filled.Description
-                },
-                contentDescription = null,
-                tint = when {
-                    isDirectory -> AccentGold
-                    isVideoFile -> NetflixRed
-                    else -> TextSecondary
-                },
-                modifier = Modifier.size(32.dp)
-            )
+            // File Icon or Thumbnail
+            Box(
+                modifier = Modifier
+                    .size(if (isVideoFile) 80.dp else 32.dp, if (isVideoFile) 60.dp else 32.dp)
+                    .clip(RoundedCornerShape(if (isVideoFile) 8.dp else 0.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                if (isVideoFile && videoPath != null) {
+                    // Show thumbnail for video files
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(DividerGray),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        AsyncImage(
+                            model = videoPath,
+                            contentDescription = "Video thumbnail",
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop,
+                            onError = {
+                                // Error loading thumbnail - placeholder will show
+                            }
+                        )
+                        // Overlay icon on thumbnail
+                        Icon(
+                            imageVector = Icons.Filled.Movie,
+                            contentDescription = null,
+                            tint = TextPrimary.copy(alpha = 0.7f),
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+                } else {
+                    // Regular icon for directories and non-video files
+                    Icon(
+                        imageVector = when {
+                            isDirectory -> Icons.Filled.Folder
+                            isVideoFile -> Icons.Filled.Movie
+                            else -> Icons.Filled.Description
+                        },
+                        contentDescription = null,
+                        tint = when {
+                            isDirectory -> AccentGold
+                            isVideoFile -> NetflixRed
+                            else -> TextSecondary
+                        },
+                        modifier = Modifier.size(32.dp)
+                    )
+                }
+            }
 
             Spacer(modifier = Modifier.width(12.dp))
 
@@ -494,6 +534,20 @@ fun FancyFileCard(
                         text = fileSize,
                         style = MaterialTheme.typography.labelSmall,
                         color = TextTertiary
+                    )
+                }
+            }
+
+            // Favorite button for video files
+            if (isVideoFile && onFavoriteToggle != null) {
+                IconButton(
+                    onClick = onFavoriteToggle,
+                    modifier = Modifier.size(40.dp)
+                ) {
+                    Icon(
+                        imageVector = if (isFavorite) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
+                        contentDescription = if (isFavorite) "Remove from favorites" else "Add to favorites",
+                        tint = if (isFavorite) NetflixRed else TextSecondary
                     )
                 }
             }
