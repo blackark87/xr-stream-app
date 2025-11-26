@@ -356,10 +356,11 @@ fun ImmersiveVideoPlayer(
     exoPlayer: androidx.media3.exoplayer.ExoPlayer?
 ) {
     var recenterTrigger by remember { mutableStateOf(0) }
-    var entity by remember { mutableStateOf<SurfaceEntity?>(null) }
 
     DisposableEffect(videoFormat, stereoMode, exoPlayer, recenterTrigger) {
         println("XR: Creating Immersive SurfaceEntity for $videoFormat / $stereoMode (recenter: $recenterTrigger)")
+
+        var entity: SurfaceEntity? = null
 
         try {
             val shape = when (videoFormat) {
@@ -380,19 +381,25 @@ fun ImmersiveVideoPlayer(
 
             session.configure(newConfig)
 
-            // Get initial head pose - centered on user's head position
-            val initialPose = session.scene.spatialUser.head?.pose ?: Pose.Identity
+            // Position sphere/hemisphere centered on user's current head position
+            // Use head position for translation, but keep rotation identity so video faces forward
+            val headPosition = session.scene.spatialUser.head?.pose?.translation ?: Vector3(0f, 0f, 0f)
 
-            // Create the SurfaceEntity at the head's current position
+            // Create pose: centered at head position, facing forward (identity rotation)
+            val entityPose = Pose(
+                translation = headPosition,
+                rotation = androidx.xr.runtime.math.Quaternion.Identity  // Face forward
+            )
+
             entity = SurfaceEntity.create(
                 session = session,
                 shape = shape,
                 stereoMode = xrStereoMode,
-                pose = initialPose
+                pose = entityPose
             )
 
-            println("XR: SurfaceEntity created successfully at pose: $initialPose. Attaching to player.")
-            exoPlayer?.setVideoSurface(entity?.getSurface())
+            println("XR: SurfaceEntity created at position: $headPosition, facing forward. Attaching to player.")
+            exoPlayer?.setVideoSurface(entity.getSurface())
 
         } catch (e: Exception) {
             println("XR: Error creating immersive surface: ${e.message}")
@@ -402,25 +409,7 @@ fun ImmersiveVideoPlayer(
         onDispose {
             println("XR: Disposing SurfaceEntity")
             entity?.dispose()
-            entity = null
             exoPlayer?.clearVideoSurface()
-        }
-    }
-
-    // Continuously update entity pose to follow head movement
-    LaunchedEffect(entity) {
-        while (entity != null) {
-            try {
-                val head = session.scene.spatialUser.head
-                if (head != null) {
-                    // Update entity pose to match current head position
-                    // This makes the sphere/hemisphere follow the user
-                    entity?.setPose(head.pose)
-                }
-            } catch (e: Exception) {
-                println("XR: Error updating entity pose: ${e.message}")
-            }
-            kotlinx.coroutines.delay(16) // Update at ~60fps
         }
     }
 
