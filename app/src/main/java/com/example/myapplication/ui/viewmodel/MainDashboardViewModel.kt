@@ -112,6 +112,13 @@ class MainDashboardViewModel(
             )
 
             try {
+                // Clear existing clients before connecting to a new one
+                smbClient?.disconnect()
+                smbClient = null
+                localClient?.disconnect()
+                localClient = null
+                AppState.clear()
+
                 val result = if (server.isLocalStorage) {
                     // Connect to local storage
                     val client = LocalFileClient(context)
