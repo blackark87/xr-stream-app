@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.ui.graphics.Color
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
@@ -225,17 +226,19 @@ fun SpatialVideoPlayerContent(
             }
         }
 
-        // Controls Orbiter
+        // Draggable Controls Panel using SpatialPanel
         if (showControls && !playerState.isLoading && playerState.error == null) {
-            Orbiter(
-                position = ContentEdge.Bottom,
-                offset = 24.dp,
-                alignment = Alignment.CenterHorizontally
+            SpatialPanel(
+                modifier = SubspaceModifier
+                    .width(600.dp)
+                    .height(120.dp)
             ) {
-                // Controls panel
-                Surface(
-                    color = androidx.compose.ui.graphics.Color.Transparent,
-                    modifier = Modifier.width(600.dp) // Fixed width for controls
+                // Controls content in a Box for proper layout
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.7f)),
+                    contentAlignment = Alignment.Center
                 ) {
                     XRPlaybackControls(
                         videoPlayerViewModel = videoPlayerViewModel,
@@ -253,14 +256,14 @@ fun SpatialVideoPlayerContent(
                 offset = 24.dp,
                 alignment = Alignment.CenterHorizontally
             ) {
-                // Transparent button to show controls when clicked "somewhere"
                 Button(
                     onClick = { showControls = true },
-                    colors = ButtonDefaults.buttonColors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
-                    modifier = Modifier
-                        .fillMaxSize()
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary
+                    ),
+                    modifier = Modifier.padding(16.dp)
                 ) {
-                    // Empty content or invisible text
+                    Text("Show Controls")
                 }
             }
         }
@@ -352,8 +355,10 @@ fun ImmersiveVideoPlayer(
     stereoMode: com.example.myapplication.ui.viewmodel.StereoMode,
     exoPlayer: androidx.media3.exoplayer.ExoPlayer?
 ) {
-    DisposableEffect(videoFormat, stereoMode, exoPlayer) {
-        println("XR: Creating Immersive SurfaceEntity for $videoFormat / $stereoMode")
+    var recenterTrigger by remember { mutableStateOf(0) }
+
+    DisposableEffect(videoFormat, stereoMode, exoPlayer, recenterTrigger) {
+        println("XR: Creating Immersive SurfaceEntity for $videoFormat / $stereoMode (recenter: $recenterTrigger)")
 
         var entity: SurfaceEntity? = null
 
@@ -371,22 +376,25 @@ fun ImmersiveVideoPlayer(
             }
 
             val newConfig = session.config.copy(
-                headTracking = Config.HeadTrackingMode.LAST_KNOWN,
+                headTracking = Config.HeadTrackingMode.CONTINUOUS,  // Changed to CONTINUOUS for head following
             )
 
-            session.configure(newConfig);
+            session.configure(newConfig)
 
-            // Create the SurfaceEntity
-            // We use Identity pose in ActivitySpace for now. 
-            // Ideally, we might want to center it on the user's head, but Identity is a safe start.
+            // Create the SurfaceEntity attached to the user's position
+            // Use the user's current head position as the center
+            val headPose = session.scene.spatialUser.head?.pose ?: Pose.Identity
+
             entity = SurfaceEntity.create(
                 session = session,
                 shape = shape,
                 stereoMode = xrStereoMode,
-                pose = session.scene.spatialUser.head?.transformPoseTo(
-                    Pose.Identity,
-                    session.scene.activitySpace
-                )!!,
+                // Attach to user space so it follows head movement
+                pose = Pose(
+                    translation = Vector3(0f, 0f, 0f),  // Center on user
+                    rotation = headPose.rotation  // Use current head rotation for initial alignment
+                ),
+                parent = session.scene.spatialUser  // Attach to user, not activity space
             )
 
             println("XR: SurfaceEntity created successfully. Attaching to player.")
@@ -418,16 +426,20 @@ fun ImmersiveVideoPlayer(
         }
     }
 
-    // Informational text (Orbiter)
+    // Recenter button (Orbiter) - for immersive mode
     Orbiter(
         position = ContentEdge.Bottom,
-        offset = 300.dp,
+        offset = 100.dp,
         alignment = Alignment.CenterHorizontally
     ) {
-        Surface(
-            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.6f),
-            shape = MaterialTheme.shapes.medium
+        Button(
+            onClick = { recenterTrigger++ },
+            colors = ButtonDefaults.buttonColors(
+                containerColor = MaterialTheme.colorScheme.primaryContainer
+            ),
+            modifier = Modifier.padding(16.dp)
         ) {
+            Text("Recenter View")
         }
     }
 }
