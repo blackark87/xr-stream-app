@@ -38,8 +38,7 @@ import kotlin.math.roundToInt
 fun XRPlaybackControls(
     videoPlayerViewModel: VideoPlayerViewModel,
     playerState: VideoPlayerState,
-    onNavigateBack: () -> Unit,
-    onToggleControls: () -> Unit
+    onNavigateBack: () -> Unit
 ) {
     var showSpeedMenu by remember { mutableStateOf(false) }
     var showVolumeSlider by remember { mutableStateOf(false) }
@@ -185,11 +184,8 @@ fun XRPlaybackControls(
                     Text("Format", color = Color.White)
                 }
 
-                // Hide controls
-                TextButton(onClick = onToggleControls) {
-                    Text("Hide", color = Color.White)
-                }
             }
+
 
             // Speed menu
             if (showSpeedMenu) {

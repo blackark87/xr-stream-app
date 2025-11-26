@@ -5,6 +5,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.navigation.compose.rememberNavController
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import com.example.myapplication.ui.navigation.AppNavigation
 import com.example.myapplication.ui.theme.MyApplicationTheme
 
@@ -16,6 +18,29 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             MyApplicationTheme {
+                val context = androidx.compose.ui.platform.LocalContext.current
+                var hasHeadTrackingPermission by androidx.compose.runtime.remember {
+                    androidx.compose.runtime.mutableStateOf(
+                        androidx.core.content.ContextCompat.checkSelfPermission(
+                            context,
+                            "android.permission.HEAD_TRACKING"
+                        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                    )
+                }
+
+                val launcher = androidx.activity.compose.rememberLauncherForActivityResult(
+                    contract = androidx.activity.result.contract.ActivityResultContracts.RequestPermission(),
+                    onResult = { isGranted ->
+                        hasHeadTrackingPermission = isGranted
+                    }
+                )
+
+                androidx.compose.runtime.LaunchedEffect(Unit) {
+                    if (!hasHeadTrackingPermission) {
+                        launcher.launch("android.permission.HEAD_TRACKING")
+                    }
+                }
+
                 val navController = rememberNavController()
                 AppNavigation(
                     navController = navController,
@@ -23,5 +48,11 @@ class MainActivity : ComponentActivity() {
                 )
             }
         }
+    }
+    override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
+        if (event.action == android.view.KeyEvent.ACTION_DOWN) {
+            com.example.myapplication.AppState.keyEvents.tryEmit(event)
+        }
+        return super.dispatchKeyEvent(event)
     }
 }

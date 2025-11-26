@@ -154,8 +154,12 @@ fun SpatialVideoPlayerContent(
     var showControls by remember { mutableStateOf(true) }  // Start with controls visible
 
     // Auto-hide controls after 5 seconds
-    // Auto-hide controls logic removed as per user request
-    // Controls will remain visible until explicitly hidden
+    LaunchedEffect(showControls) {
+        if (showControls) {
+            kotlinx.coroutines.delay(5000)
+            showControls = false
+        }
+    }
 
 
 // ...
@@ -197,8 +201,7 @@ fun SpatialVideoPlayerContent(
                     XRPlaybackControls(
                         videoPlayerViewModel = videoPlayerViewModel,
                         playerState = playerState,
-                        onNavigateBack = onNavigateBack,
-                        onToggleControls = { showControls = !showControls }
+                        onNavigateBack = onNavigateBack
                     )
                 }
             }
@@ -216,8 +219,7 @@ fun SpatialVideoPlayerContent(
                     onClick = { showControls = true },
                     colors = ButtonDefaults.buttonColors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
                     modifier = Modifier
-                        .width(200.dp) // Make it wide enough to be easily clickable
-                        .height(100.dp)
+                        .fillMaxSize()
                 ) {
                     // Empty content or invisible text
                 }
@@ -360,6 +362,20 @@ fun ImmersiveVideoPlayer(
             println("XR: Disposing SurfaceEntity")
             entity?.dispose()
             exoPlayer?.clearVideoSurface()
+        }
+    }
+
+    // Log head pose for verification
+    LaunchedEffect(session) {
+        while (true) {
+            val head = session.scene.spatialUser.head
+            if (head != null) {
+                val pose = head.transformPoseTo(Pose.Identity, session.scene.activitySpace)
+                println("XR: Head Pose: $pose")
+            } else {
+                println("XR: Head Pose is null")
+            }
+            kotlinx.coroutines.delay(1000)
         }
     }
 

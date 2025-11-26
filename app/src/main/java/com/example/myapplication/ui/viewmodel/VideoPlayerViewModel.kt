@@ -112,6 +112,42 @@ class VideoPlayerViewModel(
         _state.value = _state.value.copy(stereoMode = mode)
     }
 
+    init {
+        // Observe global key events for controller input
+        viewModelScope.launch {
+            com.example.myapplication.AppState.keyEvents.collect { event ->
+                handleKeyEvent(event)
+            }
+        }
+    }
+
+    private fun handleKeyEvent(event: android.view.KeyEvent) {
+        when (event.keyCode) {
+            android.view.KeyEvent.KEYCODE_BUTTON_A,
+            android.view.KeyEvent.KEYCODE_DPAD_CENTER,
+            android.view.KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
+            android.view.KeyEvent.KEYCODE_SPACE -> {
+                togglePlayPause()
+            }
+            android.view.KeyEvent.KEYCODE_DPAD_LEFT -> {
+                seekBackward()
+            }
+            android.view.KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                seekForward()
+            }
+            android.view.KeyEvent.KEYCODE_BUTTON_Y -> {
+                // Cycle stereo mode: Mono -> SBS -> TB -> Mono
+                val currentMode = _state.value.stereoMode
+                val nextMode = when (currentMode) {
+                    StereoMode.Mono -> StereoMode.SideBySide
+                    StereoMode.SideBySide -> StereoMode.TopBottom
+                    StereoMode.TopBottom -> StereoMode.Mono
+                }
+                setStereoMode(nextMode)
+            }
+        }
+    }
+
     fun initializePlayer(
         context: Context,
         smbConfig: SMBConfig,
@@ -386,6 +422,22 @@ class VideoPlayerViewModel(
     fun setVolume(volume: Float) {
         exoPlayer?.volume = volume.coerceIn(0f, 1f)
         _state.value = _state.value.copy(volume = volume)
+    }
+
+    fun togglePlayPause() {
+        if (_state.value.isPlaying) {
+            pause()
+        } else {
+            play()
+        }
+    }
+
+    fun seekForward() {
+        skipForward()
+    }
+
+    fun seekBackward() {
+        skipBackward()
     }
 
     fun skipForward(ms: Long = 10000) {
