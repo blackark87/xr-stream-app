@@ -25,12 +25,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.xr.compose.platform.LocalSession
 import androidx.xr.compose.spatial.ContentEdge
 import androidx.xr.compose.spatial.Orbiter
 import androidx.xr.compose.spatial.Subspace
 import androidx.xr.compose.subspace.SpatialBox
+import androidx.xr.compose.subspace.SpatialPanel
 import androidx.xr.compose.subspace.SpatialExternalSurface
 import androidx.xr.compose.subspace.StereoMode
 import androidx.xr.compose.subspace.layout.SpatialAlignment
@@ -152,6 +154,7 @@ fun SpatialVideoPlayerContent(
     println("XR: SpatialVideoPlayerContent composed. Format: ${playerState.videoFormat}")
     val exoPlayer by videoPlayerViewModel.playerFlow.collectAsState()
     var showControls by remember { mutableStateOf(true) }  // Start with controls visible
+    val session = LocalSession.current
 
     // Auto-hide controls after 5 seconds
     LaunchedEffect(showControls) {
@@ -165,24 +168,60 @@ fun SpatialVideoPlayerContent(
 // ...
 
     Subspace {
-        // Use SpatialColumn to stack Video
-        androidx.xr.compose.subspace.SpatialColumn(
-            modifier = SubspaceModifier.fillMaxSize(),
-            alignment = SpatialAlignment.Center
-        ) {
-            // Video Player Container (16:9)
-            SpatialBox(
-                modifier = SubspaceModifier
-                    .width(1280.dp)
-                    .height(720.dp)
+        // For 2D mode: Use head-locked Orbiter that follows user's gaze
+        // This allows the screen to always be in front of the user
+        if (playerState.videoFormat == com.example.myapplication.ui.viewmodel.VideoFormat.Format2D) {
+            // Head-locked video player using Orbiter
+            // Position at center with comfortable viewing distance
+            Orbiter(
+                position = ContentEdge.Center,
+                offset = 0.dp,
+                alignment = Alignment.Center
             ) {
-                // Video player logic based on format
-                SpatialVideoPlayer(
-                    videoFormat = playerState.videoFormat,
-                    stereoMode = playerState.stereoMode,
-                    exoPlayer = exoPlayer,
-                    modifier = SubspaceModifier.fillMaxSize()
-                )
+                Surface(
+                    modifier = Modifier
+                        .width(1200.dp)
+                        .height(675.dp),
+                    color = androidx.compose.ui.graphics.Color.Black,
+                    shape = MaterialTheme.shapes.medium
+                ) {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        // Render video using AndroidView for Orbiter compatibility
+                        if (exoPlayer != null) {
+                            AndroidView(
+                                factory = { context ->
+                                    android.view.SurfaceView(context).apply {
+                                        exoPlayer.setVideoSurfaceView(this)
+                                    }
+                                },
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        }
+                    }
+                }
+            }
+        } else {
+            // For immersive modes (180/360), use SpatialBox as it shouldn't be movable
+            androidx.xr.compose.subspace.SpatialColumn(
+                modifier = SubspaceModifier.fillMaxSize(),
+                alignment = SpatialAlignment.Center
+            ) {
+                SpatialBox(
+                    modifier = SubspaceModifier
+                        .width(1280.dp)
+                        .height(720.dp)
+                ) {
+                    // Video player logic based on format
+                    SpatialVideoPlayer(
+                        videoFormat = playerState.videoFormat,
+                        stereoMode = playerState.stereoMode,
+                        exoPlayer = exoPlayer,
+                        modifier = SubspaceModifier.fillMaxSize()
+                    )
+                }
             }
         }
 
