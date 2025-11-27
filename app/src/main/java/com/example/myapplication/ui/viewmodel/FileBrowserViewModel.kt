@@ -16,7 +16,8 @@ data class FileBrowserState(
     val pathHistory: List<String> = emptyList(),
     val error: String? = null,
     val selectedFile: SMBFileItem? = null,
-    val canGoBack: Boolean = false
+    val canGoBack: Boolean = false,
+    val showVideosOnly: Boolean = true
 )
 
 class FileBrowserViewModel : ViewModel() {
@@ -132,6 +133,19 @@ class FileBrowserViewModel : ViewModel() {
     fun getVideoFiles(): List<SMBFileItem> {
         return _state.value.files.filter {
             !it.isDirectory && SMBClient.isVideoFile(it.name)
+        }
+    }
+
+    fun toggleVideoFilter() {
+        _state.value = _state.value.copy(showVideosOnly = !_state.value.showVideosOnly)
+    }
+
+    fun getFilteredFiles(): List<SMBFileItem> {
+        return if (_state.value.showVideosOnly) {
+            // When filter is on, show directories (for navigation) and video files only
+            _state.value.files.filter { it.isDirectory || SMBClient.isVideoFile(it.name) }
+        } else {
+            _state.value.files
         }
     }
 }
