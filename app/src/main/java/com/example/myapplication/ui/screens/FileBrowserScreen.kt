@@ -11,11 +11,17 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -30,6 +36,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.myapplication.network.SMBClient
 import com.example.myapplication.network.SMBFileItem
+import com.example.myapplication.ui.components.FancyFileCard
 import com.example.myapplication.ui.viewmodel.FileBrowserViewModel
 
 @Composable
@@ -74,20 +81,51 @@ fun FileBrowserScreen(
                     style = MaterialTheme.typography.headlineSmall
                 )
 
-                if (state.canGoBack) {
-                    IconButton(onClick = { fileBrowserViewModel.navigateBack() }) {
-                        Text("⬅", style = MaterialTheme.typography.titleLarge)
-                    }
-                }
-
-                TextButton(
-                    onClick = {
-                        com.example.myapplication.AppState.clear()
-                        onNavigateBack()
-                    }
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Disconnect")
+                    if (state.canGoBack) {
+                        IconButton(onClick = { fileBrowserViewModel.navigateBack() }) {
+                            Text("⬅", style = MaterialTheme.typography.titleLarge)
+                        }
+                    }
+
+                    TextButton(
+                        onClick = {
+                            com.example.myapplication.AppState.clear()
+                            onNavigateBack()
+                        }
+                    ) {
+                        Text("Disconnect")
+                    }
                 }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Filter chip
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                FilterChip(
+                    selected = state.showVideosOnly,
+                    onClick = { fileBrowserViewModel.toggleVideoFilter() },
+                    label = { Text("Videos Only") },
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Filled.FilterList,
+                            contentDescription = "Filter",
+                            modifier = Modifier.size(18.dp)
+                        )
+                    },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                        selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                )
             }
 
             Spacer(modifier = Modifier.height(8.dp))
@@ -99,8 +137,11 @@ fun FileBrowserScreen(
                 modifier = Modifier.padding(bottom = 16.dp)
             )
 
+            // Get filtered files
+            val filteredFiles = fileBrowserViewModel.getFilteredFiles()
+
             // File list
-            if (state.files.isEmpty() && !state.isLoading) {
+            if (filteredFiles.isEmpty() && !state.isLoading) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -108,7 +149,7 @@ fun FileBrowserScreen(
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        text = "No files found",
+                        text = if (state.showVideosOnly) "No video files found" else "No files found",
                         style = MaterialTheme.typography.bodyLarge
                     )
                 }
@@ -117,9 +158,14 @@ fun FileBrowserScreen(
                     modifier = Modifier.weight(1f),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    items(state.files) { file ->
-                        FileItemCard(
-                            file = file,
+                    items(filteredFiles) { file ->
+                        val isVideo = SMBClient.isVideoFile(file.name)
+                        FancyFileCard(
+                            fileName = file.name,
+                            isDirectory = file.isDirectory,
+                            isVideoFile = isVideo,
+                            fileSize = if (!file.isDirectory) formatFileSize(file.size) else null,
+                            videoPath = if (isVideo) file.path else null,
                             onClick = {
                                 if (file.isDirectory) {
                                     fileBrowserViewModel.navigateToDirectory(file)
@@ -146,71 +192,6 @@ fun FileBrowserScreen(
         if (state.isLoading) {
             CircularProgressIndicator(
                 modifier = Modifier.align(Alignment.Center)
-            )
-        }
-    }
-}
-
-@Composable
-fun FileItemCard(
-    file: SMBFileItem,
-    onClick: () -> Unit
-) {
-    val isVideo = SMBClient.isVideoFile(file.name)
-
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick),
-        colors = if (isVideo) {
-            CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.primaryContainer
-            )
-        } else {
-            CardDefaults.cardColors()
-        }
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = file.name,
-                    style = MaterialTheme.typography.titleMedium
-                )
-
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    Text(
-                        text = if (file.isDirectory) "Folder" else "File",
-                        style = MaterialTheme.typography.bodySmall
-                    )
-
-                    if (!file.isDirectory) {
-                        Text(
-                            text = formatFileSize(file.size),
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                    }
-
-                    if (isVideo) {
-                        Text(
-                            text = "Video",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                    }
-                }
-            }
-
-            Text(
-                text = if (file.isDirectory) "→" else "",
-                style = MaterialTheme.typography.headlineSmall
             )
         }
     }
