@@ -37,7 +37,9 @@ data class VideoPlayerState(
     val videoFile: SMBFileItem? = null,
     val videoFormat: VideoFormat = VideoFormat.Format2D,
     val stereoMode: StereoMode = StereoMode.Mono,
-    val zoomLevel: Float = 1.0f
+    val zoomLevel: Float = 1.0f,
+    val playlist: List<SMBFileItem> = emptyList(),
+    val currentPlaylistIndex: Int = -1
 )
 
 enum class VideoFormat {
@@ -66,6 +68,10 @@ class VideoPlayerViewModel(
     private var exoPlayer: ExoPlayer? = null
     private var currentVideoId: Long? = null
     private var pendingSaveJob: Job? = null
+    
+    // Store context and config for playlist navigation
+    private var appContext: Context? = null
+    private var currentSmbConfig: SMBConfig? = null
 
     /**
      * Detect if video is SBS/stereo based on filename patterns
@@ -166,6 +172,12 @@ class VideoPlayerViewModel(
             android.view.KeyEvent.KEYCODE_DPAD_RIGHT -> {
                 seekForward()
             }
+            android.view.KeyEvent.KEYCODE_BUTTON_L1 -> {
+                playPreviousVideo()
+            }
+            android.view.KeyEvent.KEYCODE_BUTTON_R1 -> {
+                playNextVideo()
+            }
             android.view.KeyEvent.KEYCODE_BUTTON_Y -> {
                 // Cycle stereo mode: Mono -> SBS -> TB -> Mono
                 val currentMode = _state.value.stereoMode
@@ -191,6 +203,9 @@ class VideoPlayerViewModel(
         videoFile: SMBFileItem
     ) {
         Log.d("VideoPlayerViewModel", "initializePlayer called for ${videoFile.name}")
+        
+        this.appContext = context.applicationContext
+        this.currentSmbConfig = smbConfig
 
         viewModelScope.launch {
             try {
@@ -407,6 +422,82 @@ class VideoPlayerViewModel(
                     isLoading = false,
                     error = e.message ?: "Failed to initialize player"
                 )
+            }
+        }
+
+        // Fetch playlist if empty
+        if (_state.value.playlist.isEmpty()) {
+            fetchPlaylist(videoFile, smbConfig)
+        }
+    }
+
+    private fun fetchPlaylist(currentFile: SMBFileItem, smbConfig: SMBConfig) {
+        viewModelScope.launch {
+            try {
+                // Get parent path
+                val parentPath = currentFile.path.substringBeforeLast('/', "")
+                val relativeParentPath = parentPath.replace("smb://${smbConfig.serverAddress}:${smbConfig.port}/${smbConfig.shareName}/", "")
+                                                   .removePrefix("/")
+
+                Log.d("VideoPlayerViewModel", "Fetching playlist for path: $relativeParentPath")
+
+                // Use SMBClient to list files
+                val client = com.example.myapplication.network.SMBClient(smbConfig)
+                val connectResult = client.connect()
+                if (connectResult.isSuccess) {
+                    val listResult = client.listFiles(relativeParentPath)
+                    if (listResult.isSuccess) {
+                        val allFiles = listResult.getOrNull() ?: emptyList()
+                        // Filter for video files and sort
+                        val videoExtensions = listOf("mp4", "mkv", "avi", "mov", "wmv", "flv", "webm")
+                        val videoFiles = allFiles.filter { file ->
+                            !file.isDirectory && videoExtensions.any { ext -> file.name.endsWith(ext, ignoreCase = true) }
+                        }.sortedBy { it.name.lowercase() }
+
+                        val currentIndex = videoFiles.indexOfFirst { it.path == currentFile.path }
+
+                        _state.value = _state.value.copy(
+                            playlist = videoFiles,
+                            currentPlaylistIndex = currentIndex
+                        )
+                        Log.d("VideoPlayerViewModel", "Playlist fetched: ${videoFiles.size} videos, current index: $currentIndex")
+                    }
+                    client.disconnect()
+                }
+            } catch (e: Exception) {
+                Log.e("VideoPlayerViewModel", "Failed to fetch playlist: ${e.message}")
+            }
+        }
+    }
+
+    fun playNextVideo() {
+        val state = _state.value
+        if (state.playlist.isNotEmpty() && state.currentPlaylistIndex < state.playlist.size - 1) {
+            val nextIndex = state.currentPlaylistIndex + 1
+            val nextFile = state.playlist[nextIndex]
+            
+            appContext?.let { ctx ->
+                currentSmbConfig?.let { config ->
+                    // Update index immediately to prevent double clicks
+                    _state.value = _state.value.copy(currentPlaylistIndex = nextIndex)
+                    initializePlayer(ctx, config, nextFile)
+                }
+            }
+        }
+    }
+
+    fun playPreviousVideo() {
+        val state = _state.value
+        if (state.playlist.isNotEmpty() && state.currentPlaylistIndex > 0) {
+            val prevIndex = state.currentPlaylistIndex - 1
+            val prevFile = state.playlist[prevIndex]
+            
+            appContext?.let { ctx ->
+                currentSmbConfig?.let { config ->
+                    // Update index immediately
+                    _state.value = _state.value.copy(currentPlaylistIndex = prevIndex)
+                    initializePlayer(ctx, config, prevFile)
+                }
             }
         }
     }

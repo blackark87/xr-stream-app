@@ -163,6 +163,20 @@ fun XRPlaybackControls(
                 horizontalArrangement = Arrangement.Center,
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                // Previous Video
+                IconButton(
+                    onClick = { videoPlayerViewModel.playPreviousVideo() },
+                    modifier = Modifier.size(56.dp)
+                ) {
+                    Text(
+                        text = "⏮",
+                        style = MaterialTheme.typography.headlineMedium,
+                        color = Color.White
+                    )
+                }
+
+                Spacer(modifier = Modifier.width(16.dp))
+
                 // Rewind button
                 IconButton(
                     onClick = { videoPlayerViewModel.skipBackward() },
@@ -212,6 +226,20 @@ fun XRPlaybackControls(
                 ) {
                     Text(
                         text = "⏩",
+                        style = MaterialTheme.typography.headlineMedium,
+                        color = Color.White
+                    )
+                }
+
+                Spacer(modifier = Modifier.width(16.dp))
+
+                // Next Video
+                IconButton(
+                    onClick = { videoPlayerViewModel.playNextVideo() },
+                    modifier = Modifier.size(56.dp)
+                ) {
+                    Text(
+                        text = "⏭",
                         style = MaterialTheme.typography.headlineMedium,
                         color = Color.White
                     )

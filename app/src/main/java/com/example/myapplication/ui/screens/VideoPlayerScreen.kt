@@ -11,6 +11,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.ui.graphics.Color
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -47,12 +49,10 @@ import androidx.xr.scenecore.SurfaceEntity
 import androidx.xr.runtime.math.FloatSize2d
 import androidx.xr.runtime.math.Pose
 import androidx.xr.scenecore.scene
-import androidx.xr.scenecore.InteractableComponent
-import androidx.xr.scenecore.InputEvent
-import java.util.concurrent.Executor
 import androidx.compose.ui.draw.scale
+import androidx.xr.compose.subspace.layout.offset
 import androidx.xr.compose.subspace.layout.scale
-import androidx.xr.scenecore.runtime.InputEventListener
+import androidx.xr.runtime.math.Vector3
 
 import com.example.myapplication.data.database.AppDatabase
 import com.example.myapplication.data.repository.VideoRepository
@@ -114,7 +114,7 @@ fun VideoPlayerScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(androidx.compose.ui.graphics.Color.Black)
+            .background(if (hasXrFeature) androidx.compose.ui.graphics.Color.Transparent else androidx.compose.ui.graphics.Color.Black)
     ) {
         if (hasXrFeature) {
             // XR device detected - render spatial video content
@@ -167,123 +167,103 @@ fun SpatialVideoPlayerContent(
     // Auto-hide controls after 5 seconds
     LaunchedEffect(showControls) {
         if (showControls) {
-            kotlinx.coroutines.delay(5000)
+            kotlinx.coroutines.delay(10000)
             showControls = false
         }
     }
 
-    // Listen for A button to toggle controls
+    // Listen for A button or Trigger to toggle controls
     LaunchedEffect(Unit) {
         com.example.myapplication.AppState.keyEvents.collect { event ->
-            if (event.keyCode == android.view.KeyEvent.KEYCODE_BUTTON_A && event.action == android.view.KeyEvent.ACTION_UP) {
-                showControls = !showControls
+            if (event.action == android.view.KeyEvent.ACTION_UP) {
+                when (event.keyCode) {
+                    android.view.KeyEvent.KEYCODE_BUTTON_A,
+                    android.view.KeyEvent.KEYCODE_DPAD_CENTER,
+                    android.view.KeyEvent.KEYCODE_ENTER,
+                    android.view.KeyEvent.KEYCODE_BUTTON_R2 -> {
+                        showControls = !showControls
+                    }
+                }
             }
         }
     }
 
-
-// ...
-
     Subspace {
-        // For 2D mode: Use head-locked Orbiter that follows user's gaze
-        // This allows the screen to always be in front of the user
-        if (playerState.videoFormat == com.example.myapplication.ui.viewmodel.VideoFormat.Format2D) {
-            // Head-locked video player using Orbiter
-            // Position at center with comfortable viewing distance
-            Orbiter(
-                position = ContentEdge.Center,
-                offset = 0.dp,
-                alignment = Alignment.Center
-            ) {
-                Surface(
-                    modifier = Modifier
-                        .width(1200.dp)
-                        .height(675.dp),
-                    color = androidx.compose.ui.graphics.Color.Black,
-                    shape = MaterialTheme.shapes.medium
+        SpatialBox(modifier = SubspaceModifier.fillMaxSize()) {
+            // For 2D mode: Use SpatialExternalSurface which is designed for XR video rendering
+            if (playerState.videoFormat == com.example.myapplication.ui.viewmodel.VideoFormat.Format2D) {
+                // Render 2D video using the spatial video player
+                // Wrap in SpatialColumn to center it
+                androidx.xr.compose.subspace.SpatialColumn(
+                    modifier = SubspaceModifier.fillMaxSize(),
+                    alignment = SpatialAlignment.Center
                 ) {
-                    Box(
-                        modifier = Modifier.fillMaxSize(),
-                        contentAlignment = Alignment.Center
+                    SpatialVideoPlayer(
+                        videoFormat = playerState.videoFormat,
+                        stereoMode = playerState.stereoMode,
+                        zoomLevel = playerState.zoomLevel,
+                        exoPlayer = exoPlayer,
+                        onToggleControls = { showControls = !showControls },
+                        modifier = SubspaceModifier
+                            .width(1280.dp)
+                            .height(720.dp)
+                    )
+                }
+            } else {
+                // For immersive modes (180/360), use SpatialBox as it shouldn't be movable
+                androidx.xr.compose.subspace.SpatialColumn(
+                    modifier = SubspaceModifier.fillMaxSize(),
+                    alignment = SpatialAlignment.Center
+                ) {
+                    SpatialBox(
+                        modifier = SubspaceModifier
+                            .width(1280.dp)
+                            .height(720.dp)
                     ) {
-                        // Render video using AndroidView for Orbiter compatibility
-                        if (exoPlayer != null) {
-                            AndroidView(
-                                factory = { context ->
-                                    android.view.SurfaceView(context).apply {
-                                        exoPlayer.setVideoSurfaceView(this)
-                                    }
-                                },
-                                modifier = Modifier.fillMaxSize()
+                        // Video player logic based on format
+                        SpatialVideoPlayer(
+                            videoFormat = playerState.videoFormat,
+                            stereoMode = playerState.stereoMode,
+                            zoomLevel = playerState.zoomLevel,
+                            exoPlayer = exoPlayer,
+                            onToggleControls = { showControls = !showControls },
+                            modifier = SubspaceModifier.fillMaxSize()
+                        )
+                    }
+                }
+            }
+
+            // Controls Panel positioned at center
+            // Placed after video to ensure it's on top (Z-order)
+            // Added Z-offset to bring it closer to the user and ensure it captures clicks
+            if (showControls && !playerState.isLoading && playerState.error == null) {
+                androidx.xr.compose.subspace.SpatialColumn(
+                    modifier = SubspaceModifier.fillMaxSize(),
+                    alignment = SpatialAlignment.Center
+                ) {
+                    SpatialPanel(
+                        modifier = SubspaceModifier
+                            .width(600.dp)
+                            .height(640.dp)
+                            .offset(z = 100.dp) // Bring controls forward
+                    ) {
+                        // XRPlaybackControls has its own background
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(androidx.compose.ui.graphics.Color.Transparent),
+                            contentAlignment = Alignment.BottomCenter
+                        ) {
+                            XRPlaybackControls(
+                                videoPlayerViewModel = videoPlayerViewModel,
+                                playerState = playerState,
+                                onNavigateBack = onNavigateBack
                             )
                         }
                     }
                 }
             }
-        } else {
-            // For immersive modes (180/360), use SpatialBox as it shouldn't be movable
-            androidx.xr.compose.subspace.SpatialColumn(
-                modifier = SubspaceModifier.fillMaxSize(),
-                alignment = SpatialAlignment.Center
-            ) {
-                SpatialBox(
-                    modifier = SubspaceModifier
-                        .width(1280.dp)
-                        .height(720.dp)
-                ) {
-                    // Video player logic based on format
-                    SpatialVideoPlayer(
-                        videoFormat = playerState.videoFormat,
-                        stereoMode = playerState.stereoMode,
-                        exoPlayer = exoPlayer,
-                        modifier = SubspaceModifier.fillMaxSize()
-                    )
-                }
-            }
         }
-
-        // Draggable Controls Panel using SpatialPanel
-        if (showControls && !playerState.isLoading && playerState.error == null) {
-            SpatialPanel(
-                modifier = SubspaceModifier
-                    .width(600.dp)
-                    .height(120.dp)
-            ) {
-                // Controls content in a Box for proper layout
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(Color.Black.copy(alpha = 0.7f)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    XRPlaybackControls(
-                        videoPlayerViewModel = videoPlayerViewModel,
-                        playerState = playerState,
-                        onNavigateBack = onNavigateBack
-                    )
-                }
-            }
-        }
-
-        // Show Controls Button (Orbiter) - Visible when controls are hidden
-        if (!showControls && !playerState.isLoading && playerState.error == null) {
-            Orbiter(
-                position = ContentEdge.Bottom,
-                offset = 24.dp,
-                alignment = Alignment.CenterHorizontally
-            ) {
-                Button(
-                    onClick = { showControls = true },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.primary
-                    ),
-                    modifier = Modifier.padding(16.dp)
-                ) {
-                    Text("Show Controls")
-                }
-            }
-        }
-
     }
 }
 
@@ -302,6 +282,7 @@ fun SpatialVideoPlayer(
             isStereo = stereoMode != com.example.myapplication.ui.viewmodel.StereoMode.Mono,
             zoomLevel = zoomLevel,
             exoPlayer = exoPlayer,
+            onToggleControls = onToggleControls,
             modifier = modifier
         )
     } else {
@@ -313,8 +294,7 @@ fun SpatialVideoPlayer(
                 videoFormat = videoFormat,
                 stereoMode = stereoMode,
                 zoomLevel = zoomLevel,
-                exoPlayer = exoPlayer,
-                onToggleControls = onToggleControls
+                exoPlayer = exoPlayer
             )
         } else {
             // Fallback if no session (shouldn't happen in XR)
@@ -342,31 +322,46 @@ fun VideoPlayerOrbiter(
     isStereo: Boolean,
     zoomLevel: Float,
     exoPlayer: androidx.media3.exoplayer.ExoPlayer?,
+    onToggleControls: () -> Unit,
     modifier: SubspaceModifier = SubspaceModifier
 ) {
-    println("XR: VideoPlayerSurface composed. isStereo: $isStereo, Player: ${exoPlayer?.hashCode()}")
+    println("XR: VideoPlayerOrbiter composed. Player: ${exoPlayer?.hashCode()}")
 
-    // Only create surface when player is ready
-    if (exoPlayer != null) {
-        // Use SpatialExternalSurface - the official XR API for video rendering
-        SpatialExternalSurface(
-            stereoMode = if (isStereo) StereoMode.SideBySide else StereoMode.Mono,
-            modifier = modifier.scale(zoomLevel)
-        ) {
-            // onSurfaceCreated is called when the Surface is ready
-            onSurfaceCreated { surface ->
-                println("XR: SpatialExternalSurface created, attaching to ExoPlayer")
-                exoPlayer.setVideoSurface(surface)
+    // Wrap in SpatialBox to allow layering the click overlay on top of the video
+    SpatialBox(modifier = modifier.scale(zoomLevel)) {
+        // 1. The Video Surface (Layer 0)
+        if (exoPlayer != null) {
+            SpatialExternalSurface(
+                stereoMode = if (isStereo) StereoMode.SideBySide else StereoMode.Mono,
+                modifier = SubspaceModifier.fillMaxSize()
+            ) {
+                onSurfaceCreated { surface ->
+                    println("XR: SpatialExternalSurface created, attaching to ExoPlayer")
+                    exoPlayer.setVideoSurface(surface)
+                }
+                onSurfaceDestroyed {
+                    println("XR: SpatialExternalSurface destroyed, clearing ExoPlayer surface")
+                    exoPlayer.clearVideoSurface()
+                }
             }
-
-            // onSurfaceDestroyed is called when the Surface is destroyed
-            onSurfaceDestroyed {
-                println("XR: SpatialExternalSurface destroyed, clearing ExoPlayer surface")
-                exoPlayer.clearVideoSurface()
-            }
+        } else {
+            println("XR: Waiting for ExoPlayer to be ready...")
         }
-    } else {
-        println("XR: Waiting for ExoPlayer to be ready...")
+
+        // 2. Click Overlay (Layer 1)
+        // Transparent panel to capture clicks
+        // Use a very low alpha instead of Transparent to ensure hit-testing works
+        SpatialPanel(modifier = SubspaceModifier.fillMaxSize()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.White.copy(alpha = 0.01f))
+                    .clickable {
+                        println("XR: Video overlay clicked! Toggling controls.")
+                        onToggleControls()
+                    }
+            )
+        }
     }
 }
 
@@ -376,8 +371,7 @@ fun ImmersiveVideoPlayer(
     videoFormat: com.example.myapplication.ui.viewmodel.VideoFormat,
     stereoMode: com.example.myapplication.ui.viewmodel.StereoMode,
     zoomLevel: Float,
-    exoPlayer: androidx.media3.exoplayer.ExoPlayer?,
-    onToggleControls: () -> Unit
+    exoPlayer: androidx.media3.exoplayer.ExoPlayer?
 ) {
     var recenterTrigger by remember { mutableStateOf(0) }
 
@@ -408,7 +402,8 @@ fun ImmersiveVideoPlayer(
 
             // Position sphere/hemisphere centered on user's current head position
             // Use head position for translation, but keep rotation identity so video faces forward
-            val headPosition = session.scene.spatialUser.head?.pose?.translation ?: Vector3(0f, 0f, 0f)
+            // TODO: Fix head pose retrieval. Currently defaulting to session origin (0,0,0).
+            val headPosition = Vector3(0f, 0f, 0f)
 
             // Create pose: centered at head position, facing forward (identity rotation)
             val entityPose = Pose(
