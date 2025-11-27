@@ -28,16 +28,45 @@ class MainActivity : ComponentActivity() {
                     )
                 }
 
-                val launcher = androidx.activity.compose.rememberLauncherForActivityResult(
+                var hasStoragePermission by androidx.compose.runtime.remember {
+                    val permission = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                        "android.permission.READ_MEDIA_VIDEO"
+                    } else {
+                        "android.permission.READ_EXTERNAL_STORAGE"
+                    }
+                    androidx.compose.runtime.mutableStateOf(
+                        androidx.core.content.ContextCompat.checkSelfPermission(
+                            context,
+                            permission
+                        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                    )
+                }
+
+                val headTrackingLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
                     contract = androidx.activity.result.contract.ActivityResultContracts.RequestPermission(),
                     onResult = { isGranted ->
                         hasHeadTrackingPermission = isGranted
                     }
                 )
 
+                val storageLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+                    contract = androidx.activity.result.contract.ActivityResultContracts.RequestPermission(),
+                    onResult = { isGranted ->
+                        hasStoragePermission = isGranted
+                    }
+                )
+
                 androidx.compose.runtime.LaunchedEffect(Unit) {
                     if (!hasHeadTrackingPermission) {
-                        launcher.launch("android.permission.HEAD_TRACKING")
+                        headTrackingLauncher.launch("android.permission.HEAD_TRACKING")
+                    }
+                    if (!hasStoragePermission) {
+                        val permission = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                            "android.permission.READ_MEDIA_VIDEO"
+                        } else {
+                            "android.permission.READ_EXTERNAL_STORAGE"
+                        }
+                        storageLauncher.launch(permission)
                     }
                 }
 

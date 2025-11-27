@@ -50,4 +50,10 @@ interface VideoDao {
 
     @Query("UPDATE recent_videos SET isFavorite = :isFavorite WHERE filePath = :filePath")
     suspend fun updateFavoriteStatusByPath(filePath: String, isFavorite: Boolean)
+
+    @Query("UPDATE recent_videos SET videoFormat = :format WHERE id = :videoId")
+    suspend fun updateVideoFormat(videoId: Long, format: String)
+
+    @Query("UPDATE recent_videos SET stereoMode = :mode WHERE id = :videoId")
+    suspend fun updateStereoMode(videoId: Long, mode: String)
 }
