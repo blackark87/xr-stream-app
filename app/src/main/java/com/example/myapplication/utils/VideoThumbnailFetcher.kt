@@ -77,17 +77,61 @@ class VideoThumbnailFetcher(
     }
 
     private fun extractSMBThumbnail(smbUrl: String): FetchResult? {
-        // For SMB files, we need to use a different approach
-        // MediaMetadataRetriever doesn't support SMB URLs directly
-        // We could either:
-        // 1. Download first few MB and extract frame (complex)
-        // 2. Return a placeholder for now
-        // 3. Cache thumbnails separately
+        var tempFile: java.io.File? = null
+        val retriever = MediaMetadataRetriever()
+        
+        return try {
+            // Create temp file
+            tempFile = java.io.File.createTempFile("smb_thumb_", ".mp4", options.context.cacheDir)
+            
+            // Download header (first 10MB)
+            val smbFile = com.example.myapplication.AppState.smbClient?.getSmbFile(smbUrl) ?: return null
+            smbFile.inputStream.use { input: java.io.InputStream ->
+                tempFile.outputStream().use { output ->
+                    val buffer = ByteArray(8192)
+                    var totalBytes = 0L
+                    val maxBytes = 10 * 1024 * 1024L // 10MB limit
+                    
+                    var bytesRead = input.read(buffer)
+                    while (bytesRead != -1 && totalBytes < maxBytes) {
+                        output.write(buffer, 0, bytesRead)
+                        totalBytes += bytesRead
+                        bytesRead = input.read(buffer)
+                    }
+                }
+            }
 
-        // For now, return null to use placeholder
-        // TODO: Implement SMB thumbnail extraction if needed
-        Log.d("VideoThumbnailFetcher", "SMB thumbnail extraction not yet implemented for: $smbUrl")
-        return null
+            // Extract frame from temp file
+            retriever.setDataSource(tempFile.absolutePath)
+            val bitmap = retriever.getFrameAtTime(0, MediaMetadataRetriever.OPTION_CLOSEST_SYNC) 
+                ?: return null
+
+            // Convert to Coil result
+            val buffer = Buffer()
+            bitmap.compress(Bitmap.CompressFormat.JPEG, 85, buffer.outputStream())
+
+            SourceResult(
+                source = ImageSource(buffer, options.context),
+                mimeType = "image/jpeg",
+                dataSource = DataSource.NETWORK
+            )
+
+        } catch (e: Exception) {
+            Log.e("VideoThumbnailFetcher", "Error extracting SMB thumbnail", e)
+            null
+        } finally {
+            try {
+                retriever.release()
+            } catch (e: Exception) {
+                Log.e("VideoThumbnailFetcher", "Error releasing retriever", e)
+            }
+            // Clean up temp file
+            try {
+                tempFile?.delete()
+            } catch (e: Exception) {
+                Log.e("VideoThumbnailFetcher", "Error deleting temp file", e)
+            }
+        }
     }
 
     class Factory : Fetcher.Factory<String> {

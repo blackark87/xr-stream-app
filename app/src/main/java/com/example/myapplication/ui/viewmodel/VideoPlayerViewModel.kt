@@ -16,12 +16,14 @@ import com.example.myapplication.data.repository.VideoRepository
 import com.example.myapplication.network.SMBConfig
 import com.example.myapplication.network.SMBFileItem
 import com.example.myapplication.player.SMBDataSource
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 
 data class VideoPlayerState(
     val isPlaying: Boolean = false,
@@ -34,7 +36,8 @@ data class VideoPlayerState(
     val error: String? = null,
     val videoFile: SMBFileItem? = null,
     val videoFormat: VideoFormat = VideoFormat.Format2D,
-    val stereoMode: StereoMode = StereoMode.Mono
+    val stereoMode: StereoMode = StereoMode.Mono,
+    val zoomLevel: Float = 1.0f
 )
 
 enum class VideoFormat {
@@ -62,6 +65,7 @@ class VideoPlayerViewModel(
 
     private var exoPlayer: ExoPlayer? = null
     private var currentVideoId: Long? = null
+    private var pendingSaveJob: Job? = null
 
     /**
      * Detect if video is SBS/stereo based on filename patterns
@@ -106,10 +110,38 @@ class VideoPlayerViewModel(
 
     fun setVideoFormat(format: VideoFormat) {
         _state.value = _state.value.copy(videoFormat = format)
+        // Cancel any pending save job
+        pendingSaveJob?.cancel()
+        pendingSaveJob = viewModelScope.launch {
+            currentVideoId?.let { id ->
+                try {
+                    videoRepository.updateVideoFormat(id, format.name)
+                    Log.d("VideoPlayerViewModel", "Saved video format: ${format.name} for video ID: $id")
+                } catch (e: Exception) {
+                    Log.e("VideoPlayerViewModel", "Failed to save video format: ${e.message}", e)
+                }
+            } ?: run {
+                Log.w("VideoPlayerViewModel", "Cannot save video format: currentVideoId is null")
+            }
+        }
     }
 
     fun setStereoMode(mode: StereoMode) {
         _state.value = _state.value.copy(stereoMode = mode)
+        // Cancel any pending save job
+        pendingSaveJob?.cancel()
+        pendingSaveJob = viewModelScope.launch {
+            currentVideoId?.let { id ->
+                try {
+                    videoRepository.updateStereoMode(id, mode.name)
+                    Log.d("VideoPlayerViewModel", "Saved stereo mode: ${mode.name} for video ID: $id")
+                } catch (e: Exception) {
+                    Log.e("VideoPlayerViewModel", "Failed to save stereo mode: ${e.message}", e)
+                }
+            } ?: run {
+                Log.w("VideoPlayerViewModel", "Cannot save stereo mode: currentVideoId is null")
+            }
+        }
     }
 
     init {
@@ -123,7 +155,6 @@ class VideoPlayerViewModel(
 
     private fun handleKeyEvent(event: android.view.KeyEvent) {
         when (event.keyCode) {
-            android.view.KeyEvent.KEYCODE_BUTTON_A,
             android.view.KeyEvent.KEYCODE_DPAD_CENTER,
             android.view.KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
             android.view.KeyEvent.KEYCODE_SPACE -> {
@@ -145,6 +176,12 @@ class VideoPlayerViewModel(
                 }
                 setStereoMode(nextMode)
             }
+            android.view.KeyEvent.KEYCODE_DPAD_UP -> {
+                adjustZoom(0.1f)
+            }
+            android.view.KeyEvent.KEYCODE_DPAD_DOWN -> {
+                adjustZoom(-0.1f)
+            }
         }
     }
 
@@ -157,13 +194,45 @@ class VideoPlayerViewModel(
 
         viewModelScope.launch {
             try {
-                // Default to 2D/Mono as requested ("play first, then toggle")
-                // We no longer use filename detection for initial state
-                val initialStereoMode = StereoMode.Mono
-                val initialVideoFormat = VideoFormat.Format2D
+                // Check for saved video settings
+                Log.d("VideoPlayerViewModel", "Looking up video by path: ${videoFile.path}")
+                val savedVideo = videoRepository.getVideoByPath(videoFile.path)
+
+                if (savedVideo != null) {
+                    Log.d(
+                        "VideoPlayerViewModel",
+                        "Found saved video - ID: ${savedVideo.id}, stereo: ${savedVideo.stereoMode}, format: ${savedVideo.videoFormat}, favorite: ${savedVideo.isFavorite}"
+                    )
+                } else {
+                    Log.d("VideoPlayerViewModel", "No saved video found, will create new record")
+                }
+
+                // Use saved settings if available, otherwise default to 2D/Mono
+                val initialStereoMode = if (savedVideo != null) {
+                    try {
+                        StereoMode.valueOf(savedVideo.stereoMode)
+                    } catch (e: Exception) {
+                        Log.w("VideoPlayerViewModel", "Invalid stereo mode in database: ${savedVideo.stereoMode}, defaulting to Mono")
+                        StereoMode.Mono
+                    }
+                } else {
+                    StereoMode.Mono
+                }
+
+                val initialVideoFormat = if (savedVideo != null) {
+                    try {
+                        VideoFormat.valueOf(savedVideo.videoFormat)
+                    } catch (e: Exception) {
+                        Log.w("VideoPlayerViewModel", "Invalid video format in database: ${savedVideo.videoFormat}, defaulting to Format2D")
+                        VideoFormat.Format2D
+                    }
+                } else {
+                    VideoFormat.Format2D
+                }
+
                 Log.d(
                     "VideoPlayerViewModel",
-                    "Initializing with defaults - Stereo: $initialStereoMode, Format: $initialVideoFormat"
+                    "Initializing player - Stereo: $initialStereoMode, Format: $initialVideoFormat"
                 )
 
                 _state.value = _state.value.copy(
@@ -307,7 +376,7 @@ class VideoPlayerViewModel(
                 exoPlayer?.prepare()
 
                 // Check for saved progress and resume from last position
-                val savedVideo = videoRepository.getVideoByPath(videoFile.path)
+                // savedVideo is already fetched above
                 val resumePosition = savedVideo?.lastPosition ?: 0L
 
                 if (resumePosition > 0 && savedVideo != null && savedVideo.duration > 0) {
@@ -344,7 +413,7 @@ class VideoPlayerViewModel(
 
     private suspend fun saveToRecentVideos(videoFile: SMBFileItem, smbConfig: SMBConfig, existingVideo: RecentVideo?) {
         if (existingVideo != null) {
-            // Update existing video - preserve favorite status and ID
+            // Update existing video - preserve favorite status, ID, and settings
             val updatedVideo = existingVideo.copy(
                 fileName = videoFile.name,
                 lastPlayed = System.currentTimeMillis()
@@ -362,7 +431,9 @@ class VideoPlayerViewModel(
                 lastPlayed = System.currentTimeMillis(),
                 lastPosition = 0,
                 duration = 0,
-                isFavorite = false
+                isFavorite = false,
+                videoFormat = _state.value.videoFormat.name,
+                stereoMode = _state.value.stereoMode.name
             )
             currentVideoId = videoRepository.insertVideo(recentVideo)
             Log.d("VideoPlayerViewModel", "Created new video record (ID: $currentVideoId)")
@@ -424,6 +495,11 @@ class VideoPlayerViewModel(
         _state.value = _state.value.copy(volume = volume)
     }
 
+    fun adjustZoom(delta: Float) {
+        val newZoom = (_state.value.zoomLevel + delta).coerceIn(0.5f, 3.0f)
+        _state.value = _state.value.copy(zoomLevel = newZoom)
+    }
+
     fun togglePlayPause() {
         if (_state.value.isPlaying) {
             pause()
@@ -466,19 +542,29 @@ class VideoPlayerViewModel(
     }
 
     fun releasePlayer() {
-        // Save final position and duration
-        viewModelScope.launch {
+        // Use runBlocking to ensure all saves complete before releasing the player
+        // This is safe because releasePlayer() is called from onCleared() during ViewModel destruction
+        runBlocking {
+            // Wait for any pending format/stereo mode saves to complete
+            pendingSaveJob?.join()
+            Log.d("VideoPlayerViewModel", "Pending save job completed")
+
+            // Save final position and duration
             currentVideoId?.let { videoId ->
                 exoPlayer?.let { player ->
-                    val currentVideo = videoRepository.getVideoById(videoId)
-                    currentVideo?.let { video ->
-                        val updatedVideo = video.copy(
-                            lastPosition = player.currentPosition,
-                            duration = if (player.duration > 0) player.duration else video.duration,
-                            lastPlayed = System.currentTimeMillis()
-                        )
-                        videoRepository.updateVideo(updatedVideo)
-                        Log.d("VideoPlayerViewModel", "Saved final position: ${player.currentPosition}ms, duration: ${player.duration}ms")
+                    try {
+                        val currentVideo = videoRepository.getVideoById(videoId)
+                        currentVideo?.let { video ->
+                            val updatedVideo = video.copy(
+                                lastPosition = player.currentPosition,
+                                duration = if (player.duration > 0) player.duration else video.duration,
+                                lastPlayed = System.currentTimeMillis()
+                            )
+                            videoRepository.updateVideo(updatedVideo)
+                            Log.d("VideoPlayerViewModel", "Saved final position: ${player.currentPosition}ms, duration: ${player.duration}ms")
+                        }
+                    } catch (e: Exception) {
+                        Log.e("VideoPlayerViewModel", "Failed to save final position: ${e.message}", e)
                     }
                 }
             }
@@ -488,6 +574,7 @@ class VideoPlayerViewModel(
         exoPlayer = null
         _playerFlow.value = null
         _state.value = VideoPlayerState()
+        pendingSaveJob = null
     }
 
     override fun onCleared() {

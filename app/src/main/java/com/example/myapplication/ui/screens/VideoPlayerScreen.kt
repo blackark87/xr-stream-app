@@ -1,6 +1,7 @@
 package com.example.myapplication.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -10,7 +11,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.ui.graphics.Color
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -46,13 +46,20 @@ import androidx.xr.runtime.Session
 import androidx.xr.scenecore.SurfaceEntity
 import androidx.xr.runtime.math.FloatSize2d
 import androidx.xr.runtime.math.Pose
-import androidx.xr.runtime.math.Vector3
 import androidx.xr.scenecore.scene
+import androidx.xr.scenecore.InteractableComponent
+import androidx.xr.scenecore.InputEvent
+import java.util.concurrent.Executor
+import androidx.compose.ui.draw.scale
+import androidx.xr.compose.subspace.layout.scale
+import androidx.xr.scenecore.runtime.InputEventListener
+
 import com.example.myapplication.data.database.AppDatabase
 import com.example.myapplication.data.repository.VideoRepository
 import com.example.myapplication.ui.components.XRPlaybackControls
 import com.example.myapplication.ui.viewmodel.VideoPlayerViewModel
 import com.example.myapplication.ui.viewmodel.VideoPlayerViewModelFactory
+import java.util.concurrent.ExecutorService
 
 @Composable
 fun VideoPlayerScreen(
@@ -162,6 +169,15 @@ fun SpatialVideoPlayerContent(
         if (showControls) {
             kotlinx.coroutines.delay(5000)
             showControls = false
+        }
+    }
+
+    // Listen for A button to toggle controls
+    LaunchedEffect(Unit) {
+        com.example.myapplication.AppState.keyEvents.collect { event ->
+            if (event.keyCode == android.view.KeyEvent.KEYCODE_BUTTON_A && event.action == android.view.KeyEvent.ACTION_UP) {
+                showControls = !showControls
+            }
         }
     }
 
@@ -275,13 +291,16 @@ fun SpatialVideoPlayerContent(
 fun SpatialVideoPlayer(
     videoFormat: com.example.myapplication.ui.viewmodel.VideoFormat,
     stereoMode: com.example.myapplication.ui.viewmodel.StereoMode,
+    zoomLevel: Float,
     exoPlayer: androidx.media3.exoplayer.ExoPlayer?,
+    onToggleControls: () -> Unit,
     modifier: SubspaceModifier = SubspaceModifier
 ) {
     if (videoFormat == com.example.myapplication.ui.viewmodel.VideoFormat.Format2D) {
         // 2D Flat Mode (Orbiter)
         VideoPlayerOrbiter(
             isStereo = stereoMode != com.example.myapplication.ui.viewmodel.StereoMode.Mono,
+            zoomLevel = zoomLevel,
             exoPlayer = exoPlayer,
             modifier = modifier
         )
@@ -293,7 +312,9 @@ fun SpatialVideoPlayer(
                 session = session,
                 videoFormat = videoFormat,
                 stereoMode = stereoMode,
-                exoPlayer = exoPlayer
+                zoomLevel = zoomLevel,
+                exoPlayer = exoPlayer,
+                onToggleControls = onToggleControls
             )
         } else {
             // Fallback if no session (shouldn't happen in XR)
@@ -319,6 +340,7 @@ fun SpatialVideoPlayer(
 @Composable
 fun VideoPlayerOrbiter(
     isStereo: Boolean,
+    zoomLevel: Float,
     exoPlayer: androidx.media3.exoplayer.ExoPlayer?,
     modifier: SubspaceModifier = SubspaceModifier
 ) {
@@ -329,7 +351,7 @@ fun VideoPlayerOrbiter(
         // Use SpatialExternalSurface - the official XR API for video rendering
         SpatialExternalSurface(
             stereoMode = if (isStereo) StereoMode.SideBySide else StereoMode.Mono,
-            modifier = modifier
+            modifier = modifier.scale(zoomLevel)
         ) {
             // onSurfaceCreated is called when the Surface is ready
             onSurfaceCreated { surface ->
@@ -353,7 +375,9 @@ fun ImmersiveVideoPlayer(
     session: Session,
     videoFormat: com.example.myapplication.ui.viewmodel.VideoFormat,
     stereoMode: com.example.myapplication.ui.viewmodel.StereoMode,
-    exoPlayer: androidx.media3.exoplayer.ExoPlayer?
+    zoomLevel: Float,
+    exoPlayer: androidx.media3.exoplayer.ExoPlayer?,
+    onToggleControls: () -> Unit
 ) {
     var recenterTrigger by remember { mutableStateOf(0) }
 
@@ -364,9 +388,9 @@ fun ImmersiveVideoPlayer(
 
         try {
             val shape = when (videoFormat) {
-                com.example.myapplication.ui.viewmodel.VideoFormat.Format180 -> SurfaceEntity.Shape.Hemisphere(1.0f)
-                com.example.myapplication.ui.viewmodel.VideoFormat.Format360 -> SurfaceEntity.Shape.Sphere(1.0f)
-                else -> SurfaceEntity.Shape.Quad(FloatSize2d(1.5f, 1.5f))
+                com.example.myapplication.ui.viewmodel.VideoFormat.Format180 -> SurfaceEntity.Shape.Hemisphere(1.0f * zoomLevel)
+                com.example.myapplication.ui.viewmodel.VideoFormat.Format360 -> SurfaceEntity.Shape.Sphere(1.0f * zoomLevel)
+                else -> SurfaceEntity.Shape.Quad(FloatSize2d(1.5f * zoomLevel, 1.5f * zoomLevel))
             }
 
             val xrStereoMode = when (stereoMode) {
@@ -377,6 +401,7 @@ fun ImmersiveVideoPlayer(
 
             val newConfig = session.config.copy(
                 headTracking = Config.HeadTrackingMode.LAST_KNOWN,
+
             )
 
             session.configure(newConfig)

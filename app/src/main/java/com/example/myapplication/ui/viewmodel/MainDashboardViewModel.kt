@@ -12,6 +12,7 @@ import com.example.myapplication.network.LocalFileClient
 import com.example.myapplication.network.SMBClient
 import com.example.myapplication.network.SMBConfig
 import com.example.myapplication.network.SMBFileItem
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -53,6 +54,7 @@ class MainDashboardViewModel(
     val files: StateFlow<List<SMBFileItem>> = _files.asStateFlow()
 
     // Favorites from database - filtered by currently connected server
+    @OptIn(ExperimentalCoroutinesApi::class)
     val favorites: StateFlow<List<RecentVideo>> = _uiState
         .flatMapLatest { state ->
             if (state.isConnected && state.selectedServer != null) {

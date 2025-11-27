@@ -14,5 +14,7 @@ data class RecentVideo(
     val lastPlayed: Long = System.currentTimeMillis(),
     val lastPosition: Long = 0, // Last playback position in milliseconds
     val duration: Long = 0, // Video duration in milliseconds
-    val isFavorite: Boolean = false // Mark as favorite for quick access
+    val isFavorite: Boolean = false, // Mark as favorite for quick access
+    val videoFormat: String = "Format2D", // Saved video format (Format2D, Format180, Format360)
+    val stereoMode: String = "Mono" // Saved stereo mode (Mono, SideBySide, TopBottom)
 )
