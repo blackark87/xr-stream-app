@@ -17,7 +17,7 @@ data class FileBrowserState(
     val error: String? = null,
     val selectedFile: SMBFileItem? = null,
     val canGoBack: Boolean = false,
-    val showVideosOnly: Boolean = false
+    val showVideosOnly: Boolean = true
 )
 
 class FileBrowserViewModel : ViewModel() {
