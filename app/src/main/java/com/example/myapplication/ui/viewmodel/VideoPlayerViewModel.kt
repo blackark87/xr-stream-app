@@ -156,59 +156,59 @@ class VideoPlayerViewModel(
         }
     }
 
-    init {
-        // Observe global key events for controller input
-        viewModelScope.launch {
-            com.example.myapplication.AppState.keyEvents.collect { event ->
-                handleKeyEvent(event)
-            }
-        }
-    }
+//    init {
+//        // Observe global key events for controller input
+//        viewModelScope.launch {
+//            com.example.myapplication.AppState.keyEvents.collect { event ->
+//                handleKeyEvent(event)
+//            }
+//        }
+//    }
 
-    private fun handleKeyEvent(event: android.view.KeyEvent) {
-        when (event.keyCode) {
-            android.view.KeyEvent.KEYCODE_DPAD_CENTER,
-            android.view.KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
-            android.view.KeyEvent.KEYCODE_SPACE -> {
-                togglePlayPause()
-            }
-
-            android.view.KeyEvent.KEYCODE_DPAD_LEFT -> {
-                seekBackward()
-            }
-
-            android.view.KeyEvent.KEYCODE_DPAD_RIGHT -> {
-                seekForward()
-            }
-
-            android.view.KeyEvent.KEYCODE_BUTTON_L1 -> {
-                playPreviousVideo()
-            }
-
-            android.view.KeyEvent.KEYCODE_BUTTON_R1 -> {
-                playNextVideo()
-            }
-
-            android.view.KeyEvent.KEYCODE_BUTTON_Y -> {
-                // Cycle stereo mode: Mono -> SBS -> TB -> Mono
-                val currentMode = _state.value.stereoMode
-                val nextMode = when (currentMode) {
-                    StereoMode.Mono -> StereoMode.SideBySide
-                    StereoMode.SideBySide -> StereoMode.TopBottom
-                    StereoMode.TopBottom -> StereoMode.Mono
-                }
-                setStereoMode(nextMode)
-            }
-
-            android.view.KeyEvent.KEYCODE_DPAD_UP -> {
-                adjustZoom(0.1f)
-            }
-
-            android.view.KeyEvent.KEYCODE_DPAD_DOWN -> {
-                adjustZoom(-0.1f)
-            }
-        }
-    }
+//    private fun handleKeyEvent(event: android.view.KeyEvent) {
+//        when (event.keyCode) {
+//            android.view.KeyEvent.KEYCODE_DPAD_CENTER,
+//            android.view.KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
+//            android.view.KeyEvent.KEYCODE_SPACE -> {
+//                togglePlayPause()
+//            }
+//
+//            android.view.KeyEvent.KEYCODE_DPAD_LEFT -> {
+//                seekBackward()
+//            }
+//
+//            android.view.KeyEvent.KEYCODE_DPAD_RIGHT -> {
+//                seekForward()
+//            }
+//
+//            android.view.KeyEvent.KEYCODE_BUTTON_L1 -> {
+//                playPreviousVideo()
+//            }
+//
+//            android.view.KeyEvent.KEYCODE_BUTTON_R1 -> {
+//                playNextVideo()
+//            }
+//
+//            android.view.KeyEvent.KEYCODE_BUTTON_Y -> {
+//                // Cycle stereo mode: Mono -> SBS -> TB -> Mono
+//                val currentMode = _state.value.stereoMode
+//                val nextMode = when (currentMode) {
+//                    StereoMode.Mono -> StereoMode.SideBySide
+//                    StereoMode.SideBySide -> StereoMode.TopBottom
+//                    StereoMode.TopBottom -> StereoMode.Mono
+//                }
+//                setStereoMode(nextMode)
+//            }
+//
+//            android.view.KeyEvent.KEYCODE_DPAD_UP -> {
+//                adjustZoom(0.1f)
+//            }
+//
+//            android.view.KeyEvent.KEYCODE_DPAD_DOWN -> {
+//                adjustZoom(-0.1f)
+//            }
+//        }
+//    }
 
     fun initializePlayer(
         context: Context,
@@ -276,6 +276,9 @@ class VideoPlayerViewModel(
                     stereoMode = initialStereoMode,
                     videoFormat = initialVideoFormat
                 )
+
+                // Save to recent videos immediately to ensure we have an ID for updates
+                saveToRecentVideos(videoFile, smbConfig, savedVideo)
 
                 // Release existing player if any
                 releasePlayer()
@@ -435,9 +438,6 @@ class VideoPlayerViewModel(
                 // Expose player to UI
                 _playerFlow.value = exoPlayer
 
-                // Save to recent videos
-                saveToRecentVideos(videoFile, smbConfig, savedVideo)
-
                 // Start position tracking
                 startPositionTracking()
 
@@ -546,9 +546,13 @@ class VideoPlayerViewModel(
     ) {
         if (existingVideo != null) {
             // Update existing video - preserve favorite status, ID, and settings
+            // IMPORTANT: Use current state for format/stereo mode to avoid overwriting user changes
+            // if this is called after user has already changed settings
             val updatedVideo = existingVideo.copy(
                 fileName = videoFile.name,
-                lastPlayed = System.currentTimeMillis()
+                lastPlayed = System.currentTimeMillis(),
+                videoFormat = _state.value.videoFormat.name,
+                stereoMode = _state.value.stereoMode.name
             )
             videoRepository.updateVideo(updatedVideo)
             currentVideoId = existingVideo.id
@@ -588,16 +592,14 @@ class VideoPlayerViewModel(
                     // Save position and duration every 5 seconds
                     currentVideoId?.let { videoId ->
                         if (player.currentPosition % 5000 < 500) {
-                            // Update both position and duration
-                            val currentVideo = videoRepository.getVideoById(videoId)
-                            currentVideo?.let { video ->
-                                val updatedVideo = video.copy(
-                                    lastPosition = player.currentPosition,
-                                    duration = if (player.duration > 0) player.duration else video.duration,
-                                    lastPlayed = System.currentTimeMillis()
-                                )
-                                videoRepository.updateVideo(updatedVideo)
-                            }
+                            // Update only playback state to avoid overwriting other fields (like format/stereo)
+                            val duration = if (player.duration > 0) player.duration else 0L
+                            videoRepository.updatePlaybackState(
+                                videoId = videoId,
+                                position = player.currentPosition,
+                                duration = duration,
+                                timestamp = System.currentTimeMillis()
+                            )
                         }
                     }
                 }
@@ -688,19 +690,18 @@ class VideoPlayerViewModel(
             currentVideoId?.let { videoId ->
                 exoPlayer?.let { player ->
                     try {
-                        val currentVideo = videoRepository.getVideoById(videoId)
-                        currentVideo?.let { video ->
-                            val updatedVideo = video.copy(
-                                lastPosition = player.currentPosition,
-                                duration = if (player.duration > 0) player.duration else video.duration,
-                                lastPlayed = System.currentTimeMillis()
-                            )
-                            videoRepository.updateVideo(updatedVideo)
-                            Log.d(
-                                "VideoPlayerViewModel",
-                                "Saved final position: ${player.currentPosition}ms, duration: ${player.duration}ms"
-                            )
-                        }
+                        // Update only playback state
+                        val duration = if (player.duration > 0) player.duration else 0L
+                        videoRepository.updatePlaybackState(
+                            videoId = videoId,
+                            position = player.currentPosition,
+                            duration = duration,
+                            timestamp = System.currentTimeMillis()
+                        )
+                        Log.d(
+                            "VideoPlayerViewModel",
+                            "Saved final position: ${player.currentPosition}ms, duration: ${player.duration}ms"
+                        )
                     } catch (e: Exception) {
                         Log.e(
                             "VideoPlayerViewModel",

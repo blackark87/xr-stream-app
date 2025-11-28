@@ -51,8 +51,7 @@ import kotlin.math.roundToInt
 fun XRPlaybackControls(
     videoPlayerViewModel: VideoPlayerViewModel,
     playerState: VideoPlayerState,
-    onNavigateBack: () -> Unit,
-    onRecenter: () -> Unit
+    onNavigateBack: () -> Unit
 ) {
     var showSpeedMenu by remember { mutableStateOf(false) }
     var showVolumeSlider by remember { mutableStateOf(false) }
@@ -75,8 +74,8 @@ fun XRPlaybackControls(
             .background(
                 Brush.verticalGradient(
                     colors = listOf(
-                        Color.Transparent,
-                        Color.Black.copy(alpha = 0.7f),
+                        Color.Black.copy(alpha = 0.0f),
+                        Color.Black.copy(alpha = 0.0f),
                         Color.Black.copy(alpha = 0.95f)
                     )
                 )
@@ -301,19 +300,7 @@ fun XRPlaybackControls(
                     )
                 }
 
-                // Recenter control
-                TextButton(
-                    onClick = onRecenter,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(Color.Transparent)
-                ) {
-                    Text(
-                        text = "Recenter",
-                        color = Color.White,
-                        style = MaterialTheme.typography.bodyMedium
-                    )
-                }
+
             }
 
 

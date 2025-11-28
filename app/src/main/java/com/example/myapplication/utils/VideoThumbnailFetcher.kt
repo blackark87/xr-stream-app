@@ -108,7 +108,7 @@ class VideoThumbnailFetcher(
             smbFile.inputStream.use { input: java.io.InputStream ->
                 tempFile.outputStream().use { output ->
                     val buffer = ByteArray(64 * 1024) // 64KB buffer
-                    val maxBytes = 50 * 1024 * 1024L // 50MB limit
+                    val maxBytes = 150 * 1024 * 1024L // 150MB limit
 
                     var bytesRead = input.read(buffer)
                     while (bytesRead != -1 && totalBytes < maxBytes) {
@@ -137,14 +137,42 @@ class VideoThumbnailFetcher(
             Log.d("VideoThumbnailFetcher", "Setting data source for MediaMetadataRetriever...")
             retriever.setDataSource(tempFile.absolutePath)
 
-            Log.d("VideoThumbnailFetcher", "Extracting frame at 0s...")
-            var bitmap = retriever.getFrameAtTime(0, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+            // Try to get video duration to pick a better frame
+            val durationStr =
+                retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+            val durationMs = durationStr?.toLongOrNull() ?: 0L
+
+            // Target: 10% of video or 30 seconds, whichever is smaller
+            // But at least 2 seconds if possible
+            val targetTimeUs = if (durationMs > 0) {
+                val tenPercent = durationMs * 1000L / 10L
+                val thirtySeconds = 30 * 1000 * 1000L
+                val target = minOf(tenPercent, thirtySeconds)
+                maxOf(target, 2000000L) // At least 2s
+            } else {
+                2000000L // Default to 2s if duration unknown
+            }
+
+            Log.d(
+                "VideoThumbnailFetcher",
+                "Video duration: ${durationMs}ms. Target time: ${targetTimeUs}us"
+            )
+
+            var bitmap =
+                retriever.getFrameAtTime(targetTimeUs, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
 
             if (bitmap == null) {
-                Log.w("VideoThumbnailFetcher", "Failed to extract frame at 0s, trying at 2s...")
-                // Try at 2 seconds (2000000 microseconds)
+                Log.w(
+                    "VideoThumbnailFetcher",
+                    "Failed to extract frame at ${targetTimeUs}us, trying at 5s..."
+                )
                 bitmap =
-                    retriever.getFrameAtTime(2000000, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                    retriever.getFrameAtTime(5000000, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+            }
+
+            if (bitmap == null) {
+                Log.w("VideoThumbnailFetcher", "Failed to extract frame at 5s, trying at 0s...")
+                bitmap = retriever.getFrameAtTime(0, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
             }
 
             if (bitmap == null) {

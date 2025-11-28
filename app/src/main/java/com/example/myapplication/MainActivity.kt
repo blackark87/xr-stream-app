@@ -82,10 +82,5 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
-        if (event.action == android.view.KeyEvent.ACTION_DOWN) {
-            com.example.myapplication.AppState.keyEvents.tryEmit(event)
-        }
-        return super.dispatchKeyEvent(event)
-    }
+
 }

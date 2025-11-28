@@ -60,6 +60,29 @@ class VideoRepository(private val videoDao: VideoDao) {
         videoDao.updateFavoriteStatusByPath(filePath, isFavorite)
     }
 
+    suspend fun updatePlaybackInfo(videoId: Long, timestamp: Long, position: Long) {
+        try {
+            videoDao.updatePlaybackInfo(videoId, timestamp, position)
+        } catch (e: Exception) {
+            Log.e("VideoRepository", "Failed to update playback info", e)
+            throw e
+        }
+    }
+
+    suspend fun updatePlaybackState(
+        videoId: Long,
+        position: Long,
+        duration: Long,
+        timestamp: Long
+    ) {
+        try {
+            videoDao.updatePlaybackState(videoId, position, duration, timestamp)
+        } catch (e: Exception) {
+            Log.e("VideoRepository", "Failed to update playback state", e)
+            throw e
+        }
+    }
+
     suspend fun updateVideoFormat(videoId: Long, format: String) {
         try {
             videoDao.updateVideoFormat(videoId, format)

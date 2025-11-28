@@ -35,6 +35,9 @@ interface VideoDao {
     @Query("UPDATE recent_videos SET lastPlayed = :timestamp, lastPosition = :position WHERE id = :videoId")
     suspend fun updatePlaybackInfo(videoId: Long, timestamp: Long, position: Long)
 
+    @Query("UPDATE recent_videos SET lastPlayed = :timestamp, lastPosition = :position, duration = :duration WHERE id = :videoId")
+    suspend fun updatePlaybackState(videoId: Long, position: Long, duration: Long, timestamp: Long)
+
     @Query("DELETE FROM recent_videos")
     suspend fun clearAllVideos()
 

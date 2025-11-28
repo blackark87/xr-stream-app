@@ -18,8 +18,9 @@ sealed class Screen(val route: String) {
     object MainDashboard : Screen("main_dashboard")
     object VideoPlayer : Screen("video_player/{filePath}/{fileName}") {
         fun createRoute(filePath: String, fileName: String): String {
-            val encodedPath = android.net.Uri.encode(filePath)
-            return "video_player/$encodedPath/$fileName"
+            val encodedPath = java.net.URLEncoder.encode(filePath, "UTF-8").replace("+", "%20")
+            val encodedName = java.net.URLEncoder.encode(fileName, "UTF-8").replace("+", "%20")
+            return "video_player/$encodedPath/$encodedName"
         }
     }
 }

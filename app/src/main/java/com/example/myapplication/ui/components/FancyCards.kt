@@ -48,6 +48,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -347,10 +348,10 @@ fun FancyMovieCard(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Movie Icon (placeholder for thumbnail)
+                // Movie Icon or Thumbnail
                 Box(
                     modifier = Modifier
-                        .size(80.dp, 120.dp)
+                        .size(80.dp, 60.dp) // Adjusted aspect ratio for video thumbnail
                         .clip(RoundedCornerShape(8.dp))
                         .background(
                             brush = Brush.linearGradient(
@@ -359,12 +360,27 @@ fun FancyMovieCard(
                         ),
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(
-                        imageVector = Icons.Filled.Movie,
-                        contentDescription = "Movie",
-                        tint = TextSecondary,
-                        modifier = Modifier.size(48.dp)
-                    )
+                    if (video.filePath.isNotEmpty()) {
+                        AsyncImage(
+                            model = coil.request.ImageRequest.Builder(androidx.compose.ui.platform.LocalContext.current)
+                                .data(video.filePath)
+                                .diskCacheKey(video.filePath)
+                                .diskCachePolicy(coil.request.CachePolicy.ENABLED)
+                                .memoryCachePolicy(coil.request.CachePolicy.ENABLED)
+                                .build(),
+                            contentDescription = "Video thumbnail",
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop,
+                            error = rememberVectorPainter(Icons.Filled.Movie)
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Filled.Movie,
+                            contentDescription = "Movie",
+                            tint = TextSecondary,
+                            modifier = Modifier.size(32.dp)
+                        )
+                    }
                 }
 
                 Spacer(modifier = Modifier.width(16.dp))

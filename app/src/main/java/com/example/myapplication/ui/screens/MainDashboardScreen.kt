@@ -221,7 +221,12 @@ fun MainDashboardScreen(
                     favorites = favorites,
                     isConnected = uiState.isConnected,
                     onFavoriteClick = { video ->
-                        navController.navigate("video_player/${video.filePath}/${video.fileName}")
+                        navController.navigate(
+                            Screen.VideoPlayer.createRoute(
+                                video.filePath,
+                                video.fileName
+                            )
+                        )
                     },
                     onFavoriteToggle = { video ->
                         viewModel.toggleFavorite(video.id, !video.isFavorite)

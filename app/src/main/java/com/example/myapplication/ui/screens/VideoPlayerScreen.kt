@@ -47,6 +47,7 @@ import androidx.xr.runtime.math.FloatSize2d
 import androidx.xr.runtime.math.Pose
 import androidx.xr.runtime.math.Vector3
 import androidx.xr.scenecore.SurfaceEntity
+import androidx.xr.scenecore.scene
 import com.example.myapplication.data.database.AppDatabase
 import com.example.myapplication.data.repository.VideoRepository
 import com.example.myapplication.ui.components.XRPlaybackControls
@@ -165,21 +166,7 @@ fun SpatialVideoPlayerContent(
         }
     }
 
-    // Listen for A button or Trigger to toggle controls
-    LaunchedEffect(Unit) {
-        com.example.myapplication.AppState.keyEvents.collect { event ->
-            if (event.action == android.view.KeyEvent.ACTION_UP) {
-                when (event.keyCode) {
-                    android.view.KeyEvent.KEYCODE_BUTTON_A,
-                    android.view.KeyEvent.KEYCODE_DPAD_CENTER,
-                    android.view.KeyEvent.KEYCODE_ENTER,
-                    android.view.KeyEvent.KEYCODE_BUTTON_R2 -> {
-                        showControls = !showControls
-                    }
-                }
-            }
-        }
-    }
+
 
     Subspace {
         SpatialBox(modifier = SubspaceModifier.fillMaxSize()) {
@@ -251,8 +238,7 @@ fun SpatialVideoPlayerContent(
                             XRPlaybackControls(
                                 videoPlayerViewModel = videoPlayerViewModel,
                                 playerState = playerState,
-                                onNavigateBack = onNavigateBack,
-                                onRecenter = { recenterTrigger++ }
+                                onNavigateBack = onNavigateBack
                             )
                         }
                     }
@@ -285,14 +271,31 @@ fun SpatialVideoPlayer(
         // Immersive Mode (180/360)
         val session = LocalSession.current
         if (session != null) {
-            ImmersiveVideoPlayer(
-                session = session,
-                videoFormat = videoFormat,
-                stereoMode = stereoMode,
-                zoomLevel = zoomLevel,
-                exoPlayer = exoPlayer,
-                recenterTrigger = recenterTrigger
-            )
+            // Wrap in SpatialBox to add click overlay
+            SpatialBox(modifier = modifier.fillMaxSize()) {
+                ImmersiveVideoPlayer(
+                    session = session,
+                    videoFormat = videoFormat,
+                    stereoMode = stereoMode,
+                    zoomLevel = zoomLevel,
+                    exoPlayer = exoPlayer,
+                    recenterTrigger = recenterTrigger
+                )
+
+                // Click Overlay for Immersive Mode
+                // Transparent panel to capture clicks
+                SpatialPanel(modifier = SubspaceModifier.fillMaxSize()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color.White.copy(alpha = 0.01f))
+                            .clickable {
+                                println("XR: Immersive overlay clicked! Toggling controls.")
+                                onToggleControls()
+                            }
+                    )
+                }
+            }
         } else {
             // Fallback if no session (shouldn't happen in XR)
             Orbiter(
@@ -418,7 +421,10 @@ fun ImmersiveVideoPlayer(
                 session = session,
                 shape = shape,
                 stereoMode = xrStereoMode,
-                pose = entityPose
+                pose = session.scene.spatialUser.head?.transformPoseTo(
+                    Pose.Identity,
+                    session.scene.activitySpace
+                )!!,
             )
 
             println("XR: SurfaceEntity created at position: $headPosition, facing forward. Attaching to player.")
