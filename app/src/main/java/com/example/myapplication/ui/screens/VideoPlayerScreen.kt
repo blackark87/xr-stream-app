@@ -8,11 +8,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
-import androidx.compose.ui.graphics.Color
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -26,40 +22,36 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.xr.compose.platform.LocalSession
 import androidx.xr.compose.spatial.ContentEdge
 import androidx.xr.compose.spatial.Orbiter
 import androidx.xr.compose.spatial.Subspace
 import androidx.xr.compose.subspace.SpatialBox
-import androidx.xr.compose.subspace.SpatialPanel
 import androidx.xr.compose.subspace.SpatialExternalSurface
+import androidx.xr.compose.subspace.SpatialPanel
 import androidx.xr.compose.subspace.StereoMode
 import androidx.xr.compose.subspace.layout.SpatialAlignment
 import androidx.xr.compose.subspace.layout.SubspaceModifier
 import androidx.xr.compose.subspace.layout.fillMaxSize
 import androidx.xr.compose.subspace.layout.height
+import androidx.xr.compose.subspace.layout.offset
+import androidx.xr.compose.subspace.layout.scale
 import androidx.xr.compose.subspace.layout.width
 import androidx.xr.runtime.Config
 import androidx.xr.runtime.Session
-import androidx.xr.scenecore.SurfaceEntity
 import androidx.xr.runtime.math.FloatSize2d
 import androidx.xr.runtime.math.Pose
-import androidx.xr.scenecore.scene
-import androidx.compose.ui.draw.scale
-import androidx.xr.compose.subspace.layout.offset
-import androidx.xr.compose.subspace.layout.scale
 import androidx.xr.runtime.math.Vector3
-
+import androidx.xr.scenecore.SurfaceEntity
 import com.example.myapplication.data.database.AppDatabase
 import com.example.myapplication.data.repository.VideoRepository
 import com.example.myapplication.ui.components.XRPlaybackControls
 import com.example.myapplication.ui.viewmodel.VideoPlayerViewModel
 import com.example.myapplication.ui.viewmodel.VideoPlayerViewModelFactory
-import java.util.concurrent.ExecutorService
 
 @Composable
 fun VideoPlayerScreen(
@@ -162,6 +154,7 @@ fun SpatialVideoPlayerContent(
     println("XR: SpatialVideoPlayerContent composed. Format: ${playerState.videoFormat}")
     val exoPlayer by videoPlayerViewModel.playerFlow.collectAsState()
     var showControls by remember { mutableStateOf(true) }  // Start with controls visible
+    var recenterTrigger by remember { mutableStateOf(0) }
     val session = LocalSession.current
 
     // Auto-hide controls after 5 seconds
@@ -227,6 +220,7 @@ fun SpatialVideoPlayerContent(
                             zoomLevel = playerState.zoomLevel,
                             exoPlayer = exoPlayer,
                             onToggleControls = { showControls = !showControls },
+                            recenterTrigger = recenterTrigger,
                             modifier = SubspaceModifier.fillMaxSize()
                         )
                     }
@@ -257,7 +251,8 @@ fun SpatialVideoPlayerContent(
                             XRPlaybackControls(
                                 videoPlayerViewModel = videoPlayerViewModel,
                                 playerState = playerState,
-                                onNavigateBack = onNavigateBack
+                                onNavigateBack = onNavigateBack,
+                                onRecenter = { recenterTrigger++ }
                             )
                         }
                     }
@@ -274,6 +269,7 @@ fun SpatialVideoPlayer(
     zoomLevel: Float,
     exoPlayer: androidx.media3.exoplayer.ExoPlayer?,
     onToggleControls: () -> Unit,
+    recenterTrigger: Int = 0,
     modifier: SubspaceModifier = SubspaceModifier
 ) {
     if (videoFormat == com.example.myapplication.ui.viewmodel.VideoFormat.Format2D) {
@@ -294,7 +290,8 @@ fun SpatialVideoPlayer(
                 videoFormat = videoFormat,
                 stereoMode = stereoMode,
                 zoomLevel = zoomLevel,
-                exoPlayer = exoPlayer
+                exoPlayer = exoPlayer,
+                recenterTrigger = recenterTrigger
             )
         } else {
             // Fallback if no session (shouldn't happen in XR)
@@ -371,9 +368,9 @@ fun ImmersiveVideoPlayer(
     videoFormat: com.example.myapplication.ui.viewmodel.VideoFormat,
     stereoMode: com.example.myapplication.ui.viewmodel.StereoMode,
     zoomLevel: Float,
-    exoPlayer: androidx.media3.exoplayer.ExoPlayer?
+    exoPlayer: androidx.media3.exoplayer.ExoPlayer?,
+    recenterTrigger: Int
 ) {
-    var recenterTrigger by remember { mutableStateOf(0) }
 
     DisposableEffect(videoFormat, stereoMode, exoPlayer, recenterTrigger) {
         println("XR: Creating Immersive SurfaceEntity for $videoFormat / $stereoMode (recenter: $recenterTrigger)")
@@ -382,8 +379,14 @@ fun ImmersiveVideoPlayer(
 
         try {
             val shape = when (videoFormat) {
-                com.example.myapplication.ui.viewmodel.VideoFormat.Format180 -> SurfaceEntity.Shape.Hemisphere(1.0f * zoomLevel)
-                com.example.myapplication.ui.viewmodel.VideoFormat.Format360 -> SurfaceEntity.Shape.Sphere(1.0f * zoomLevel)
+                com.example.myapplication.ui.viewmodel.VideoFormat.Format180 -> SurfaceEntity.Shape.Hemisphere(
+                    1.0f * zoomLevel
+                )
+
+                com.example.myapplication.ui.viewmodel.VideoFormat.Format360 -> SurfaceEntity.Shape.Sphere(
+                    1.0f * zoomLevel
+                )
+
                 else -> SurfaceEntity.Shape.Quad(FloatSize2d(1.5f * zoomLevel, 1.5f * zoomLevel))
             }
 
@@ -396,7 +399,7 @@ fun ImmersiveVideoPlayer(
             val newConfig = session.config.copy(
                 headTracking = Config.HeadTrackingMode.LAST_KNOWN,
 
-            )
+                )
 
             session.configure(newConfig)
 
@@ -433,20 +436,6 @@ fun ImmersiveVideoPlayer(
         }
     }
 
-    // Recenter button (Orbiter) - for immersive mode
-    Orbiter(
-        position = ContentEdge.Bottom,
-        offset = 100.dp,
-        alignment = Alignment.CenterHorizontally
-    ) {
-        Button(
-            onClick = { recenterTrigger++ },
-            colors = ButtonDefaults.buttonColors(
-                containerColor = MaterialTheme.colorScheme.primaryContainer
-            ),
-            modifier = Modifier.padding(16.dp)
-        ) {
-            Text("Recenter View")
-        }
-    }
+    // Recenter button removed - moved to playback controls
+
 }

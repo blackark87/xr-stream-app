@@ -11,18 +11,30 @@
         android:maxSdkVersion="32" />
 
     <!-- Optional for Jetpack XR SDK - allows testing on non-XR devices -->
-    <uses-feature android:name="android.software.xr.api.spatial" android:required="false" />
+    <uses-feature
+        android:name="android.software.xr.api.spatial"
+        android:required="false" />
     <!-- Sets android:required to true, indicating that your app can't function on devices without controllers. -->
-    <uses-feature android:name="android.hardware.xr.input.controller" android:required="false" />
+    <uses-feature
+        android:name="android.hardware.xr.input.controller"
+        android:required="false" />
     <!-- Sets android:required to true, indicating that your app can't function on devices without hand tracking. -->
-    <uses-feature android:name="android.hardware.xr.input.hand_tracking" android:required="false" />
+    <uses-feature
+        android:name="android.hardware.xr.input.hand_tracking"
+        android:required="false" />
     <!-- Sets android:required to true, indicating that your app can't function on devices without eye tracking. -->
-    <uses-feature android:name="android.hardware.xr.input.eye_tracking" android:required="false" />
+    <uses-feature
+        android:name="android.hardware.xr.input.eye_tracking"
+        android:required="false" />
     <!-- Sets android:required to true, indicating that your app can't function on devices without head tracking. -->
-    <uses-feature android:name="android.hardware.xr.input.head_tracking" android:required="false" />
-    <uses-feature android:name="android.software.xr.api.openxr"
-        android:version="0x00010001"
-        android:required="true" />
+    <uses-feature
+        android:name="android.hardware.xr.input.head_tracking"
+        android:required="false" />
+    <uses-feature
+        android:name="android.software.xr.api.openxr"
+        android:required="true"
+        android:version="0x00010001" />
+
     <application
         android:name=".XRStreamApplication"
         android:allowBackup="true"

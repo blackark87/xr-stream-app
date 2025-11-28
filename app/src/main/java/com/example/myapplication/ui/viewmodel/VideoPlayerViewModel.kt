@@ -68,7 +68,7 @@ class VideoPlayerViewModel(
     private var exoPlayer: ExoPlayer? = null
     private var currentVideoId: Long? = null
     private var pendingSaveJob: Job? = null
-    
+
     // Store context and config for playlist navigation
     private var appContext: Context? = null
     private var currentSmbConfig: SMBConfig? = null
@@ -122,7 +122,10 @@ class VideoPlayerViewModel(
             currentVideoId?.let { id ->
                 try {
                     videoRepository.updateVideoFormat(id, format.name)
-                    Log.d("VideoPlayerViewModel", "Saved video format: ${format.name} for video ID: $id")
+                    Log.d(
+                        "VideoPlayerViewModel",
+                        "Saved video format: ${format.name} for video ID: $id"
+                    )
                 } catch (e: Exception) {
                     Log.e("VideoPlayerViewModel", "Failed to save video format: ${e.message}", e)
                 }
@@ -140,7 +143,10 @@ class VideoPlayerViewModel(
             currentVideoId?.let { id ->
                 try {
                     videoRepository.updateStereoMode(id, mode.name)
-                    Log.d("VideoPlayerViewModel", "Saved stereo mode: ${mode.name} for video ID: $id")
+                    Log.d(
+                        "VideoPlayerViewModel",
+                        "Saved stereo mode: ${mode.name} for video ID: $id"
+                    )
                 } catch (e: Exception) {
                     Log.e("VideoPlayerViewModel", "Failed to save stereo mode: ${e.message}", e)
                 }
@@ -166,18 +172,23 @@ class VideoPlayerViewModel(
             android.view.KeyEvent.KEYCODE_SPACE -> {
                 togglePlayPause()
             }
+
             android.view.KeyEvent.KEYCODE_DPAD_LEFT -> {
                 seekBackward()
             }
+
             android.view.KeyEvent.KEYCODE_DPAD_RIGHT -> {
                 seekForward()
             }
+
             android.view.KeyEvent.KEYCODE_BUTTON_L1 -> {
                 playPreviousVideo()
             }
+
             android.view.KeyEvent.KEYCODE_BUTTON_R1 -> {
                 playNextVideo()
             }
+
             android.view.KeyEvent.KEYCODE_BUTTON_Y -> {
                 // Cycle stereo mode: Mono -> SBS -> TB -> Mono
                 val currentMode = _state.value.stereoMode
@@ -188,9 +199,11 @@ class VideoPlayerViewModel(
                 }
                 setStereoMode(nextMode)
             }
+
             android.view.KeyEvent.KEYCODE_DPAD_UP -> {
                 adjustZoom(0.1f)
             }
+
             android.view.KeyEvent.KEYCODE_DPAD_DOWN -> {
                 adjustZoom(-0.1f)
             }
@@ -203,7 +216,7 @@ class VideoPlayerViewModel(
         videoFile: SMBFileItem
     ) {
         Log.d("VideoPlayerViewModel", "initializePlayer called for ${videoFile.name}")
-        
+
         this.appContext = context.applicationContext
         this.currentSmbConfig = smbConfig
 
@@ -227,7 +240,10 @@ class VideoPlayerViewModel(
                     try {
                         StereoMode.valueOf(savedVideo.stereoMode)
                     } catch (e: Exception) {
-                        Log.w("VideoPlayerViewModel", "Invalid stereo mode in database: ${savedVideo.stereoMode}, defaulting to Mono")
+                        Log.w(
+                            "VideoPlayerViewModel",
+                            "Invalid stereo mode in database: ${savedVideo.stereoMode}, defaulting to Mono"
+                        )
                         StereoMode.Mono
                     }
                 } else {
@@ -238,7 +254,10 @@ class VideoPlayerViewModel(
                     try {
                         VideoFormat.valueOf(savedVideo.videoFormat)
                     } catch (e: Exception) {
-                        Log.w("VideoPlayerViewModel", "Invalid video format in database: ${savedVideo.videoFormat}, defaulting to Format2D")
+                        Log.w(
+                            "VideoPlayerViewModel",
+                            "Invalid video format in database: ${savedVideo.videoFormat}, defaulting to Format2D"
+                        )
                         VideoFormat.Format2D
                     }
                 } else {
@@ -398,10 +417,16 @@ class VideoPlayerViewModel(
                     // Only resume if we're not near the end (within 5% of duration)
                     val progressPercent = (resumePosition.toFloat() / savedVideo.duration.toFloat())
                     if (progressPercent < 0.95f) {
-                        Log.d("VideoPlayerViewModel", "Resuming playback from position: ${resumePosition}ms (${(progressPercent * 100).toInt()}%)")
+                        Log.d(
+                            "VideoPlayerViewModel",
+                            "Resuming playback from position: ${resumePosition}ms (${(progressPercent * 100).toInt()}%)"
+                        )
                         exoPlayer?.seekTo(resumePosition)
                     } else {
-                        Log.d("VideoPlayerViewModel", "Video was almost finished, starting from beginning")
+                        Log.d(
+                            "VideoPlayerViewModel",
+                            "Video was almost finished, starting from beginning"
+                        )
                     }
                 }
 
@@ -436,8 +461,11 @@ class VideoPlayerViewModel(
             try {
                 // Get parent path
                 val parentPath = currentFile.path.substringBeforeLast('/', "")
-                val relativeParentPath = parentPath.replace("smb://${smbConfig.serverAddress}:${smbConfig.port}/${smbConfig.shareName}/", "")
-                                                   .removePrefix("/")
+                val relativeParentPath = parentPath.replace(
+                    "smb://${smbConfig.serverAddress}:${smbConfig.port}/${smbConfig.shareName}/",
+                    ""
+                )
+                    .removePrefix("/")
 
                 Log.d("VideoPlayerViewModel", "Fetching playlist for path: $relativeParentPath")
 
@@ -449,9 +477,15 @@ class VideoPlayerViewModel(
                     if (listResult.isSuccess) {
                         val allFiles = listResult.getOrNull() ?: emptyList()
                         // Filter for video files and sort
-                        val videoExtensions = listOf("mp4", "mkv", "avi", "mov", "wmv", "flv", "webm")
+                        val videoExtensions =
+                            listOf("mp4", "mkv", "avi", "mov", "wmv", "flv", "webm")
                         val videoFiles = allFiles.filter { file ->
-                            !file.isDirectory && videoExtensions.any { ext -> file.name.endsWith(ext, ignoreCase = true) }
+                            !file.isDirectory && videoExtensions.any { ext ->
+                                file.name.endsWith(
+                                    ext,
+                                    ignoreCase = true
+                                )
+                            }
                         }.sortedBy { it.name.lowercase() }
 
                         val currentIndex = videoFiles.indexOfFirst { it.path == currentFile.path }
@@ -460,7 +494,10 @@ class VideoPlayerViewModel(
                             playlist = videoFiles,
                             currentPlaylistIndex = currentIndex
                         )
-                        Log.d("VideoPlayerViewModel", "Playlist fetched: ${videoFiles.size} videos, current index: $currentIndex")
+                        Log.d(
+                            "VideoPlayerViewModel",
+                            "Playlist fetched: ${videoFiles.size} videos, current index: $currentIndex"
+                        )
                     }
                     client.disconnect()
                 }
@@ -475,7 +512,7 @@ class VideoPlayerViewModel(
         if (state.playlist.isNotEmpty() && state.currentPlaylistIndex < state.playlist.size - 1) {
             val nextIndex = state.currentPlaylistIndex + 1
             val nextFile = state.playlist[nextIndex]
-            
+
             appContext?.let { ctx ->
                 currentSmbConfig?.let { config ->
                     // Update index immediately to prevent double clicks
@@ -491,7 +528,7 @@ class VideoPlayerViewModel(
         if (state.playlist.isNotEmpty() && state.currentPlaylistIndex > 0) {
             val prevIndex = state.currentPlaylistIndex - 1
             val prevFile = state.playlist[prevIndex]
-            
+
             appContext?.let { ctx ->
                 currentSmbConfig?.let { config ->
                     // Update index immediately
@@ -502,7 +539,11 @@ class VideoPlayerViewModel(
         }
     }
 
-    private suspend fun saveToRecentVideos(videoFile: SMBFileItem, smbConfig: SMBConfig, existingVideo: RecentVideo?) {
+    private suspend fun saveToRecentVideos(
+        videoFile: SMBFileItem,
+        smbConfig: SMBConfig,
+        existingVideo: RecentVideo?
+    ) {
         if (existingVideo != null) {
             // Update existing video - preserve favorite status, ID, and settings
             val updatedVideo = existingVideo.copy(
@@ -511,7 +552,10 @@ class VideoPlayerViewModel(
             )
             videoRepository.updateVideo(updatedVideo)
             currentVideoId = existingVideo.id
-            Log.d("VideoPlayerViewModel", "Updated existing video record (ID: ${existingVideo.id}, isFavorite: ${existingVideo.isFavorite})")
+            Log.d(
+                "VideoPlayerViewModel",
+                "Updated existing video record (ID: ${existingVideo.id}, isFavorite: ${existingVideo.isFavorite})"
+            )
         } else {
             // Create new video entry
             val recentVideo = RecentVideo(
@@ -652,10 +696,17 @@ class VideoPlayerViewModel(
                                 lastPlayed = System.currentTimeMillis()
                             )
                             videoRepository.updateVideo(updatedVideo)
-                            Log.d("VideoPlayerViewModel", "Saved final position: ${player.currentPosition}ms, duration: ${player.duration}ms")
+                            Log.d(
+                                "VideoPlayerViewModel",
+                                "Saved final position: ${player.currentPosition}ms, duration: ${player.duration}ms"
+                            )
                         }
                     } catch (e: Exception) {
-                        Log.e("VideoPlayerViewModel", "Failed to save final position: ${e.message}", e)
+                        Log.e(
+                            "VideoPlayerViewModel",
+                            "Failed to save final position: ${e.message}",
+                            e
+                        )
                     }
                 }
             }

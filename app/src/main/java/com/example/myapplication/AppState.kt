@@ -1,9 +1,9 @@
 package com.example.myapplication
 
+import android.view.KeyEvent
 import com.example.myapplication.network.SMBClient
 import com.example.myapplication.network.SMBConfig
 import kotlinx.coroutines.flow.MutableSharedFlow
-import android.view.KeyEvent
 
 object AppState {
     var smbClient: SMBClient? = null
