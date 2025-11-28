@@ -95,7 +95,7 @@ class MainDashboardViewModel(
     fun updateServer(server: SavedServer) {
         viewModelScope.launch {
             serverRepository.updateServer(server)
-            
+
             // If updating the currently connected server, reconnect with new details if needed
             // For now, we'll just disconnect to be safe if credentials changed
             if (_uiState.value.selectedServer?.id == server.id) {
@@ -131,7 +131,7 @@ class MainDashboardViewModel(
                 password = server.password,
                 domain = server.domain
             )
-            
+
             val client = SMBClient(config)
             val result = client.connect()
             client.disconnect()

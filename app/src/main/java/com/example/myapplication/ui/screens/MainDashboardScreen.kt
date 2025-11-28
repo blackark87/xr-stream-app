@@ -19,7 +19,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
-import kotlinx.coroutines.launch
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Error
@@ -77,6 +76,7 @@ import com.example.myapplication.ui.theme.TextPrimary
 import com.example.myapplication.ui.theme.TextSecondary
 import com.example.myapplication.ui.theme.TextTertiary
 import com.example.myapplication.ui.viewmodel.MainDashboardViewModel
+import kotlinx.coroutines.launch
 
 /**
  * Main Dashboard Screen - Netflix/Disney+ style 3-panel layout
@@ -237,7 +237,7 @@ fun MainDashboardScreen(
         if (showAddServerDialog || serverToEdit != null) {
             AddServerDialog(
                 initialServer = serverToEdit,
-                onDismiss = { 
+                onDismiss = {
                     showAddServerDialog = false
                     serverToEdit = null
                 },
@@ -732,7 +732,8 @@ private fun AddServerDialog(
                     }
                     Spacer(modifier = Modifier.width(8.dp))
 
-                    val isSaveEnabled = name.isNotBlank() && address.isNotBlank() && !isTestingConnection
+                    val isSaveEnabled =
+                        name.isNotBlank() && address.isNotBlank() && !isTestingConnection
 
                     Button(
                         onClick = {
@@ -740,7 +741,7 @@ private fun AddServerDialog(
                                 scope.launch {
                                     isTestingConnection = true
                                     connectionError = null
-                                    
+
                                     val serverToSave = SavedServer(
                                         id = initialServer?.id ?: 0, // Preserve ID if editing
                                         serverName = name,
@@ -752,11 +753,12 @@ private fun AddServerDialog(
                                     )
 
                                     val result = onTestConnection(serverToSave)
-                                    
+
                                     if (result.isSuccess) {
                                         onSave(serverToSave)
                                     } else {
-                                        connectionError = "Connection failed: ${result.exceptionOrNull()?.message}"
+                                        connectionError =
+                                            "Connection failed: ${result.exceptionOrNull()?.message}"
                                         isTestingConnection = false
                                     }
                                 }

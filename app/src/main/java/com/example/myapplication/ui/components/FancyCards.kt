@@ -509,7 +509,11 @@ fun FancyFileCard(
                             onState = { state ->
                                 android.util.Log.d("FancyFileCard", "AsyncImage state: $state")
                                 if (state is coil.compose.AsyncImagePainter.State.Error) {
-                                    android.util.Log.e("FancyFileCard", "AsyncImage Error: ${state.result.throwable.message}", state.result.throwable)
+                                    android.util.Log.e(
+                                        "FancyFileCard",
+                                        "AsyncImage Error: ${state.result.throwable.message}",
+                                        state.result.throwable
+                                    )
                                 }
                             }
                         )

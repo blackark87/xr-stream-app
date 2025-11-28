@@ -118,7 +118,10 @@ fun FileBrowserScreen(
                 FilterChip(
                     selected = state.showVideosOnly,
                     onClick = {
-                        android.util.Log.d("FileBrowser", "Filter chip clicked! Current: ${state.showVideosOnly}")
+                        android.util.Log.d(
+                            "FileBrowser",
+                            "Filter chip clicked! Current: ${state.showVideosOnly}"
+                        )
                         fileBrowserViewModel.toggleVideoFilter()
                     },
                     label = {
@@ -189,7 +192,10 @@ fun FileBrowserScreen(
                 ) {
                     items(filteredFiles) { file ->
                         val isVideo = SMBClient.isVideoFile(file.name)
-                        android.util.Log.d("FileBrowser", "Displaying: ${file.name}, isDir: ${file.isDirectory}, isVideo: $isVideo")
+                        android.util.Log.d(
+                            "FileBrowser",
+                            "Displaying: ${file.name}, isDir: ${file.isDirectory}, isVideo: $isVideo"
+                        )
                         if (isVideo) {
                             android.util.Log.d(
                                 "FileBrowser",

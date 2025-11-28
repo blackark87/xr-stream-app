@@ -21,7 +21,10 @@ class XRStreamApplication : Application(), ImageLoaderFactory {
     }
 
     override fun newImageLoader(): ImageLoader {
-        android.util.Log.d("XRStreamApplication", "Creating new ImageLoader with VideoThumbnailFetcher")
+        android.util.Log.d(
+            "XRStreamApplication",
+            "Creating new ImageLoader with VideoThumbnailFetcher"
+        )
         return ImageLoader.Builder(this)
             .components {
                 // Add video frame decoder for extracting frames from videos
@@ -36,7 +39,10 @@ class XRStreamApplication : Application(), ImageLoaderFactory {
             }
             .diskCache {
                 val cacheDir = cacheDir.resolve("image_cache")
-                android.util.Log.d("XRStreamApplication", "Configuring disk cache at: ${cacheDir.absolutePath}")
+                android.util.Log.d(
+                    "XRStreamApplication",
+                    "Configuring disk cache at: ${cacheDir.absolutePath}"
+                )
                 DiskCache.Builder()
                     .directory(cacheDir)
                     .maxSizeBytes(500L * 1024 * 1024) // 500MB fixed size
