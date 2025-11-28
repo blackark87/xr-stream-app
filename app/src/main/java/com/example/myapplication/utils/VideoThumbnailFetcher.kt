@@ -77,21 +77,28 @@ class VideoThumbnailFetcher(
     }
 
     private fun extractSMBThumbnail(smbUrl: String): FetchResult? {
+        Log.d("VideoThumbnailFetcher", "Extracting SMB thumbnail for: $smbUrl")
         var tempFile: java.io.File? = null
         val retriever = MediaMetadataRetriever()
-        
+
         return try {
             // Create temp file
             tempFile = java.io.File.createTempFile("smb_thumb_", ".mp4", options.context.cacheDir)
-            
+            Log.d("VideoThumbnailFetcher", "Created temp file: ${tempFile.absolutePath}")
+
             // Download header (first 10MB)
-            val smbFile = com.example.myapplication.AppState.smbClient?.getSmbFile(smbUrl) ?: return null
+            val smbFile = com.example.myapplication.AppState.smbClient?.getSmbFile(smbUrl)
+            if (smbFile == null) {
+                Log.e("VideoThumbnailFetcher", "SMB client is null!")
+                return null
+            }
+            Log.d("VideoThumbnailFetcher", "Got SMB file, downloading...")
+            var totalBytes = 0L
             smbFile.inputStream.use { input: java.io.InputStream ->
                 tempFile.outputStream().use { output ->
                     val buffer = ByteArray(8192)
-                    var totalBytes = 0L
                     val maxBytes = 10 * 1024 * 1024L // 10MB limit
-                    
+
                     var bytesRead = input.read(buffer)
                     while (bytesRead != -1 && totalBytes < maxBytes) {
                         output.write(buffer, 0, bytesRead)
@@ -101,15 +108,22 @@ class VideoThumbnailFetcher(
                 }
             }
 
+            Log.d("VideoThumbnailFetcher", "Downloaded $totalBytes bytes")
+
             // Extract frame from temp file
             retriever.setDataSource(tempFile.absolutePath)
-            val bitmap = retriever.getFrameAtTime(0, MediaMetadataRetriever.OPTION_CLOSEST_SYNC) 
-                ?: return null
+            val bitmap = retriever.getFrameAtTime(0, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+            if (bitmap == null) {
+                Log.e("VideoThumbnailFetcher", "Failed to extract frame from video")
+                return null
+            }
+            Log.d("VideoThumbnailFetcher", "Extracted bitmap: ${bitmap.width}x${bitmap.height}")
 
             // Convert to Coil result
             val buffer = Buffer()
             bitmap.compress(Bitmap.CompressFormat.JPEG, 85, buffer.outputStream())
 
+            Log.d("VideoThumbnailFetcher", "Successfully created thumbnail")
             SourceResult(
                 source = ImageSource(buffer, options.context),
                 mimeType = "image/jpeg",
