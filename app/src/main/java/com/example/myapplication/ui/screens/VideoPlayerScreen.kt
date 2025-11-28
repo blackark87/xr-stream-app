@@ -162,6 +162,7 @@ fun SpatialVideoPlayerContent(
     println("XR: SpatialVideoPlayerContent composed. Format: ${playerState.videoFormat}")
     val exoPlayer by videoPlayerViewModel.playerFlow.collectAsState()
     var showControls by remember { mutableStateOf(true) }  // Start with controls visible
+    var recenterTrigger by remember { mutableStateOf(0) }
     val session = LocalSession.current
 
     // Auto-hide controls after 5 seconds
@@ -227,6 +228,7 @@ fun SpatialVideoPlayerContent(
                             zoomLevel = playerState.zoomLevel,
                             exoPlayer = exoPlayer,
                             onToggleControls = { showControls = !showControls },
+                            recenterTrigger = recenterTrigger,
                             modifier = SubspaceModifier.fillMaxSize()
                         )
                     }
@@ -257,7 +259,8 @@ fun SpatialVideoPlayerContent(
                             XRPlaybackControls(
                                 videoPlayerViewModel = videoPlayerViewModel,
                                 playerState = playerState,
-                                onNavigateBack = onNavigateBack
+                                onNavigateBack = onNavigateBack,
+                                onRecenter = { recenterTrigger++ }
                             )
                         }
                     }
@@ -274,6 +277,7 @@ fun SpatialVideoPlayer(
     zoomLevel: Float,
     exoPlayer: androidx.media3.exoplayer.ExoPlayer?,
     onToggleControls: () -> Unit,
+    recenterTrigger: Int = 0,
     modifier: SubspaceModifier = SubspaceModifier
 ) {
     if (videoFormat == com.example.myapplication.ui.viewmodel.VideoFormat.Format2D) {
@@ -294,7 +298,8 @@ fun SpatialVideoPlayer(
                 videoFormat = videoFormat,
                 stereoMode = stereoMode,
                 zoomLevel = zoomLevel,
-                exoPlayer = exoPlayer
+                exoPlayer = exoPlayer,
+                recenterTrigger = recenterTrigger
             )
         } else {
             // Fallback if no session (shouldn't happen in XR)
@@ -371,9 +376,9 @@ fun ImmersiveVideoPlayer(
     videoFormat: com.example.myapplication.ui.viewmodel.VideoFormat,
     stereoMode: com.example.myapplication.ui.viewmodel.StereoMode,
     zoomLevel: Float,
-    exoPlayer: androidx.media3.exoplayer.ExoPlayer?
+    exoPlayer: androidx.media3.exoplayer.ExoPlayer?,
+    recenterTrigger: Int
 ) {
-    var recenterTrigger by remember { mutableStateOf(0) }
 
     DisposableEffect(videoFormat, stereoMode, exoPlayer, recenterTrigger) {
         println("XR: Creating Immersive SurfaceEntity for $videoFormat / $stereoMode (recenter: $recenterTrigger)")
@@ -433,20 +438,6 @@ fun ImmersiveVideoPlayer(
         }
     }
 
-    // Recenter button (Orbiter) - for immersive mode
-    Orbiter(
-        position = ContentEdge.Bottom,
-        offset = 100.dp,
-        alignment = Alignment.CenterHorizontally
-    ) {
-        Button(
-            onClick = { recenterTrigger++ },
-            colors = ButtonDefaults.buttonColors(
-                containerColor = MaterialTheme.colorScheme.primaryContainer
-            ),
-            modifier = Modifier.padding(16.dp)
-        ) {
-            Text("Recenter View")
-        }
-    }
+    // Recenter button removed - moved to playback controls
+
 }
