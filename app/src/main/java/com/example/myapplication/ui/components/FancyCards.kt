@@ -26,6 +26,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Home
@@ -180,6 +181,7 @@ fun LocalStorageCard(
 fun FancyServerCard(
     server: SavedServer,
     onClick: () -> Unit,
+    onEdit: () -> Unit,
     onDelete: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -219,13 +221,13 @@ fun FancyServerCard(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
+                .padding(12.dp), // Reduced padding from 16.dp
             verticalAlignment = Alignment.CenterVertically
         ) {
             // Server Icon
             Box(
                 modifier = Modifier
-                    .size(56.dp)
+                    .size(48.dp) // Reduced size from 56.dp
                     .clip(CircleShape)
                     .background(
                         brush = Brush.linearGradient(
@@ -238,11 +240,11 @@ fun FancyServerCard(
                     imageVector = Icons.Filled.Storage,
                     contentDescription = "Server",
                     tint = TextPrimary,
-                    modifier = Modifier.size(32.dp)
+                    modifier = Modifier.size(28.dp) // Reduced size from 32.dp
                 )
             }
 
-            Spacer(modifier = Modifier.width(16.dp))
+            Spacer(modifier = Modifier.width(12.dp)) // Reduced spacing from 16.dp
 
             // Server Info
             Column(
@@ -252,16 +254,28 @@ fun FancyServerCard(
                     text = server.serverName,
                     style = MaterialTheme.typography.titleMedium,
                     color = TextPrimary,
-                    maxLines = 1,
+                    maxLines = 2, // Increased maxLines
                     overflow = TextOverflow.Ellipsis
                 )
-                Spacer(modifier = Modifier.height(4.dp))
+                Spacer(modifier = Modifier.height(2.dp)) // Reduced spacing
                 Text(
                     text = "${server.serverAddress}/${server.shareName}",
                     style = MaterialTheme.typography.bodySmall,
                     color = TextSecondary,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
+                )
+            }
+
+            // Edit Button
+            IconButton(
+                onClick = onEdit,
+                modifier = Modifier.size(40.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Edit,
+                    contentDescription = "Edit Server",
+                    tint = TextSecondary
                 )
             }
 
@@ -475,6 +489,7 @@ fun FancyFileCard(
             ) {
                 if (isVideoFile && videoPath != null) {
                     // Show thumbnail for video files with fallback icon
+                    android.util.Log.d("FancyFileCard", "Rendering thumbnail for: $videoPath")
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
@@ -482,10 +497,21 @@ fun FancyFileCard(
                         contentAlignment = Alignment.Center
                     ) {
                         AsyncImage(
-                            model = videoPath,
+                            model = coil.request.ImageRequest.Builder(androidx.compose.ui.platform.LocalContext.current)
+                                .data(videoPath)
+                                .diskCacheKey(videoPath) // Explicitly set cache key
+                                .diskCachePolicy(coil.request.CachePolicy.ENABLED)
+                                .memoryCachePolicy(coil.request.CachePolicy.ENABLED)
+                                .build(),
                             contentDescription = "Video thumbnail",
                             modifier = Modifier.fillMaxSize(),
-                            contentScale = ContentScale.Crop
+                            contentScale = ContentScale.Crop,
+                            onState = { state ->
+                                android.util.Log.d("FancyFileCard", "AsyncImage state: $state")
+                                if (state is coil.compose.AsyncImagePainter.State.Error) {
+                                    android.util.Log.e("FancyFileCard", "AsyncImage Error: ${state.result.throwable.message}", state.result.throwable)
+                                }
+                            }
                         )
                     }
                 } else {

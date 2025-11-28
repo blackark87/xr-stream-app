@@ -15,7 +15,13 @@ import com.example.myapplication.utils.VideoThumbnailFetcher
  */
 class XRStreamApplication : Application(), ImageLoaderFactory {
 
+    override fun onCreate() {
+        super.onCreate()
+        android.util.Log.d("XRStreamApplication", "Application created")
+    }
+
     override fun newImageLoader(): ImageLoader {
+        android.util.Log.d("XRStreamApplication", "Creating new ImageLoader with VideoThumbnailFetcher")
         return ImageLoader.Builder(this)
             .components {
                 // Add video frame decoder for extracting frames from videos
@@ -29,9 +35,11 @@ class XRStreamApplication : Application(), ImageLoaderFactory {
                     .build()
             }
             .diskCache {
+                val cacheDir = cacheDir.resolve("image_cache")
+                android.util.Log.d("XRStreamApplication", "Configuring disk cache at: ${cacheDir.absolutePath}")
                 DiskCache.Builder()
-                    .directory(cacheDir.resolve("image_cache"))
-                    .maxSizePercent(0.02) // Use 2% of disk space
+                    .directory(cacheDir)
+                    .maxSizeBytes(500L * 1024 * 1024) // 500MB fixed size
                     .build()
             }
             .respectCacheHeaders(false) // Don't rely on HTTP cache headers for SMB

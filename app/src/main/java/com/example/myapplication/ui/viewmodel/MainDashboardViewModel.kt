@@ -90,6 +90,21 @@ class MainDashboardViewModel(
     }
 
     /**
+     * Update an existing server in the database
+     */
+    fun updateServer(server: SavedServer) {
+        viewModelScope.launch {
+            serverRepository.updateServer(server)
+            
+            // If updating the currently connected server, reconnect with new details if needed
+            // For now, we'll just disconnect to be safe if credentials changed
+            if (_uiState.value.selectedServer?.id == server.id) {
+                disconnect()
+            }
+        }
+    }
+
+    /**
      * Delete a server from the database
      */
     fun deleteServer(server: SavedServer) {
@@ -100,6 +115,29 @@ class MainDashboardViewModel(
             if (_uiState.value.selectedServer?.id == server.id) {
                 disconnect()
             }
+        }
+    }
+
+    /**
+     * Test connection to a server without saving it
+     */
+    suspend fun testConnection(server: SavedServer): Result<Unit> {
+        return try {
+            val config = SMBConfig(
+                serverAddress = server.serverAddress,
+                port = server.port,
+                shareName = server.shareName,
+                username = server.username,
+                password = server.password,
+                domain = server.domain
+            )
+            
+            val client = SMBClient(config)
+            val result = client.connect()
+            client.disconnect()
+            result
+        } catch (e: Exception) {
+            Result.failure(e)
         }
     }
 
@@ -229,11 +267,15 @@ class MainDashboardViewModel(
                 if (result.isSuccess) {
                     val fileList = result.getOrNull() ?: emptyList()
 
-                    // Sort: directories first, then by name
-                    val sortedFiles = fileList.sortedWith(
-                        compareByDescending<SMBFileItem> { it.isDirectory }
-                            .thenBy { it.name.lowercase() }
-                    )
+                    // Filter and Sort:
+                    // 1. Filter: Keep only directories and video files
+                    // 2. Sort: Directories first, then by name
+                    val sortedFiles = fileList
+                        .filter { it.isDirectory || SMBClient.isVideoFile(it.name) }
+                        .sortedWith(
+                            compareByDescending<SMBFileItem> { it.isDirectory }
+                                .thenBy { it.name.lowercase() }
+                        )
 
                     _files.value = sortedFiles
                     _uiState.value = _uiState.value.copy(

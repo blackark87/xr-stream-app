@@ -19,6 +19,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import kotlinx.coroutines.launch
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Error
@@ -93,6 +94,7 @@ fun MainDashboardScreen(
     val recentVideos by viewModel.recentVideos.collectAsStateWithLifecycle()
 
     var showAddServerDialog by remember { mutableStateOf(false) }
+    var serverToEdit by remember { mutableStateOf<SavedServer?>(null) }
 
     Box(
         modifier = Modifier
@@ -171,6 +173,9 @@ fun MainDashboardScreen(
                     onServerClick = { server ->
                         viewModel.connectToServer(server)
                     },
+                    onServerEdit = { server ->
+                        serverToEdit = server
+                    },
                     onServerDelete = { server ->
                         viewModel.deleteServer(server)
                     },
@@ -178,7 +183,7 @@ fun MainDashboardScreen(
                         showAddServerDialog = true
                     },
                     modifier = Modifier
-                        .weight(0.25f)
+                        .weight(0.28f) // Increased from 0.25f
                         .fillMaxHeight()
                 )
 
@@ -205,7 +210,7 @@ fun MainDashboardScreen(
                         viewModel.toggleFavoriteByPath(filePath, !isFavorite)
                     },
                     modifier = Modifier
-                        .weight(0.5f)
+                        .weight(0.44f) // Decreased from 0.5f
                         .fillMaxHeight()
                 )
 
@@ -222,19 +227,31 @@ fun MainDashboardScreen(
                         viewModel.toggleFavorite(video.id, !video.isFavorite)
                     },
                     modifier = Modifier
-                        .weight(0.25f)
+                        .weight(0.28f) // Increased from 0.25f
                         .fillMaxHeight()
                 )
             }
         }
 
-        // Add Server Dialog
-        if (showAddServerDialog) {
+        // Add/Edit Server Dialog
+        if (showAddServerDialog || serverToEdit != null) {
             AddServerDialog(
-                onDismiss = { showAddServerDialog = false },
-                onSave = { server ->
-                    viewModel.addServer(server)
+                initialServer = serverToEdit,
+                onDismiss = { 
                     showAddServerDialog = false
+                    serverToEdit = null
+                },
+                onSave = { server ->
+                    if (serverToEdit != null) {
+                        viewModel.updateServer(server)
+                    } else {
+                        viewModel.addServer(server)
+                    }
+                    showAddServerDialog = false
+                    serverToEdit = null
+                },
+                onTestConnection = { server ->
+                    viewModel.testConnection(server)
                 }
             )
         }
@@ -283,6 +300,7 @@ private fun ServerListPanel(
     selectedServer: SavedServer?,
     isConnecting: Boolean,
     onServerClick: (SavedServer) -> Unit,
+    onServerEdit: (SavedServer) -> Unit,
     onServerDelete: (SavedServer) -> Unit,
     onAddServerClick: () -> Unit,
     modifier: Modifier = Modifier
@@ -345,6 +363,7 @@ private fun ServerListPanel(
                         FancyServerCard(
                             server = server,
                             onClick = { onServerClick(server) },
+                            onEdit = { onServerEdit(server) },
                             onDelete = { onServerDelete(server) }
                         )
                     }
@@ -591,17 +610,26 @@ private fun FavoritesPanel(
 /**
  * Add Server Dialog
  */
+/**
+ * Add/Edit Server Dialog
+ */
 @Composable
 private fun AddServerDialog(
+    initialServer: SavedServer? = null,
     onDismiss: () -> Unit,
-    onSave: (SavedServer) -> Unit
+    onSave: (SavedServer) -> Unit,
+    onTestConnection: suspend (SavedServer) -> Result<Unit>
 ) {
-    var name by remember { mutableStateOf("") }
-    var address by remember { mutableStateOf("") }
-    var shareName by remember { mutableStateOf("") }
-    var username by remember { mutableStateOf("") }
-    var password by remember { mutableStateOf("") }
-    var domain by remember { mutableStateOf("") }
+    var name by remember { mutableStateOf(initialServer?.serverName ?: "") }
+    var address by remember { mutableStateOf(initialServer?.serverAddress ?: "") }
+    var shareName by remember { mutableStateOf(initialServer?.shareName ?: "") }
+    var username by remember { mutableStateOf(initialServer?.username ?: "") }
+    var password by remember { mutableStateOf(initialServer?.password ?: "") }
+    var domain by remember { mutableStateOf(initialServer?.domain ?: "") }
+
+    var isTestingConnection by remember { mutableStateOf(false) }
+    var connectionError by remember { mutableStateOf<String?>(null) }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
 
     // Use standard Dialog composable
     androidx.compose.ui.window.Dialog(
@@ -622,7 +650,7 @@ private fun AddServerDialog(
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 Text(
-                    text = "Add Server",
+                    text = if (initialServer == null) "Add Server" else "Edit Server",
                     style = MaterialTheme.typography.headlineSmall,
                     color = TextPrimary
                 )
@@ -635,7 +663,8 @@ private fun AddServerDialog(
                         onValueChange = { name = it },
                         label = { Text("Server Name") },
                         modifier = Modifier.fillMaxWidth(),
-                        singleLine = true
+                        singleLine = true,
+                        enabled = !isTestingConnection
                     )
                     OutlinedTextField(
                         value = address,
@@ -643,7 +672,8 @@ private fun AddServerDialog(
                         label = { Text("IP Address") },
                         placeholder = { Text("e.g., 192.168.1.100") },
                         modifier = Modifier.fillMaxWidth(),
-                        singleLine = true
+                        singleLine = true,
+                        enabled = !isTestingConnection
                     )
                     OutlinedTextField(
                         value = shareName,
@@ -651,14 +681,16 @@ private fun AddServerDialog(
                         label = { Text("Share Name (Optional)") },
                         placeholder = { Text("e.g., Videos") },
                         modifier = Modifier.fillMaxWidth(),
-                        singleLine = true
+                        singleLine = true,
+                        enabled = !isTestingConnection
                     )
                     OutlinedTextField(
                         value = username,
                         onValueChange = { username = it },
                         label = { Text("Username") },
                         modifier = Modifier.fillMaxWidth(),
-                        singleLine = true
+                        singleLine = true,
+                        enabled = !isTestingConnection
                     )
                     OutlinedTextField(
                         value = password,
@@ -666,14 +698,24 @@ private fun AddServerDialog(
                         label = { Text("Password") },
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true,
-                        visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation()
+                        visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                        enabled = !isTestingConnection
                     )
                     OutlinedTextField(
                         value = domain,
                         onValueChange = { domain = it },
                         label = { Text("Domain (optional)") },
                         modifier = Modifier.fillMaxWidth(),
-                        singleLine = true
+                        singleLine = true,
+                        enabled = !isTestingConnection
+                    )
+                }
+
+                if (connectionError != null) {
+                    Text(
+                        text = connectionError!!,
+                        color = ErrorRed,
+                        style = MaterialTheme.typography.bodySmall
                     )
                 }
 
@@ -682,26 +724,42 @@ private fun AddServerDialog(
                     horizontalArrangement = Arrangement.End,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    TextButton(onClick = onDismiss) {
+                    TextButton(
+                        onClick = onDismiss,
+                        enabled = !isTestingConnection
+                    ) {
                         Text("Cancel", color = TextSecondary)
                     }
                     Spacer(modifier = Modifier.width(8.dp))
 
-                    val isSaveEnabled = name.isNotBlank() && address.isNotBlank()
+                    val isSaveEnabled = name.isNotBlank() && address.isNotBlank() && !isTestingConnection
 
                     Button(
                         onClick = {
                             if (isSaveEnabled) {
-                                onSave(
-                                    SavedServer(
+                                scope.launch {
+                                    isTestingConnection = true
+                                    connectionError = null
+                                    
+                                    val serverToSave = SavedServer(
+                                        id = initialServer?.id ?: 0, // Preserve ID if editing
                                         serverName = name,
                                         serverAddress = address,
-                                        shareName = shareName, // Can be empty
+                                        shareName = shareName,
                                         username = username,
                                         password = password,
                                         domain = domain
                                     )
-                                )
+
+                                    val result = onTestConnection(serverToSave)
+                                    
+                                    if (result.isSuccess) {
+                                        onSave(serverToSave)
+                                    } else {
+                                        connectionError = "Connection failed: ${result.exceptionOrNull()?.message}"
+                                        isTestingConnection = false
+                                    }
+                                }
                             }
                         },
                         colors = ButtonDefaults.buttonColors(
@@ -709,7 +767,15 @@ private fun AddServerDialog(
                         ),
                         enabled = isSaveEnabled
                     ) {
-                        Text("Save")
+                        if (isTestingConnection) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(24.dp),
+                                color = TextPrimary,
+                                strokeWidth = 2.dp
+                            )
+                        } else {
+                            Text("Save")
+                        }
                     }
                 }
             }
