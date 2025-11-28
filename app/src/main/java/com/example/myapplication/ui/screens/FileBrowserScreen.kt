@@ -140,6 +140,9 @@ fun FileBrowserScreen(
             // Get filtered files
             val filteredFiles = fileBrowserViewModel.getFilteredFiles()
 
+            // Debug logging
+            android.util.Log.d("FileBrowser", "Filter active: ${state.showVideosOnly}, Total files: ${state.files.size}, Filtered: ${filteredFiles.size}")
+
             // File list
             if (filteredFiles.isEmpty() && !state.isLoading) {
                 Box(
@@ -160,6 +163,9 @@ fun FileBrowserScreen(
                 ) {
                     items(filteredFiles) { file ->
                         val isVideo = SMBClient.isVideoFile(file.name)
+                        if (isVideo) {
+                            android.util.Log.d("FileBrowser", "Video file: ${file.name}, path: ${file.path}")
+                        }
                         FancyFileCard(
                             fileName = file.name,
                             isDirectory = file.isDirectory,

@@ -474,7 +474,7 @@ fun FancyFileCard(
                 contentAlignment = Alignment.Center
             ) {
                 if (isVideoFile && videoPath != null) {
-                    // Show thumbnail for video files
+                    // Show thumbnail for video files with fallback icon
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
@@ -485,17 +485,7 @@ fun FancyFileCard(
                             model = videoPath,
                             contentDescription = "Video thumbnail",
                             modifier = Modifier.fillMaxSize(),
-                            contentScale = ContentScale.Crop,
-                            onError = {
-                                // Error loading thumbnail - placeholder will show
-                            }
-                        )
-                        // Overlay icon on thumbnail
-                        Icon(
-                            imageVector = Icons.Filled.Movie,
-                            contentDescription = null,
-                            tint = TextPrimary.copy(alpha = 0.7f),
-                            modifier = Modifier.size(24.dp)
+                            contentScale = ContentScale.Crop
                         )
                     }
                 } else {
