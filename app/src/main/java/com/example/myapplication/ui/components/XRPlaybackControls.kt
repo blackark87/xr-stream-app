@@ -42,8 +42,6 @@ import androidx.compose.ui.unit.dp
 import androidx.media3.common.util.UnstableApi
 import com.example.myapplication.ui.viewmodel.StereoMode
 import com.example.myapplication.ui.viewmodel.VideoFormat
-import androidx.xr.scenecore.InputEvent;
-import androidx.xr.scenecore.InputEvent.Source;
 import com.example.myapplication.ui.viewmodel.VideoPlayerState
 import com.example.myapplication.ui.viewmodel.VideoPlayerViewModel
 import kotlin.math.roundToInt

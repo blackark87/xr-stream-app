@@ -1,7 +1,6 @@
 package com.example.myapplication.ui.screens
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,8 +15,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.FilterList
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
@@ -141,7 +138,10 @@ fun FileBrowserScreen(
             val filteredFiles = fileBrowserViewModel.getFilteredFiles()
 
             // Debug logging
-            android.util.Log.d("FileBrowser", "Filter active: ${state.showVideosOnly}, Total files: ${state.files.size}, Filtered: ${filteredFiles.size}")
+            android.util.Log.d(
+                "FileBrowser",
+                "Filter active: ${state.showVideosOnly}, Total files: ${state.files.size}, Filtered: ${filteredFiles.size}"
+            )
 
             // File list
             if (filteredFiles.isEmpty() && !state.isLoading) {
@@ -164,7 +164,10 @@ fun FileBrowserScreen(
                     items(filteredFiles) { file ->
                         val isVideo = SMBClient.isVideoFile(file.name)
                         if (isVideo) {
-                            android.util.Log.d("FileBrowser", "Video file: ${file.name}, path: ${file.path}")
+                            android.util.Log.d(
+                                "FileBrowser",
+                                "Video file: ${file.name}, path: ${file.path}"
+                            )
                         }
                         FancyFileCard(
                             fileName = file.name,

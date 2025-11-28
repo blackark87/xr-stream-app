@@ -11,11 +11,8 @@ import coil.fetch.FetchResult
 import coil.fetch.Fetcher
 import coil.fetch.SourceResult
 import coil.request.Options
-import com.example.myapplication.AppState
 import okio.Buffer
-import okio.buffer
 import okio.source
-import java.io.ByteArrayInputStream
 
 /**
  * Custom Coil Fetcher for extracting video thumbnails from SMB and local files
@@ -34,10 +31,12 @@ class VideoThumbnailFetcher(
                     // For SMB videos, extract thumbnail using MediaMetadataRetriever with custom data source
                     extractSMBThumbnail(data)
                 }
+
                 "file", null -> {
                     // For local files, use standard MediaMetadataRetriever
                     extractLocalThumbnail(data)
                 }
+
                 else -> null
             }
         } catch (e: Exception) {
@@ -157,7 +156,8 @@ class VideoThumbnailFetcher(
         }
 
         private fun isVideoFile(path: String): Boolean {
-            val videoExtensions = listOf(".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".webm", ".m4v")
+            val videoExtensions =
+                listOf(".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".webm", ".m4v")
             return videoExtensions.any { path.lowercase().endsWith(it) }
         }
     }

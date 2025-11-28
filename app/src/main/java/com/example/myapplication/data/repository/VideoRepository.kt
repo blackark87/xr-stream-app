@@ -63,9 +63,16 @@ class VideoRepository(private val videoDao: VideoDao) {
     suspend fun updateVideoFormat(videoId: Long, format: String) {
         try {
             videoDao.updateVideoFormat(videoId, format)
-            Log.d("VideoRepository", "Successfully updated video format to $format for video ID: $videoId")
+            Log.d(
+                "VideoRepository",
+                "Successfully updated video format to $format for video ID: $videoId"
+            )
         } catch (e: Exception) {
-            Log.e("VideoRepository", "Failed to update video format for video $videoId: ${e.message}", e)
+            Log.e(
+                "VideoRepository",
+                "Failed to update video format for video $videoId: ${e.message}",
+                e
+            )
             throw e // Re-throw so caller knows it failed
         }
     }
@@ -73,9 +80,16 @@ class VideoRepository(private val videoDao: VideoDao) {
     suspend fun updateStereoMode(videoId: Long, mode: String) {
         try {
             videoDao.updateStereoMode(videoId, mode)
-            Log.d("VideoRepository", "Successfully updated stereo mode to $mode for video ID: $videoId")
+            Log.d(
+                "VideoRepository",
+                "Successfully updated stereo mode to $mode for video ID: $videoId"
+            )
         } catch (e: Exception) {
-            Log.e("VideoRepository", "Failed to update stereo mode for video $videoId: ${e.message}", e)
+            Log.e(
+                "VideoRepository",
+                "Failed to update stereo mode for video $videoId: ${e.message}",
+                e
+            )
             throw e // Re-throw so caller knows it failed
         }
     }
