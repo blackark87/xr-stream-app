@@ -99,33 +99,51 @@ fun FileBrowserScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
-            // Filter chip
+            // BIG VISIBLE FILTER STATUS
+            Text(
+                text = "FILTER STATUS: ${if (state.showVideosOnly) "VIDEOS ONLY" else "ALL FILES"}",
+                style = MaterialTheme.typography.titleLarge,
+                color = if (state.showVideosOnly) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                modifier = Modifier.padding(vertical = 8.dp)
+            )
+
+            // Filter chip - LARGE AND VISIBLE
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 FilterChip(
                     selected = state.showVideosOnly,
-                    onClick = { fileBrowserViewModel.toggleVideoFilter() },
-                    label = { Text("Videos Only") },
+                    onClick = {
+                        android.util.Log.d("FileBrowser", "Filter chip clicked! Current: ${state.showVideosOnly}")
+                        fileBrowserViewModel.toggleVideoFilter()
+                    },
+                    label = {
+                        Text(
+                            "Videos Only Filter",
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                    },
                     leadingIcon = {
                         Icon(
                             imageVector = Icons.Filled.FilterList,
                             contentDescription = "Filter",
-                            modifier = Modifier.size(18.dp)
+                            modifier = Modifier.size(24.dp)
                         )
                     },
                     colors = FilterChipDefaults.filterChipColors(
-                        selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
-                        selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
-                    )
+                        selectedContainerColor = MaterialTheme.colorScheme.primary,
+                        selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
+                        labelColor = MaterialTheme.colorScheme.onSurface
+                    ),
+                    modifier = Modifier.height(56.dp)
                 )
             }
 
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
             // Current path
             Text(
@@ -141,6 +159,14 @@ fun FileBrowserScreen(
             android.util.Log.d(
                 "FileBrowser",
                 "Filter active: ${state.showVideosOnly}, Total files: ${state.files.size}, Filtered: ${filteredFiles.size}"
+            )
+
+            // Show file counts PROMINENTLY
+            Text(
+                text = "Showing ${filteredFiles.size} of ${state.files.size} items",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.secondary,
+                modifier = Modifier.padding(vertical = 8.dp)
             )
 
             // File list
@@ -163,6 +189,7 @@ fun FileBrowserScreen(
                 ) {
                     items(filteredFiles) { file ->
                         val isVideo = SMBClient.isVideoFile(file.name)
+                        android.util.Log.d("FileBrowser", "Displaying: ${file.name}, isDir: ${file.isDirectory}, isVideo: $isVideo")
                         if (isVideo) {
                             android.util.Log.d(
                                 "FileBrowser",
