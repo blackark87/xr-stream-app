@@ -1,5 +1,7 @@
 package com.example.myapplication.ui.components
 
+import android.annotation.SuppressLint
+import androidx.annotation.OptIn
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -37,12 +39,16 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import androidx.media3.common.util.UnstableApi
+import com.example.myapplication.ui.viewmodel.StereoMode
+import com.example.myapplication.ui.viewmodel.VideoFormat
 import androidx.xr.scenecore.InputEvent;
 import androidx.xr.scenecore.InputEvent.Source;
 import com.example.myapplication.ui.viewmodel.VideoPlayerState
 import com.example.myapplication.ui.viewmodel.VideoPlayerViewModel
 import kotlin.math.roundToInt
 
+@OptIn(UnstableApi::class)
 @Composable
 fun XRPlaybackControls(
     videoPlayerViewModel: VideoPlayerViewModel,
@@ -384,7 +390,7 @@ fun XRPlaybackControls(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            com.example.myapplication.ui.viewmodel.VideoFormat.entries
+                            VideoFormat.entries
                                 .forEach { format ->
                                     Button(
                                         onClick = { videoPlayerViewModel.setVideoFormat(format) },
@@ -421,7 +427,7 @@ fun XRPlaybackControls(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            com.example.myapplication.ui.viewmodel.StereoMode.entries
+                            StereoMode.entries
                                 .forEach { mode ->
                                     Button(
                                         onClick = { videoPlayerViewModel.setStereoMode(mode) },
@@ -481,8 +487,9 @@ fun XRPlaybackControls(
     }
 }
 
+@SuppressLint("DefaultLocale")
 fun formatTime(milliseconds: Long): String {
-    if (milliseconds < 0) return "00:00"
+    if (milliseconds < 0) return "00:00:00"
 
     val totalSeconds = (milliseconds / 1000).toInt()
     val hours = totalSeconds / 3600
