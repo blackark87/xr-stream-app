@@ -1,5 +1,6 @@
 package com.example.myapplication.ui.screens
 
+import androidx.annotation.OptIn
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -17,6 +18,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -26,6 +28,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.media3.common.util.UnstableApi
 import androidx.xr.compose.platform.LocalSession
 import androidx.xr.compose.spatial.ContentEdge
 import androidx.xr.compose.spatial.Orbiter
@@ -48,12 +51,14 @@ import androidx.xr.runtime.math.Pose
 import androidx.xr.runtime.math.Vector3
 import androidx.xr.scenecore.SurfaceEntity
 import androidx.xr.scenecore.scene
+
 import com.example.myapplication.data.database.AppDatabase
 import com.example.myapplication.data.repository.VideoRepository
 import com.example.myapplication.ui.components.XRPlaybackControls
 import com.example.myapplication.ui.viewmodel.VideoPlayerViewModel
 import com.example.myapplication.ui.viewmodel.VideoPlayerViewModelFactory
 
+@OptIn(UnstableApi::class)
 @Composable
 fun VideoPlayerScreen(
     videoFilePath: String,
@@ -95,6 +100,18 @@ fun VideoPlayerScreen(
             videoPlayerViewModel.initializePlayer(context, smbConfig, videoFile)
         } else {
             println("XR: Skipping player init - Missing file or config")
+        }
+    }
+
+    // Handle player events (e.g. navigation)
+    LaunchedEffect(videoPlayerViewModel) {
+        videoPlayerViewModel.playerEvents.collect { event ->
+            when (event) {
+                is com.example.myapplication.ui.viewmodel.PlayerEvent.NavigateBack -> {
+                    println("XR: Received NavigateBack event")
+                    onNavigateBack()
+                }
+            }
         }
     }
 
@@ -146,6 +163,7 @@ fun VideoPlayerScreen(
     }
 }
 
+@OptIn(UnstableApi::class)
 @Composable
 fun SpatialVideoPlayerContent(
     videoPlayerViewModel: VideoPlayerViewModel,
@@ -154,15 +172,15 @@ fun SpatialVideoPlayerContent(
 ) {
     println("XR: SpatialVideoPlayerContent composed. Format: ${playerState.videoFormat}")
     val exoPlayer by videoPlayerViewModel.playerFlow.collectAsState()
-    var showControls by remember { mutableStateOf(true) }  // Start with controls visible
-    var recenterTrigger by remember { mutableStateOf(0) }
+    val showControls = playerState.showControls
+    var recenterTrigger by remember { mutableIntStateOf(0) }
     val session = LocalSession.current
 
     // Auto-hide controls after 5 seconds
     LaunchedEffect(showControls) {
         if (showControls) {
             kotlinx.coroutines.delay(10000)
-            showControls = false
+            videoPlayerViewModel.setControlsVisibility(false)
         }
     }
 
@@ -183,7 +201,8 @@ fun SpatialVideoPlayerContent(
                         stereoMode = playerState.stereoMode,
                         zoomLevel = playerState.zoomLevel,
                         exoPlayer = exoPlayer,
-                        onToggleControls = { showControls = !showControls },
+                        onToggleControls = videoPlayerViewModel::toggleControls,
+
                         modifier = SubspaceModifier
                             .width(1280.dp)
                             .height(720.dp)
@@ -206,8 +225,9 @@ fun SpatialVideoPlayerContent(
                             stereoMode = playerState.stereoMode,
                             zoomLevel = playerState.zoomLevel,
                             exoPlayer = exoPlayer,
-                            onToggleControls = { showControls = !showControls },
+                            onToggleControls = videoPlayerViewModel::toggleControls,
                             recenterTrigger = recenterTrigger,
+
                             modifier = SubspaceModifier.fillMaxSize()
                         )
                     }
@@ -232,7 +252,7 @@ fun SpatialVideoPlayerContent(
                         Box(
                             modifier = Modifier
                                 .fillMaxSize()
-                                .background(androidx.compose.ui.graphics.Color.Transparent),
+                                .background(Color.White.copy(alpha = 0.0f)),
                             contentAlignment = Alignment.BottomCenter
                         ) {
                             XRPlaybackControls(
@@ -256,6 +276,7 @@ fun SpatialVideoPlayer(
     exoPlayer: androidx.media3.exoplayer.ExoPlayer?,
     onToggleControls: () -> Unit,
     recenterTrigger: Int = 0,
+
     modifier: SubspaceModifier = SubspaceModifier
 ) {
     if (videoFormat == com.example.myapplication.ui.viewmodel.VideoFormat.Format2D) {
@@ -279,22 +300,9 @@ fun SpatialVideoPlayer(
                     stereoMode = stereoMode,
                     zoomLevel = zoomLevel,
                     exoPlayer = exoPlayer,
-                    recenterTrigger = recenterTrigger
-                )
+                    recenterTrigger = recenterTrigger,
 
-                // Click Overlay for Immersive Mode
-                // Transparent panel to capture clicks
-                SpatialPanel(modifier = SubspaceModifier.fillMaxSize()) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(Color.White.copy(alpha = 0.01f))
-                            .clickable {
-                                println("XR: Immersive overlay clicked! Toggling controls.")
-                                onToggleControls()
-                            }
-                    )
-                }
+                )
             }
         } else {
             // Fallback if no session (shouldn't happen in XR)
@@ -355,7 +363,7 @@ fun VideoPlayerOrbiter(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(Color.White.copy(alpha = 0.01f))
+                    .background(Color.Transparent)
                     .clickable {
                         println("XR: Video overlay clicked! Toggling controls.")
                         onToggleControls()
@@ -372,9 +380,11 @@ fun ImmersiveVideoPlayer(
     stereoMode: com.example.myapplication.ui.viewmodel.StereoMode,
     zoomLevel: Float,
     exoPlayer: androidx.media3.exoplayer.ExoPlayer?,
-    recenterTrigger: Int
+    recenterTrigger: Int,
+
 ) {
 
+    val context = LocalContext.current
     DisposableEffect(videoFormat, stereoMode, exoPlayer, recenterTrigger) {
         println("XR: Creating Immersive SurfaceEntity for $videoFormat / $stereoMode (recenter: $recenterTrigger)")
 
@@ -430,6 +440,8 @@ fun ImmersiveVideoPlayer(
             println("XR: SurfaceEntity created at position: $headPosition, facing forward. Attaching to player.")
             exoPlayer?.setVideoSurface(entity.getSurface())
 
+
+
         } catch (e: Exception) {
             println("XR: Error creating immersive surface: ${e.message}")
             e.printStackTrace()
@@ -437,8 +449,8 @@ fun ImmersiveVideoPlayer(
 
         onDispose {
             println("XR: Disposing SurfaceEntity")
-            entity?.dispose()
             exoPlayer?.clearVideoSurface()
+            entity?.dispose()
         }
     }
 

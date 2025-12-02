@@ -16,6 +16,7 @@ import com.example.myapplication.data.repository.VideoRepository
 import com.example.myapplication.network.SMBConfig
 import com.example.myapplication.network.SMBFileItem
 import com.example.myapplication.player.SMBDataSource
+
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -23,7 +24,13 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.runBlocking
+
+sealed class PlayerEvent {
+    object NavigateBack : PlayerEvent()
+}
 
 data class VideoPlayerState(
     val isPlaying: Boolean = false,
@@ -39,7 +46,8 @@ data class VideoPlayerState(
     val stereoMode: StereoMode = StereoMode.Mono,
     val zoomLevel: Float = 1.0f,
     val playlist: List<SMBFileItem> = emptyList(),
-    val currentPlaylistIndex: Int = -1
+    val currentPlaylistIndex: Int = -1,
+    val showControls: Boolean = true
 )
 
 enum class VideoFormat {
@@ -65,6 +73,9 @@ class VideoPlayerViewModel(
     private val _playerFlow = MutableStateFlow<ExoPlayer?>(null)
     val playerFlow: StateFlow<ExoPlayer?> = _playerFlow.asStateFlow()
 
+    private val _playerEvents = Channel<PlayerEvent>()
+    val playerEvents = _playerEvents.receiveAsFlow()
+
     private var exoPlayer: ExoPlayer? = null
     private var currentVideoId: Long? = null
     private var pendingSaveJob: Job? = null
@@ -73,45 +84,13 @@ class VideoPlayerViewModel(
     private var appContext: Context? = null
     private var currentSmbConfig: SMBConfig? = null
 
-    /**
-     * Detect if video is SBS/stereo based on filename patterns
-     */
-    private fun detectStereoFromFilename(filename: String): StereoMode {
-        val lowerFilename = filename.lowercase()
-
-        // Check for Top-Bottom patterns
-        val tbPatterns = listOf(
-            "_tb", ".tb", "tb.", "_topbottom", "top-bottom", "top_bottom", "over-under"
-        )
-        if (tbPatterns.any { pattern -> lowerFilename.contains(pattern) }) {
-            return StereoMode.TopBottom
+    init {
+        // Observe global key events
+        viewModelScope.launch {
+            com.example.myapplication.AppState.keyEvents.collect { event ->
+                handleKeyEvent(event)
+            }
         }
-
-        // Check for Side-by-Side patterns
-        val sbsPatterns = listOf(
-            "_lr", "_sbs", ".sbs", "lr.", "sbs.",
-            "_3d", ".3d", "3d.", "_sidebyside",
-            "[lr]", "[sbs]", "(lr)", "(sbs)",
-            "side-by-side", "side_by_side"
-        )
-        if (sbsPatterns.any { pattern -> lowerFilename.contains(pattern) }) {
-            return StereoMode.SideBySide
-        }
-
-        // Check for 180/360 patterns (defaults to Mono unless stereo is also detected)
-        // Ideally we'd detect format too, but for now let's stick to stereo mode detection
-
-        return StereoMode.Mono
-    }
-
-    /**
-     * Detect video format from filename
-     */
-    private fun detectFormatFromFilename(filename: String): VideoFormat {
-        val lowerFilename = filename.lowercase()
-        if (lowerFilename.contains("180")) return VideoFormat.Format180
-        if (lowerFilename.contains("360")) return VideoFormat.Format360
-        return VideoFormat.Format2D
     }
 
     fun setVideoFormat(format: VideoFormat) {
@@ -156,59 +135,46 @@ class VideoPlayerViewModel(
         }
     }
 
-//    init {
-//        // Observe global key events for controller input
-//        viewModelScope.launch {
-//            com.example.myapplication.AppState.keyEvents.collect { event ->
-//                handleKeyEvent(event)
-//            }
-//        }
-//    }
+    fun toggleControls() {
+        _state.value = _state.value.copy(showControls = !_state.value.showControls)
+    }
 
-//    private fun handleKeyEvent(event: android.view.KeyEvent) {
-//        when (event.keyCode) {
-//            android.view.KeyEvent.KEYCODE_DPAD_CENTER,
-//            android.view.KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
-//            android.view.KeyEvent.KEYCODE_SPACE -> {
-//                togglePlayPause()
-//            }
-//
-//            android.view.KeyEvent.KEYCODE_DPAD_LEFT -> {
-//                seekBackward()
-//            }
-//
-//            android.view.KeyEvent.KEYCODE_DPAD_RIGHT -> {
-//                seekForward()
-//            }
-//
-//            android.view.KeyEvent.KEYCODE_BUTTON_L1 -> {
-//                playPreviousVideo()
-//            }
-//
-//            android.view.KeyEvent.KEYCODE_BUTTON_R1 -> {
-//                playNextVideo()
-//            }
-//
-//            android.view.KeyEvent.KEYCODE_BUTTON_Y -> {
-//                // Cycle stereo mode: Mono -> SBS -> TB -> Mono
-//                val currentMode = _state.value.stereoMode
-//                val nextMode = when (currentMode) {
-//                    StereoMode.Mono -> StereoMode.SideBySide
-//                    StereoMode.SideBySide -> StereoMode.TopBottom
-//                    StereoMode.TopBottom -> StereoMode.Mono
-//                }
-//                setStereoMode(nextMode)
-//            }
-//
-//            android.view.KeyEvent.KEYCODE_DPAD_UP -> {
-//                adjustZoom(0.1f)
-//            }
-//
-//            android.view.KeyEvent.KEYCODE_DPAD_DOWN -> {
-//                adjustZoom(-0.1f)
-//            }
-//        }
-//    }
+    fun setControlsVisibility(visible: Boolean) {
+        _state.value = _state.value.copy(showControls = visible)
+    }
+
+
+
+    private fun handleKeyEvent(event: android.view.KeyEvent) {
+        if (event.action == android.view.KeyEvent.ACTION_UP) {
+            Log.d("VideoPlayerViewModel", "Received KeyEvent: code=${event.keyCode}, name=${android.view.KeyEvent.keyCodeToString(event.keyCode)}")
+            when (event.keyCode) {
+                android.view.KeyEvent.KEYCODE_BUTTON_A,
+                android.view.KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> {
+                    togglePlayPause()
+                }
+                
+                android.view.KeyEvent.KEYCODE_BUTTON_R2 -> { // Trigger
+                    toggleControls()
+                }
+                
+                android.view.KeyEvent.KEYCODE_DPAD_LEFT -> {
+                    seekBackward()
+                }
+                
+                android.view.KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                    seekForward()
+                }
+
+                android.view.KeyEvent.KEYCODE_BUTTON_B,
+                android.view.KeyEvent.KEYCODE_BACK -> {
+                    viewModelScope.launch {
+                        _playerEvents.send(PlayerEvent.NavigateBack)
+                    }
+                }
+            }
+        }
+    }
 
     fun initializePlayer(
         context: Context,

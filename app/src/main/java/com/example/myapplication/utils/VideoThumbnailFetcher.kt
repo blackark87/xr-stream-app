@@ -12,6 +12,8 @@ import coil.fetch.Fetcher
 import coil.fetch.SourceResult
 import coil.request.Options
 import okio.Buffer
+import okio.FileSystem
+import okio.Path.Companion.toOkioPath
 
 /**
  * Custom Coil Fetcher for extracting video thumbnails from SMB and local files
@@ -74,8 +76,28 @@ class VideoThumbnailFetcher(
         }
     }
 
-    private fun extractSMBThumbnail(smbUrl: String): FetchResult? {
+    private suspend fun extractSMBThumbnail(smbUrl: String): FetchResult? {
         Log.d("VideoThumbnailFetcher", "Extracting SMB thumbnail for: $smbUrl")
+        
+        // 1. Check for existing local thumbnail based on hash
+        val context = options.context
+        val cacheDir = java.io.File(context.filesDir, "thumbnails")
+        if (!cacheDir.exists()) cacheDir.mkdirs()
+        
+        val fileNameHash = java.security.MessageDigest.getInstance("MD5")
+            .digest(smbUrl.toByteArray())
+            .joinToString("") { "%02x".format(it) }
+        val localFile = java.io.File(cacheDir, "$fileNameHash.jpg")
+        
+        if (localFile.exists()) {
+            Log.d("VideoThumbnailFetcher", "Found cached thumbnail: ${localFile.absolutePath}")
+            return SourceResult(
+                source = ImageSource(file = localFile.toOkioPath(), fileSystem = FileSystem.SYSTEM),
+                mimeType = "image/jpeg",
+                dataSource = DataSource.DISK
+            )
+        }
+
         var tempFile: java.io.File? = null
         val retriever = MediaMetadataRetriever()
 
@@ -108,7 +130,7 @@ class VideoThumbnailFetcher(
             smbFile.inputStream.use { input: java.io.InputStream ->
                 tempFile.outputStream().use { output ->
                     val buffer = ByteArray(64 * 1024) // 64KB buffer
-                    val maxBytes = 150 * 1024 * 1024L // 150MB limit
+                    val maxBytes = 20 * 1024 * 1024L // 20MB limit (reduced from 150MB for speed)
 
                     var bytesRead = input.read(buffer)
                     while (bytesRead != -1 && totalBytes < maxBytes) {
@@ -137,26 +159,9 @@ class VideoThumbnailFetcher(
             Log.d("VideoThumbnailFetcher", "Setting data source for MediaMetadataRetriever...")
             retriever.setDataSource(tempFile.absolutePath)
 
-            // Try to get video duration to pick a better frame
-            val durationStr =
-                retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
-            val durationMs = durationStr?.toLongOrNull() ?: 0L
-
             // Target: 10% of video or 30 seconds, whichever is smaller
             // But at least 2 seconds if possible
-            val targetTimeUs = if (durationMs > 0) {
-                val tenPercent = durationMs * 1000L / 10L
-                val thirtySeconds = 30 * 1000 * 1000L
-                val target = minOf(tenPercent, thirtySeconds)
-                maxOf(target, 2000000L) // At least 2s
-            } else {
-                2000000L // Default to 2s if duration unknown
-            }
-
-            Log.d(
-                "VideoThumbnailFetcher",
-                "Video duration: ${durationMs}ms. Target time: ${targetTimeUs}us"
-            )
+            val targetTimeUs = 2000000L // Default to 2s
 
             var bitmap =
                 retriever.getFrameAtTime(targetTimeUs, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
@@ -185,21 +190,27 @@ class VideoThumbnailFetcher(
             }
             Log.d("VideoThumbnailFetcher", "Extracted bitmap: ${bitmap.width}x${bitmap.height}")
 
-            // Convert to Coil result
-            val buffer = Buffer()
-            bitmap.compress(Bitmap.CompressFormat.JPEG, 85, buffer.outputStream())
+            // Save to permanent local file
+            localFile.outputStream().use { out ->
+                bitmap.compress(Bitmap.CompressFormat.JPEG, 85, out)
+            }
+            Log.d("VideoThumbnailFetcher", "Saved thumbnail to: ${localFile.absolutePath}")
 
-            // Check cache dir size
-            val cacheDir = options.context.cacheDir.resolve("image_cache")
-            val cacheSize = if (cacheDir.exists()) cacheDir.walkTopDown().filter { it.isFile }
-                .map { it.length() }.sum() else 0L
-            Log.d(
-                "VideoThumbnailFetcher",
-                "Successfully created thumbnail source. Cache dir size: ${cacheSize / 1024} KB"
-            )
+            // Update DB if record exists
+            try {
+                val db = com.example.myapplication.data.database.AppDatabase.getDatabase(context)
+                val video = db.videoDao().getVideoByPath(smbUrl)
+                if (video != null) {
+                    db.videoDao().updateThumbnailPath(video.id, localFile.absolutePath)
+                    Log.d("VideoThumbnailFetcher", "Updated DB thumbnail path for video ${video.id}")
+                }
+            } catch (e: Exception) {
+                Log.e("VideoThumbnailFetcher", "Failed to update DB", e)
+            }
 
+            // Convert to Coil result from the SAVED file
             SourceResult(
-                source = ImageSource(buffer, options.context),
+                source = ImageSource(file = localFile.toOkioPath(), fileSystem = FileSystem.SYSTEM),
                 mimeType = "image/jpeg",
                 dataSource = DataSource.NETWORK
             )
@@ -237,7 +248,7 @@ class VideoThumbnailFetcher(
         bitmap.compress(Bitmap.CompressFormat.JPEG, 85, buffer.outputStream())
 
         return SourceResult(
-            source = ImageSource(buffer, options.context),
+            source = ImageSource(source = buffer, context = options.context),
             mimeType = "image/jpeg",
             dataSource = DataSource.MEMORY
         )

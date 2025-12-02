@@ -59,4 +59,7 @@ interface VideoDao {
 
     @Query("UPDATE recent_videos SET stereoMode = :mode WHERE id = :videoId")
     suspend fun updateStereoMode(videoId: Long, mode: String)
+
+    @Query("UPDATE recent_videos SET thumbnailPath = :path WHERE id = :videoId")
+    suspend fun updateThumbnailPath(videoId: Long, path: String)
 }
