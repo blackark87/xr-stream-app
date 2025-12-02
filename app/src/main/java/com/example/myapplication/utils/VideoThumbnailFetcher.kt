@@ -55,9 +55,12 @@ class VideoThumbnailFetcher(
                 MediaMetadataRetriever.OPTION_CLOSEST_SYNC
             ) ?: return null
 
+            // Process bitmap for SBS 3D if needed
+            val processedBitmap = processBitmap(bitmap)
+
             // Convert bitmap to Coil-compatible result
             val buffer = Buffer()
-            bitmap.compress(Bitmap.CompressFormat.JPEG, 85, buffer.outputStream())
+            processedBitmap.compress(Bitmap.CompressFormat.JPEG, 85, buffer.outputStream())
 
             SourceResult(
                 source = ImageSource(buffer, options.context),
@@ -188,11 +191,15 @@ class VideoThumbnailFetcher(
                 // Return fallback image to prevent re-downloading
                 return createFallbackResult()
             }
-            Log.d("VideoThumbnailFetcher", "Extracted bitmap: ${bitmap.width}x${bitmap.height}")
+
+            // Process bitmap for SBS 3D if needed
+            val processedBitmap = processBitmap(bitmap)
+
+            Log.d("VideoThumbnailFetcher", "Extracted bitmap: ${processedBitmap.width}x${processedBitmap.height}")
 
             // Save to permanent local file
             localFile.outputStream().use { out ->
-                bitmap.compress(Bitmap.CompressFormat.JPEG, 85, out)
+                processedBitmap.compress(Bitmap.CompressFormat.JPEG, 85, out)
             }
             Log.d("VideoThumbnailFetcher", "Saved thumbnail to: ${localFile.absolutePath}")
 
@@ -236,6 +243,28 @@ class VideoThumbnailFetcher(
                 Log.e("VideoThumbnailFetcher", "Error deleting temp file", e)
             }
         }
+    }
+
+    private fun processBitmap(bitmap: Bitmap): Bitmap {
+        val width = bitmap.width
+        val height = bitmap.height
+
+        Log.d("VideoThumbnailFetcher", "Processing bitmap: ${width}x${height}")
+
+        // Check for specific SBS resolutions: 4096x2048 or 8192x4096
+        if ((width == 4096 && height == 2048) || (width == 8192 && height == 4096)) {
+            Log.d("VideoThumbnailFetcher", "Detected 3D SBS video. Cropping thumbnail.")
+            // Crop to left half
+            val croppedBitmap = Bitmap.createBitmap(bitmap, 0, 0, width / 2, height)
+            if (croppedBitmap != bitmap) {
+                bitmap.recycle()
+            }
+            return croppedBitmap
+        }
+
+        // FHD (1920x1080) and 4K UHD (3840x2160) are explicitly kept as is.
+        // Other resolutions are also kept by default.
+        return bitmap
     }
 
     private fun createFallbackResult(): SourceResult {
