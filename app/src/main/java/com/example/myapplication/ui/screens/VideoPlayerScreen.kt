@@ -29,6 +29,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.ui.PlayerView
+import androidx.media3.ui.AspectRatioFrameLayout
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.xr.compose.platform.LocalSession
 import androidx.xr.compose.spatial.ContentEdge
 import androidx.xr.compose.spatial.Orbiter
@@ -188,25 +192,30 @@ fun SpatialVideoPlayerContent(
 
     Subspace {
         SpatialBox(modifier = SubspaceModifier.fillMaxSize()) {
-            // For 2D mode: Use SpatialExternalSurface which is designed for XR video rendering
+            // For 2D mode: Use SpatialPanel with Standard2DPlayer to make it movable
             if (playerState.videoFormat == com.example.myapplication.ui.viewmodel.VideoFormat.Format2D) {
-                // Render 2D video using the spatial video player
-                // Wrap in SpatialColumn to center it
-                androidx.xr.compose.subspace.SpatialColumn(
-                    modifier = SubspaceModifier.fillMaxSize(),
-                    alignment = SpatialAlignment.Center
+                // Render 2D video using standard Android PlayerView inside a SpatialPanel
+                // This allows the user to move/drag the screen
+                SpatialPanel(
+                    modifier = SubspaceModifier
+                        .width(1280.dp)
+                        .height(720.dp)
                 ) {
-                    SpatialVideoPlayer(
-                        videoFormat = playerState.videoFormat,
-                        stereoMode = playerState.stereoMode,
-                        zoomLevel = playerState.zoomLevel,
-                        exoPlayer = exoPlayer,
-                        onToggleControls = videoPlayerViewModel::toggleControls,
+                    Box(modifier = Modifier.fillMaxSize()) {
+                        Standard2DPlayer(
+                            exoPlayer = exoPlayer,
+                            onToggleControls = videoPlayerViewModel::toggleControls
+                        )
 
-                        modifier = SubspaceModifier
-                            .width(1280.dp)
-                            .height(720.dp)
-                    )
+                        // Overlay controls if visible
+                        if (showControls && !playerState.isLoading && playerState.error == null) {
+                            XRPlaybackControls(
+                                videoPlayerViewModel = videoPlayerViewModel,
+                                playerState = playerState,
+                                onNavigateBack = onNavigateBack
+                            )
+                        }
+                    }
                 }
             } else {
                 // For immersive modes (180/360), use SpatialBox as it shouldn't be movable
@@ -234,10 +243,11 @@ fun SpatialVideoPlayerContent(
                 }
             }
 
-            // Controls Panel positioned at center
+            // Controls Panel positioned at center (For 3D modes only)
             // Placed after video to ensure it's on top (Z-order)
             // Added Z-offset to bring it closer to the user and ensure it captures clicks
-            if (showControls && !playerState.isLoading && playerState.error == null) {
+            if (playerState.videoFormat != com.example.myapplication.ui.viewmodel.VideoFormat.Format2D &&
+                showControls && !playerState.isLoading && playerState.error == null) {
                 androidx.xr.compose.subspace.SpatialColumn(
                     modifier = SubspaceModifier.fillMaxSize(),
                     alignment = SpatialAlignment.Center
@@ -456,4 +466,39 @@ fun ImmersiveVideoPlayer(
 
     // Recenter button removed - moved to playback controls
 
+}
+
+@OptIn(UnstableApi::class)
+@Composable
+fun Standard2DPlayer(
+    exoPlayer: androidx.media3.exoplayer.ExoPlayer?,
+    onToggleControls: () -> Unit
+) {
+    Box(modifier = Modifier.fillMaxSize()) {
+        if (exoPlayer != null) {
+            AndroidView(
+                factory = { context ->
+                    PlayerView(context).apply {
+                        player = exoPlayer
+                        useController = false
+                        resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+                    }
+                },
+                update = { view ->
+                    view.player = exoPlayer
+                },
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+
+        // Click overlay to toggle controls
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null
+                ) { onToggleControls() }
+        )
+    }
 }
