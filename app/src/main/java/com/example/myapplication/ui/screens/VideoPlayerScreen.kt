@@ -48,6 +48,7 @@ import androidx.xr.compose.subspace.layout.height
 import androidx.xr.compose.subspace.layout.offset
 import androidx.xr.compose.subspace.layout.scale
 import androidx.xr.compose.subspace.layout.width
+import androidx.compose.foundation.layout.width
 import androidx.xr.runtime.Config
 import androidx.xr.runtime.Session
 import androidx.xr.runtime.math.FloatSize2d
@@ -201,7 +202,10 @@ fun SpatialVideoPlayerContent(
                         .width(1280.dp)
                         .height(720.dp)
                 ) {
-                    Box(modifier = Modifier.fillMaxSize()) {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.BottomCenter
+                    ) {
                         Standard2DPlayer(
                             exoPlayer = exoPlayer,
                             onToggleControls = videoPlayerViewModel::toggleControls
@@ -209,11 +213,18 @@ fun SpatialVideoPlayerContent(
 
                         // Overlay controls if visible
                         if (showControls && !playerState.isLoading && playerState.error == null) {
-                            XRPlaybackControls(
-                                videoPlayerViewModel = videoPlayerViewModel,
-                                playerState = playerState,
-                                onNavigateBack = onNavigateBack
-                            )
+                            // Wrap controls in a box to constrain width/padding to match original look
+                            Box(
+                                modifier = Modifier
+                                    .width(600.dp)
+                                    .padding(bottom = 24.dp)
+                            ) {
+                                XRPlaybackControls(
+                                    videoPlayerViewModel = videoPlayerViewModel,
+                                    playerState = playerState,
+                                    onNavigateBack = onNavigateBack
+                                )
+                            }
                         }
                     }
                 }
