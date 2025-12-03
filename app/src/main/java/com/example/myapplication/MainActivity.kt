@@ -14,11 +14,6 @@ import com.example.myapplication.ui.theme.MyApplicationTheme
 
 class MainActivity : ComponentActivity() {
 
-    // State for axis-to-key emulation
-    private var isStickLeftProcessed = false
-    private var isStickRightProcessed = false
-    private var isTriggerProcessed = false
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -88,9 +83,6 @@ class MainActivity : ComponentActivity() {
         // Look at Logcat for "XR_RAW_KEY" when you press buttons.
         Log.d("XR_RAW_KEY", "Key Code: ${event.keyCode} | Action: ${event.action}")
 
-        // Emit to AppState for listeners (VideoPlayerViewModel)
-        com.example.myapplication.AppState.keyEvents.tryEmit(event)
-
         return super.dispatchKeyEvent(event)
     }
 
@@ -103,50 +95,6 @@ class MainActivity : ComponentActivity() {
             // This is the laser pointer moving. We don't care about this right now.
             return super.dispatchGenericMotionEvent(event)
         }
-
-        // --- CUSTOM CONTROLLER MAPPING ---
-        val stickX = event.getAxisValue(android.view.MotionEvent.AXIS_X)
-        val threshold = 0.5f
-
-        // User requested: Left -> Seek Forward (DPAD_RIGHT), Right -> Seek Backward (DPAD_LEFT)
-        if (kotlin.math.abs(stickX) > threshold) {
-            if (stickX < -threshold && !isStickLeftProcessed) {
-                // Stick Left -> Emit DPAD_RIGHT (Forward)
-                val keyEvent = KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DPAD_RIGHT)
-                com.example.myapplication.AppState.keyEvents.tryEmit(keyEvent)
-                isStickLeftProcessed = true
-                Log.d("XR_CONTROLLER", "Stick Left -> Seek Forward")
-            } else if (stickX > threshold && !isStickRightProcessed) {
-                // Stick Right -> Emit DPAD_LEFT (Backward)
-                val keyEvent = KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DPAD_LEFT)
-                com.example.myapplication.AppState.keyEvents.tryEmit(keyEvent)
-                isStickRightProcessed = true
-                Log.d("XR_CONTROLLER", "Stick Right -> Seek Backward")
-            }
-        } else {
-            // Reset when stick returns to center
-            isStickLeftProcessed = false
-            isStickRightProcessed = false
-        }
-
-        // Trigger Handling (Map axes to Button R2)
-        val rTrigger = event.getAxisValue(android.view.MotionEvent.AXIS_RTRIGGER)
-        val lTrigger = event.getAxisValue(android.view.MotionEvent.AXIS_LTRIGGER)
-        val gas = event.getAxisValue(android.view.MotionEvent.AXIS_GAS)
-        val brake = event.getAxisValue(android.view.MotionEvent.AXIS_BRAKE)
-
-        val isTriggerDown = (rTrigger > threshold) || (lTrigger > threshold) || (gas > threshold) || (brake > threshold)
-
-        if (isTriggerDown && !isTriggerProcessed) {
-            // Emit Trigger Button (R2)
-            val keyEvent = KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_BUTTON_R2)
-            com.example.myapplication.AppState.keyEvents.tryEmit(keyEvent)
-            isTriggerProcessed = true
-            Log.d("XR_CONTROLLER", "Trigger -> Toggle UI")
-        } else if (!isTriggerDown) {
-            isTriggerProcessed = false
-        }
-        // ---------------------------------
 
         // 2. Scan ALL Axis IDs to find the Stick
         // Standard Android Axes go from 0 to 48. We check them all.
