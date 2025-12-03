@@ -88,6 +88,7 @@ class MainActivity : ComponentActivity() {
     @android.annotation.SuppressLint("RestrictedApi")
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         // Log every single key press to ensure we see "A" button and others.
+        // Using Log.i (Info) to ensure it appears even if Debug logs are filtered.
         Log.i("XR_INPUT", "KeyEvent: Code=${event.keyCode} (${KeyEvent.keyCodeToString(event.keyCode)}) | Action=${event.action} | Source=${event.source}")
 
         // Emit to AppState for listeners (VideoPlayerViewModel)
@@ -99,10 +100,12 @@ class MainActivity : ComponentActivity() {
     // 2. CATCH THUMBSTICKS (Movement)
     override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {
 
-        // Log EVERYTHING first.
+        // Log EVERYTHING first. This is crucial for debugging why logs were missing.
+        // We log the source, action, and device info.
         Log.i("XR_INPUT", "GenericMotion: Source=${event.source} | Action=${event.action} | Device=${event.device.name}")
 
         // DEBUG: Scan ALL axes to see what the controller is actually emitting.
+        // This will flood logs if the controller is noisy, but it's necessary for diagnosis.
         val debugAxisList = arrayOf(
             "AXIS_X" to MotionEvent.AXIS_X,
             "AXIS_Y" to MotionEvent.AXIS_Y,
@@ -116,8 +119,6 @@ class MainActivity : ComponentActivity() {
             "AXIS_RTRIGGER" to MotionEvent.AXIS_RTRIGGER,
             "AXIS_GAS" to MotionEvent.AXIS_GAS,
             "AXIS_BRAKE" to MotionEvent.AXIS_BRAKE,
-            "AXIS_HSCROLL" to MotionEvent.AXIS_HSCROLL,
-            "AXIS_VSCROLL" to MotionEvent.AXIS_VSCROLL,
             "AXIS_GENERIC_1" to MotionEvent.AXIS_GENERIC_1
         )
 
@@ -128,28 +129,23 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        // NOTE: We REMOVED the SOURCE_TOUCHSCREEN filter because XR controllers often
-        // report as Source 4098 (Touchscreen) when acting as a pointer.
-        // Instead, we rely on the Magnitude of the axis value to distinguish
-        // pointer coordinates (large values) from stick inputs (normalized -1 to 1).
+        // Logic Prevention: Do NOT handle simple Touchscreen taps/drags as seek operations.
+        // Touchscreens use AXIS_X/Y for absolute position.
+        if (event.isFromSource(InputDevice.SOURCE_TOUCHSCREEN)) {
+            return super.dispatchGenericMotionEvent(event)
+        }
 
         // --- CUSTOM CONTROLLER MAPPING ---
 
         // 1. SEEK LOGIC (Thumbsticks)
         // Check multiple axes to support Left/Right hands and different controller mappings.
-        // Also check SCROLL axes because "Mouse" emulation often maps sticks to scrolling.
         val stickLeftX = event.getAxisValue(MotionEvent.AXIS_X)
         val stickRightX = event.getAxisValue(MotionEvent.AXIS_Z) // Often Right Stick X
         val stickRX = event.getAxisValue(MotionEvent.AXIS_RX) // Sometimes Right Stick X
         val hatX = event.getAxisValue(MotionEvent.AXIS_HAT_X) // D-Pad
-        val hScroll = event.getAxisValue(MotionEvent.AXIS_HSCROLL) // Scroll Horizontal
 
-        // Filter out "Coordinate" axes (Large values). Stick inputs are <= 1.0 (usually).
-        // We use 1.5f as a safe threshold. Pointer coordinates are usually >> 1.5.
-        // We iterate through candidate axes and pick the largest *valid* normalized value.
-        val candidates = listOf(stickLeftX, stickRightX, stickRX, hatX, hScroll)
-        val maxAxisValue = candidates
-            .filter { kotlin.math.abs(it) <= 1.5f } // Ignore pointer coordinates
+        // Find the strongest signal
+        val maxAxisValue = listOf(stickLeftX, stickRightX, stickRX, hatX)
             .maxByOrNull { kotlin.math.abs(it) } ?: 0f
 
         val threshold = 0.5f
