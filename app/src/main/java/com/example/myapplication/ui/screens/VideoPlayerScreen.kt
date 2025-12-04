@@ -129,17 +129,29 @@ fun VideoPlayerScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(if (hasXrFeature) androidx.compose.ui.graphics.Color.Transparent else androidx.compose.ui.graphics.Color.Black)
+            .background(if (hasXrFeature && playerState.videoFormat != com.example.myapplication.ui.viewmodel.VideoFormat.Format2D) androidx.compose.ui.graphics.Color.Transparent else androidx.compose.ui.graphics.Color.Black)
     ) {
         if (hasXrFeature) {
-            // XR device detected - render spatial video content
-            // LocalSession will be available inside the Subspace
-            println("XR: Rendering SpatialVideoPlayerContent")
-            SpatialVideoPlayerContent(
-                videoPlayerViewModel = videoPlayerViewModel,
-                playerState = playerState,
-                onNavigateBack = onNavigateBack
-            )
+            // XR device detected
+            if (playerState.videoFormat == com.example.myapplication.ui.viewmodel.VideoFormat.Format2D) {
+                // For 2D videos, render in the standard Activity window (NOT Subspace).
+                // This ensures the screen behaves like a standard movable application window (like the file list).
+                println("XR: Rendering Standard 2D UI")
+                StandardVideoPlayerContent(
+                    videoPlayerViewModel = videoPlayerViewModel,
+                    playerState = playerState,
+                    onNavigateBack = onNavigateBack
+                )
+            } else {
+                // For Immersive videos (180/360), render in Subspace
+                // LocalSession will be available inside the Subspace
+                println("XR: Rendering SpatialVideoPlayerContent")
+                SpatialVideoPlayerContent(
+                    videoPlayerViewModel = videoPlayerViewModel,
+                    playerState = playerState,
+                    onNavigateBack = onNavigateBack
+                )
+            }
         } else {
             // Non-XR device - show error message
             Box(
@@ -170,6 +182,50 @@ fun VideoPlayerScreen(
 
 @OptIn(UnstableApi::class)
 @Composable
+fun StandardVideoPlayerContent(
+    videoPlayerViewModel: VideoPlayerViewModel,
+    playerState: com.example.myapplication.ui.viewmodel.VideoPlayerState,
+    onNavigateBack: () -> Unit
+) {
+    val exoPlayer by videoPlayerViewModel.playerFlow.collectAsState()
+    val showControls = playerState.showControls
+
+    // Auto-hide controls after 5 seconds
+    LaunchedEffect(showControls) {
+        if (showControls) {
+            kotlinx.coroutines.delay(10000)
+            videoPlayerViewModel.setControlsVisibility(false)
+        }
+    }
+
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.BottomCenter
+    ) {
+        Standard2DPlayer(
+            exoPlayer = exoPlayer,
+            onToggleControls = videoPlayerViewModel::toggleControls
+        )
+
+        // Overlay controls if visible
+        if (showControls && !playerState.isLoading && playerState.error == null) {
+            Box(
+                modifier = Modifier
+                    .width(600.dp)
+                    .padding(bottom = 24.dp)
+            ) {
+                XRPlaybackControls(
+                    videoPlayerViewModel = videoPlayerViewModel,
+                    playerState = playerState,
+                    onNavigateBack = onNavigateBack
+                )
+            }
+        }
+    }
+}
+
+@OptIn(UnstableApi::class)
+@Composable
 fun SpatialVideoPlayerContent(
     videoPlayerViewModel: VideoPlayerViewModel,
     playerState: com.example.myapplication.ui.viewmodel.VideoPlayerState,
@@ -188,8 +244,6 @@ fun SpatialVideoPlayerContent(
             videoPlayerViewModel.setControlsVisibility(false)
         }
     }
-
-
 
     Subspace {
         SpatialBox(modifier = SubspaceModifier.fillMaxSize()) {
@@ -226,30 +280,6 @@ fun SpatialVideoPlayerContent(
                                 )
                             }
                         }
-                    }
-                }
-            } else {
-                // For immersive modes (180/360), use SpatialBox as it shouldn't be movable
-                androidx.xr.compose.subspace.SpatialColumn(
-                    modifier = SubspaceModifier.fillMaxSize(),
-                    alignment = SpatialAlignment.Center
-                ) {
-                    SpatialBox(
-                        modifier = SubspaceModifier
-                            .width(1280.dp)
-                            .height(720.dp)
-                    ) {
-                        // Video player logic based on format
-                        SpatialVideoPlayer(
-                            videoFormat = playerState.videoFormat,
-                            stereoMode = playerState.stereoMode,
-                            zoomLevel = playerState.zoomLevel,
-                            exoPlayer = exoPlayer,
-                            onToggleControls = videoPlayerViewModel::toggleControls,
-                            recenterTrigger = recenterTrigger,
-
-                            modifier = SubspaceModifier.fillMaxSize()
-                        )
                     }
                 }
             }
