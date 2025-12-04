@@ -2,10 +2,15 @@ package com.example.myapplication
 
 import android.os.Bundle
 import android.util.Log
+import android.view.InputDevice
+import android.view.KeyEvent
+import android.view.MotionEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import android.view.KeyEvent
 import android.view.InputDevice
@@ -26,23 +31,24 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
+        logInputDevices()
+
         setContent {
             MyApplicationTheme {
                 val context = androidx.compose.ui.platform.LocalContext.current
-                var hasHeadTrackingPermission by androidx.compose.runtime.remember {
-                    androidx.compose.runtime.mutableStateOf(
-                        androidx.core.content.ContextCompat.checkSelfPermission(
+                var hasHeadTrackingPermission by remember {
+                    mutableStateOf(
+                        ContextCompat.checkSelfPermission(
                             context,
                             "android.permission.HEAD_TRACKING"
                         ) == android.content.pm.PackageManager.PERMISSION_GRANTED
                     )
                 }
 
-                var hasStoragePermission by androidx.compose.runtime.remember {
-                    val permission =
-                        "android.permission.READ_MEDIA_VIDEO"
-                    androidx.compose.runtime.mutableStateOf(
-                        androidx.core.content.ContextCompat.checkSelfPermission(
+                var hasStoragePermission by remember {
+                    val permission = "android.permission.READ_MEDIA_VIDEO"
+                    mutableStateOf(
+                        ContextCompat.checkSelfPermission(
                             context,
                             permission
                         ) == android.content.pm.PackageManager.PERMISSION_GRANTED
@@ -64,14 +70,12 @@ class MainActivity : ComponentActivity() {
                     }
                 )
 
-                androidx.compose.runtime.LaunchedEffect(Unit) {
+                LaunchedEffect(Unit) {
                     if (!hasHeadTrackingPermission) {
                         headTrackingLauncher.launch("android.permission.HEAD_TRACKING")
                     }
                     if (!hasStoragePermission) {
-                        val permission =
-                            "android.permission.READ_MEDIA_VIDEO"
-                        storageLauncher.launch(permission)
+                        storageLauncher.launch("android.permission.READ_MEDIA_VIDEO")
                     }
                 }
 
@@ -81,6 +85,15 @@ class MainActivity : ComponentActivity() {
                     context = this
                 )
             }
+        }
+    }
+
+    private fun logInputDevices() {
+        val deviceIds = InputDevice.getDeviceIds()
+        Log.i("XR_HARDWARE", "Found ${deviceIds.size} input devices:")
+        for (deviceId in deviceIds) {
+            val device = InputDevice.getDevice(deviceId)
+            Log.i("XR_HARDWARE", " - ID: ${device?.id}, Name: ${device?.name}, Sources: ${device?.sources}, Vendor: ${device?.vendorId}, Product: ${device?.productId}")
         }
     }
 
