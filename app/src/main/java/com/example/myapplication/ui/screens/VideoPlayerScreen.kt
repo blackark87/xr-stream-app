@@ -247,34 +247,48 @@ fun SpatialVideoPlayerContent(
 
     Subspace {
         SpatialBox(modifier = SubspaceModifier.fillMaxSize()) {
-            // For immersive modes (180/360), use SpatialBox as it shouldn't be movable
-            androidx.xr.compose.subspace.SpatialColumn(
-                modifier = SubspaceModifier.fillMaxSize(),
-                alignment = SpatialAlignment.Center
-            ) {
-                SpatialBox(
+            // For 2D mode: Use SpatialPanel with Standard2DPlayer to make it movable
+            if (playerState.videoFormat == com.example.myapplication.ui.viewmodel.VideoFormat.Format2D) {
+                // Render 2D video using standard Android PlayerView inside a SpatialPanel
+                // This allows the user to move/drag the screen
+                SpatialPanel(
                     modifier = SubspaceModifier
                         .width(1280.dp)
                         .height(720.dp)
                 ) {
-                    // Video player logic based on format
-                    SpatialVideoPlayer(
-                        videoFormat = playerState.videoFormat,
-                        stereoMode = playerState.stereoMode,
-                        zoomLevel = playerState.zoomLevel,
-                        exoPlayer = exoPlayer,
-                        onToggleControls = videoPlayerViewModel::toggleControls,
-                        recenterTrigger = recenterTrigger,
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.BottomCenter
+                    ) {
+                        Standard2DPlayer(
+                            exoPlayer = exoPlayer,
+                            onToggleControls = videoPlayerViewModel::toggleControls
+                        )
 
-                        modifier = SubspaceModifier.fillMaxSize()
-                    )
+                        // Overlay controls if visible
+                        if (showControls && !playerState.isLoading && playerState.error == null) {
+                            // Wrap controls in a box to constrain width/padding to match original look
+                            Box(
+                                modifier = Modifier
+                                    .width(600.dp)
+                                    .padding(bottom = 24.dp)
+                            ) {
+                                XRPlaybackControls(
+                                    videoPlayerViewModel = videoPlayerViewModel,
+                                    playerState = playerState,
+                                    onNavigateBack = onNavigateBack
+                                )
+                            }
+                        }
+                    }
                 }
             }
 
             // Controls Panel positioned at center (For 3D modes only)
             // Placed after video to ensure it's on top (Z-order)
             // Added Z-offset to bring it closer to the user and ensure it captures clicks
-            if (showControls && !playerState.isLoading && playerState.error == null) {
+            if (playerState.videoFormat != com.example.myapplication.ui.viewmodel.VideoFormat.Format2D &&
+                showControls && !playerState.isLoading && playerState.error == null) {
                 androidx.xr.compose.subspace.SpatialColumn(
                     modifier = SubspaceModifier.fillMaxSize(),
                     alignment = SpatialAlignment.Center
