@@ -18,6 +18,18 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        val defaultSmbUsername = (project.findProperty("SMB_DEFAULT_USERNAME") as String?)
+            .orEmpty()
+            .replace("\\", "\\\\")
+            .replace("\"", "\\\"")
+        val defaultSmbPassword = (project.findProperty("SMB_DEFAULT_PASSWORD") as String?)
+            .orEmpty()
+            .replace("\\", "\\\\")
+            .replace("\"", "\\\"")
+
+        buildConfigField("String", "SMB_DEFAULT_USERNAME", "\"$defaultSmbUsername\"")
+        buildConfigField("String", "SMB_DEFAULT_PASSWORD", "\"$defaultSmbPassword\"")
     }
 
     buildTypes {
@@ -35,6 +47,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 
@@ -95,6 +108,7 @@ dependencies {
     // Coil for image/video loading
     implementation(libs.coil.compose)
     implementation(libs.coil.video)
+    implementation(libs.coil.network.okhttp)
 
     // Testing
     testImplementation(libs.junit)
@@ -105,5 +119,11 @@ dependencies {
     debugImplementation(libs.androidx.compose.ui.tooling)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
 }
+
+
+
+
+
+
 
 

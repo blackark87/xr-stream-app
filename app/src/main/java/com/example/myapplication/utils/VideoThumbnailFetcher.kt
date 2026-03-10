@@ -14,10 +14,11 @@ import coil3.fetch.SourceFetchResult
 import coil3.request.Options
 import jcifs.smb.SmbFile
 import jcifs.smb.SmbRandomAccessFile
+import kotlinx.coroutines.CancellationException
 import okio.Buffer
 import okio.FileSystem
 import okio.Path.Companion.toOkioPath
-
+import java.net.URI
 /**
  * Custom Coil Fetcher for extracting video thumbnails from SMB and local files
  */
@@ -25,6 +26,9 @@ class VideoThumbnailFetcher(
     private val data: String,
     private val options: Options
 ) : Fetcher {
+
+    data class Model(val path: String)
+    private val tag = "VideoThumbnailFetcher"
     private val mb = 1024L * 1024L
     private val maxFullThumbnailDownloadBytes = 768L * mb
 
@@ -85,15 +89,18 @@ class VideoThumbnailFetcher(
     private suspend fun extractSMBThumbnail(smbUrl: String): FetchResult? {
         Log.d("VideoThumbnailFetcher", "Extracting SMB thumbnail for: $smbUrl")
 
-        // 1. Check for existing local thumbnail based on hash
+        // 1. Check for existing local thumbnail based on filename identity.
         val context = options.context
         val cacheDir = java.io.File(context.filesDir, "thumbnails")
         if (!cacheDir.exists()) cacheDir.mkdirs()
 
+        val thumbnailIdentityKey = buildThumbnailIdentityKey(smbUrl)
         val fileNameHash = java.security.MessageDigest.getInstance("MD5")
-            .digest(smbUrl.toByteArray())
+            .digest(thumbnailIdentityKey.toByteArray())
             .joinToString("") { "%02x".format(it) }
         val localFile = java.io.File(cacheDir, "$fileNameHash.jpg")
+
+        Log.d(tag, "Thumbnail identity key for $smbUrl -> $thumbnailIdentityKey")
 
         if (localFile.exists()) {
             Log.d("VideoThumbnailFetcher", "Found cached thumbnail: ${localFile.absolutePath}")
@@ -103,7 +110,12 @@ class VideoThumbnailFetcher(
                 dataSource = DataSource.DISK
             )
         }
-
+        resolveMetadataPosterThumbnail(
+            videoPath = smbUrl,
+            targetThumbnailFile = localFile,
+        )?.let {
+            return it
+        }
         var tempFile: java.io.File? = null
         val retriever = MediaMetadataRetriever()
 
@@ -214,21 +226,7 @@ class VideoThumbnailFetcher(
                 bitmap.compress(Bitmap.CompressFormat.JPEG, 85, out)
             }
             Log.d("VideoThumbnailFetcher", "Saved thumbnail to: ${localFile.absolutePath}")
-
-            // Update DB if record exists
-            try {
-                val db = com.example.myapplication.data.database.AppDatabase.getDatabase(context)
-                val video = db.videoDao().getVideoByPath(smbUrl)
-                if (video != null) {
-                    db.videoDao().updateThumbnailPath(video.id, localFile.absolutePath)
-                    Log.d(
-                        "VideoThumbnailFetcher",
-                        "Updated DB thumbnail path for video ${video.id}"
-                    )
-                }
-            } catch (e: Exception) {
-                Log.e("VideoThumbnailFetcher", "Failed to update DB", e)
-            }
+            updateVideoThumbnailPathInDb(smbUrl, localFile.absolutePath)
 
             SourceFetchResult(
                 source = ImageSource(file = localFile.toOkioPath(), fileSystem = FileSystem.SYSTEM),
@@ -255,7 +253,162 @@ class VideoThumbnailFetcher(
             }
         }
     }
+    private suspend fun resolveMetadataPosterThumbnail(
+        videoPath: String,
+        targetThumbnailFile: java.io.File,
+    ): SourceFetchResult? {
+        val folderPath = extractFolderPath(videoPath)
+        if (!isMetadataLookupEligible(folderPath)) {
+            return null
+        }
 
+        val code = extractMovieCode(videoPath)
+        if (code.isNullOrBlank()) {
+            Log.d(tag, "Metadata lookup skipped: no movie code extracted from path=$videoPath")
+            return null
+        }
+
+        Log.d(tag, "Trying metadata poster lookup for code=$code folder='$folderPath'")
+        val metadata = JvrLibraryMetadataProvider.getByCode(
+            context = options.context.applicationContext,
+            rawCode = code,
+            folderPath = folderPath,
+        ) ?: run {
+            Log.d(tag, "Metadata poster unavailable for code=$code (path=$videoPath)")
+            return null
+        }
+
+        val localPosterFile = metadata.posterUrl?.let(::resolveLocalPosterFile)
+        if (localPosterFile == null) {
+            Log.d(
+                tag,
+                "Metadata resolved for code=$code but poster is not a valid local file: ${metadata.posterUrl ?: "<none>"}"
+            )
+            return null
+        }
+
+        try {
+            localPosterFile.inputStream().use { input ->
+                targetThumbnailFile.outputStream().use { output ->
+                    input.copyTo(output)
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(
+                tag,
+                "Failed to copy poster thumbnail for code=$code from ${localPosterFile.absolutePath}: ${e.message}"
+            )
+            return null
+        }
+
+        if (!targetThumbnailFile.exists() || targetThumbnailFile.length() <= 0L) {
+            Log.w(tag, "Poster copy produced empty file for code=$code path=$videoPath")
+            return null
+        }
+
+        Log.d(
+            tag,
+            "Using metadata poster thumbnail for code=$code saved=${targetThumbnailFile.absolutePath}"
+        )
+        updateVideoThumbnailPathInDb(videoPath, targetThumbnailFile.absolutePath, metadata.title)
+
+        return SourceFetchResult(
+            source = ImageSource(file = targetThumbnailFile.toOkioPath(), fileSystem = FileSystem.SYSTEM),
+            mimeType = null,
+            dataSource = DataSource.DISK
+        )
+    }
+
+    private suspend fun updateVideoThumbnailPathInDb(
+        videoPath: String,
+        thumbnailPath: String,
+        resolvedTitle: String? = null,
+    ) {
+        try {
+            val db = com.example.myapplication.data.database.AppDatabase.getDatabase(options.context)
+            val fileName = extractFileName(videoPath)
+            if (fileName.isBlank()) {
+                Log.d(tag, "No file name extracted for thumbnail update path=$videoPath")
+                return
+            }
+
+            val video = db.videoDao().getLatestVideoByFileName(fileName)
+            if (video != null) {
+                db.videoDao().updateThumbnailAndTitle(video.id, thumbnailPath, resolvedTitle)
+                Log.d(
+                    tag,
+                    "Updated DB thumbnail/title for video ${video.id} fileName=$fileName path=$thumbnailPath title=${resolvedTitle ?: "<unchanged>"}",
+                )
+            } else {
+                Log.d(tag, "No DB video row found for thumbnail update fileName=$fileName")
+            }
+        } catch (e: CancellationException) {
+            Log.d(tag, "Skipped DB thumbnail update because job was cancelled")
+        } catch (e: Exception) {
+            Log.e(tag, "Failed to update DB thumbnail path/title for path=$videoPath", e)
+        }
+    }
+
+    private fun resolveLocalPosterFile(posterUrl: String): java.io.File? {
+        val normalized = posterUrl.trim()
+        if (normalized.isBlank()) return null
+
+        val localFile = when {
+            normalized.startsWith("file:", ignoreCase = true) -> {
+                runCatching { java.io.File(URI(normalized)) }.getOrNull()
+            }
+
+            normalized.startsWith("/") -> java.io.File(normalized)
+            else -> null
+        } ?: return null
+
+        return localFile.takeIf { it.exists() && it.length() > 0L }
+    }
+
+    private fun extractFolderPath(path: String): String {
+        val sanitized = path
+            .substringBefore('?')
+            .substringBefore('#')
+            .replace('\\', '/')
+            .trim()
+        return sanitized.substringBeforeLast('/', "")
+    }
+
+    private fun extractMovieCode(path: String): String? {
+        val fileName = extractFileName(path)
+        if (fileName.isBlank()) return null
+
+        val stem = fileName.substringBeforeLast('.', fileName)
+        val match = movieCodePattern.find(stem) ?: return null
+        val maker = match.groupValues[1].uppercase()
+        val serial = match.groupValues[2]
+        return "$maker-$serial"
+    }
+
+
+    private fun extractFileName(path: String): String {
+        return path
+            .substringBefore('?')
+            .substringBefore('#')
+            .replace('\\', '/')
+            .substringAfterLast('/')
+            .trim()
+    }
+
+    private fun buildThumbnailIdentityKey(path: String): String {
+        val fileName = extractFileName(path)
+        if (fileName.isBlank()) {
+            return path.substringBefore('?').substringBefore('#').trim().lowercase()
+        }
+
+        val stem = fileName.substringBeforeLast('.', fileName)
+        return stem.trim().lowercase().ifBlank { fileName.lowercase() }
+    }
+
+    private fun isMetadataLookupEligible(folderPath: String): Boolean {
+        val normalized = folderPath.replace('\\', '/').lowercase()
+        return makerYearPathPattern.containsMatchIn(normalized) || avVrPathPattern.containsMatchIn(normalized)
+    }
     private fun extractFrameDirectlyFromSmb(
         retriever: MediaMetadataRetriever,
         smbFile: SmbFile,
@@ -561,30 +714,49 @@ class VideoThumbnailFetcher(
         )
     }
 
-    class Factory : Fetcher.Factory<Any> {
-        override fun create(data: Any, options: Options, imageLoader: ImageLoader): Fetcher? {
-            Log.d(
-                "VideoThumbnailFetcher",
-                "Factory.create called with data type: ${data::class.java.name}"
-            )
+    class ModelFactory : Fetcher.Factory<Model> {
+        override fun create(data: Model, options: Options, imageLoader: ImageLoader): Fetcher? {
+            return createFetcherForPath(data.path, options, imageLoader)
+        }
+    }
 
-            val path = when (data) {
-                is String -> data
-                is android.net.Uri -> data.toString()
-                else -> {
-                    Log.d(
-                        "VideoThumbnailFetcher",
-                        "Factory rejected: Unsupported type ${data::class.java.name}"
-                    )
-                    return null
-                }
-            }
+    class StringFactory : Fetcher.Factory<String> {
+        override fun create(data: String, options: Options, imageLoader: ImageLoader): Fetcher? {
+            return createFetcherForPath(data, options, imageLoader)
+        }
+    }
+
+    class UriFactory : Fetcher.Factory<android.net.Uri> {
+        override fun create(
+            data: android.net.Uri,
+            options: Options,
+            imageLoader: ImageLoader
+        ): Fetcher? {
+            return createFetcherForPath(data.toString(), options, imageLoader)
+        }
+    }
+
+    class CoilUriFactory : Fetcher.Factory<coil3.Uri> {
+        override fun create(data: coil3.Uri, options: Options, imageLoader: ImageLoader): Fetcher? {
+            return createFetcherForPath(data.toString(), options, imageLoader)
+        }
+    }
+
+    companion object {
+        private val movieCodePattern = Regex("(?i)([a-z]{2,10})[-_](\\d{2,5})(?!\\d)")
+        private val makerYearPathPattern = Regex("(^|/)maker/(?:19|20)\\d{2}(/|$)", RegexOption.IGNORE_CASE)
+        private val avVrPathPattern = Regex("(^|/)av/vr(/|$)", RegexOption.IGNORE_CASE)
+        private fun createFetcherForPath(
+            path: String,
+            options: Options,
+            imageLoader: ImageLoader
+        ): Fetcher? {
+            Log.d("VideoThumbnailFetcher", "Factory checking path: $path")
 
             val isVideo = isVideoFile(path)
 
-            // Check if item exists in disk cache
-            val cacheKey = path
-            val snapshot = imageLoader.diskCache?.openSnapshot(cacheKey)
+            // Check if item exists in disk cache.
+            val snapshot = imageLoader.diskCache?.openSnapshot(path)
             val isCached = snapshot != null
             snapshot?.close()
 
@@ -607,15 +779,20 @@ class VideoThumbnailFetcher(
         }
 
         private fun isVideoFile(path: String): Boolean {
+            val sanitizedPath = path.substringBefore('?').substringBefore('#')
+            val scheme = sanitizedPath.substringBefore("://", "")
+
+            // Always accept smb:// for our custom thumbnail extraction path.
+            if (scheme.equals("smb", ignoreCase = true)) {
+                return true
+            }
+
             val videoExtensions =
                 listOf(".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".webm", ".m4v")
-            return videoExtensions.any { path.lowercase().endsWith(it) }
+            return videoExtensions.any { sanitizedPath.lowercase().endsWith(it) }
         }
     }
 }
-
-
-
 
 
 

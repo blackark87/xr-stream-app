@@ -6,17 +6,20 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import com.example.myapplication.data.database.dao.ServerDao
 import com.example.myapplication.data.database.dao.VideoDao
+import com.example.myapplication.data.database.dao.VirtualGroupMetadataDao
 import com.example.myapplication.data.database.entity.RecentVideo
 import com.example.myapplication.data.database.entity.SavedServer
+import com.example.myapplication.data.database.entity.VirtualGroupMetadata
 
 @Database(
-    entities = [SavedServer::class, RecentVideo::class],
-    version = 5,
+    entities = [SavedServer::class, RecentVideo::class, VirtualGroupMetadata::class],
+    version = 7,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun serverDao(): ServerDao
     abstract fun videoDao(): VideoDao
+    abstract fun virtualGroupMetadataDao(): VirtualGroupMetadataDao
 
     companion object {
         @Volatile

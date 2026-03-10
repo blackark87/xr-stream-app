@@ -31,7 +31,7 @@ data class MainDashboardState(
     val currentPath: String = "",
     val pathHistory: List<String> = emptyList(),
     val errorMessage: String? = null,
-    val fileViewMode: FileBrowserViewMode = FileBrowserViewMode.List
+    val fileViewMode: FileBrowserViewMode = FileBrowserViewMode.Thumbnail
 )
 
 enum class FileBrowserViewMode {
@@ -484,5 +484,6 @@ class MainDashboardViewModel(
         disconnect()
     }
 }
+
 
 

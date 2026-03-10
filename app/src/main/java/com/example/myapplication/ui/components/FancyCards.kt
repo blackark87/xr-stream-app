@@ -69,6 +69,8 @@ import com.example.myapplication.ui.theme.SuccessGreen
 import com.example.myapplication.ui.theme.TextPrimary
 import com.example.myapplication.ui.theme.TextSecondary
 import com.example.myapplication.ui.theme.TextTertiary
+import com.example.myapplication.utils.ThumbnailImageLoaderProvider
+import com.example.myapplication.utils.VideoThumbnailFetcher
 
 /**
  * Local Storage Card - Special card for device storage
@@ -359,11 +361,12 @@ fun FancyMovieCard(
                     if (video.filePath.isNotEmpty()) {
                         AsyncImage(
                             model = coil3.request.ImageRequest.Builder(androidx.compose.ui.platform.LocalContext.current)
-                                .data(video.filePath)
+                                .data(VideoThumbnailFetcher.Model(video.filePath))
                                 .diskCacheKey(video.filePath)
                                 .diskCachePolicy(coil3.request.CachePolicy.ENABLED)
                                 .memoryCachePolicy(coil3.request.CachePolicy.ENABLED)
                                 .build(),
+                            imageLoader = ThumbnailImageLoaderProvider.get(androidx.compose.ui.platform.LocalContext.current),
                             contentDescription = "Video thumbnail",
                             modifier = Modifier.fillMaxSize(),
                             contentScale = ContentScale.Crop,
@@ -459,6 +462,10 @@ fun FancyFileCard(
     fileSize: String? = null,
     isFavorite: Boolean = false,
     videoPath: String? = null,
+    thumbnailModel: Any? = null,
+    thumbnailDiskCacheKey: String? = null,
+    onThumbnailLoadSuccess: (() -> Unit)? = null,
+    onThumbnailLoadError: ((Throwable?) -> Unit)? = null,
     onFavoriteToggle: (() -> Unit)? = null,
     isSelected: Boolean = false,
     onClick: () -> Unit,
@@ -515,22 +522,27 @@ fun FancyFileCard(
                     ) {
                         AsyncImage(
                             model = coil3.request.ImageRequest.Builder(androidx.compose.ui.platform.LocalContext.current)
-                                .data(videoPath)
-                                .diskCacheKey(videoPath) // Explicitly set cache key
+                                .data(thumbnailModel ?: VideoThumbnailFetcher.Model(videoPath))
+                                .diskCacheKey(thumbnailDiskCacheKey ?: videoPath)
                                 .diskCachePolicy(coil3.request.CachePolicy.ENABLED)
                                 .memoryCachePolicy(coil3.request.CachePolicy.ENABLED)
                                 .build(),
+                            imageLoader = ThumbnailImageLoaderProvider.get(androidx.compose.ui.platform.LocalContext.current),
                             contentDescription = "Video thumbnail",
                             modifier = Modifier.fillMaxSize(),
                             contentScale = ContentScale.Crop,
                             onState = { state ->
                                 android.util.Log.d("FancyFileCard", "AsyncImage state: $state")
+                                if (state is coil3.compose.AsyncImagePainter.State.Success) {
+                                    onThumbnailLoadSuccess?.invoke()
+                                }
                                 if (state is coil3.compose.AsyncImagePainter.State.Error) {
                                     android.util.Log.e(
                                         "FancyFileCard",
                                         "AsyncImage Error: ${state.result.throwable.message}",
                                         state.result.throwable
                                     )
+                                    onThumbnailLoadError?.invoke(state.result.throwable)
                                 }
                             }
                         )
@@ -641,4 +653,8 @@ fun EmptyState(
         )
     }
 }
+
+
+
+
 

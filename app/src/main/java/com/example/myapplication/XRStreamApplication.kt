@@ -19,19 +19,28 @@ class XRStreamApplication : Application(), SingletonImageLoader.Factory {
     override fun onCreate() {
         super.onCreate()
         android.util.Log.d("XRStreamApplication", "Application created")
+
+        // Ensure Compose AsyncImage always uses our loader with SMB thumbnail fetchers.
+        SingletonImageLoader.setSafe { context ->
+            buildImageLoader(context)
+        }
     }
 
     override fun newImageLoader(context: android.content.Context): ImageLoader {
+        return buildImageLoader(context)
+    }
+
+    private fun buildImageLoader(context: android.content.Context): ImageLoader {
         android.util.Log.d(
             "XRStreamApplication",
             "Creating new ImageLoader with VideoThumbnailFetcher"
         )
-        return ImageLoader.Builder(this)
+        return ImageLoader.Builder(context)
             .components {
-                // Add video frame decoder for extracting frames from videos
+                // Add video frame decoder for extracting frames from videos.
                 add(VideoFrameDecoder.Factory())
-                // Add custom fetcher for SMB video thumbnails
-                add(VideoThumbnailFetcher.Factory())
+                // Add custom fetcher only for explicit video thumbnail model requests.
+                add(VideoThumbnailFetcher.ModelFactory())
             }
             .memoryCache {
                 MemoryCache.Builder()
@@ -54,5 +63,6 @@ class XRStreamApplication : Application(), SingletonImageLoader.Factory {
             .build()
     }
 }
+
 
 

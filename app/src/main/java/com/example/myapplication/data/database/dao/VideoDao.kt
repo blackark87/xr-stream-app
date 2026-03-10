@@ -20,6 +20,9 @@ interface VideoDao {
     @Query("SELECT * FROM recent_videos WHERE filePath = :path LIMIT 1")
     suspend fun getVideoByPath(path: String): RecentVideo?
 
+    @Query("SELECT * FROM recent_videos WHERE fileName = :fileName ORDER BY lastPlayed DESC LIMIT 1")
+    suspend fun getLatestVideoByFileName(fileName: String): RecentVideo?
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertVideo(video: RecentVideo): Long
 
@@ -62,4 +65,7 @@ interface VideoDao {
 
     @Query("UPDATE recent_videos SET thumbnailPath = :path WHERE id = :videoId")
     suspend fun updateThumbnailPath(videoId: Long, path: String)
+
+    @Query("UPDATE recent_videos SET thumbnailPath = :path, resolvedTitle = COALESCE(:title, resolvedTitle) WHERE id = :videoId")
+    suspend fun updateThumbnailAndTitle(videoId: Long, path: String, title: String?)
 }
