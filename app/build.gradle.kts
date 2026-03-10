@@ -1,6 +1,5 @@
 plugins {
     alias(libs.plugins.android.application)
-    alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.ksp)
 }
@@ -34,11 +33,14 @@ android {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
     }
-    kotlinOptions {
-        jvmTarget = "11"
-    }
     buildFeatures {
         compose = true
+    }
+}
+
+kotlin {
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_11)
     }
 }
 
@@ -63,6 +65,7 @@ dependencies {
     implementation(libs.androidx.xr.compose)
     implementation(libs.androidx.xr.runtime)
     implementation(libs.androidx.xr.scenecore)
+    implementation(libs.androidx.xr.compose.material3)
     implementation(libs.androidx.xr.arcore)
     implementation(libs.androidx.xr.arcore.openxr)
 
@@ -102,3 +105,5 @@ dependencies {
     debugImplementation(libs.androidx.compose.ui.tooling)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
 }
+
+

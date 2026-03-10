@@ -87,9 +87,9 @@ import androidx.xr.compose.spatial.OrbiterOffsetType
 import androidx.xr.compose.spatial.Subspace
 import androidx.xr.compose.subspace.MovePolicy
 import androidx.xr.compose.subspace.SpatialMainPanel
-import coil.compose.AsyncImage
-import coil.request.CachePolicy
-import coil.request.ImageRequest
+import coil3.compose.AsyncImage
+import coil3.request.CachePolicy
+import coil3.request.ImageRequest
 import com.example.myapplication.R
 import com.example.myapplication.data.database.entity.RecentVideo
 import com.example.myapplication.data.database.entity.SavedServer
@@ -305,6 +305,7 @@ fun MainDashboardScreen(
                     activity?.moveTaskToBack(true)
                 },
                 onClose = {
+                    activity?.finishAndRemoveTask()
                     activity?.finishAffinity()
                 }
             )
@@ -1268,6 +1269,7 @@ private fun formatFileSizeHelper(bytes: Long): String {
     val gb = mb / 1024.0
     return String.format("%.2f GB", gb)
 }
+
 
 
 

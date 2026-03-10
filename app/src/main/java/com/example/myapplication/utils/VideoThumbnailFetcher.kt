@@ -1,16 +1,19 @@
 package com.example.myapplication.utils
 
 import android.graphics.Bitmap
+import android.media.MediaDataSource
 import android.media.MediaMetadataRetriever
 import android.util.Log
 import androidx.core.net.toUri
-import coil.ImageLoader
-import coil.decode.DataSource
-import coil.decode.ImageSource
-import coil.fetch.FetchResult
-import coil.fetch.Fetcher
-import coil.fetch.SourceResult
-import coil.request.Options
+import coil3.ImageLoader
+import coil3.decode.DataSource
+import coil3.decode.ImageSource
+import coil3.fetch.FetchResult
+import coil3.fetch.Fetcher
+import coil3.fetch.SourceFetchResult
+import coil3.request.Options
+import jcifs.smb.SmbFile
+import jcifs.smb.SmbRandomAccessFile
 import okio.Buffer
 import okio.FileSystem
 import okio.Path.Companion.toOkioPath
@@ -22,6 +25,9 @@ class VideoThumbnailFetcher(
     private val data: String,
     private val options: Options
 ) : Fetcher {
+    private val mb = 1024L * 1024L
+    private val maxFullThumbnailDownloadBytes = 768L * mb
+
 
     override suspend fun fetch(): FetchResult? {
         return try {
@@ -59,8 +65,8 @@ class VideoThumbnailFetcher(
             val buffer = Buffer()
             bitmap.compress(Bitmap.CompressFormat.JPEG, 85, buffer.outputStream())
 
-            SourceResult(
-                source = ImageSource(buffer, options.context),
+            SourceFetchResult(
+                source = ImageSource(buffer, FileSystem.SYSTEM),
                 mimeType = "image/jpeg",
                 dataSource = DataSource.DISK
             )
@@ -91,7 +97,7 @@ class VideoThumbnailFetcher(
 
         if (localFile.exists()) {
             Log.d("VideoThumbnailFetcher", "Found cached thumbnail: ${localFile.absolutePath}")
-            return SourceResult(
+            return SourceFetchResult(
                 source = ImageSource(file = localFile.toOkioPath(), fileSystem = FileSystem.SYSTEM),
                 mimeType = "image/jpeg",
                 dataSource = DataSource.DISK
@@ -111,7 +117,6 @@ class VideoThumbnailFetcher(
             )
             Log.d("VideoThumbnailFetcher", "Created temp file: ${tempFile.absolutePath}")
 
-            // Download header (first 20MB)
             val smbClient = com.example.myapplication.AppState.smbClient
             if (smbClient == null) {
                 Log.e("VideoThumbnailFetcher", "SMB client is null! Cannot fetch thumbnail.")
@@ -122,55 +127,86 @@ class VideoThumbnailFetcher(
             val smbFile = smbClient.getSmbFile(smbUrl)
             // Skip exists() check as we just listed it. It causes extra network roundtrip.
 
-            Log.d("VideoThumbnailFetcher", "Got SMB file, downloading header...")
-            var totalBytes = 0L
-            val startTime = System.currentTimeMillis()
-            var lastLogTime = startTime
+            var bitmap: Bitmap? = extractFrameDirectlyFromSmb(retriever, smbFile)
+            var durationMs = 0L
+            val smbFileSizeBytes = runCatching { smbFile.length() }.getOrElse { -1L }
 
-            smbFile.inputStream.use { input: java.io.InputStream ->
-                tempFile.outputStream().use { output ->
-                    val buffer = ByteArray(64 * 1024) // 64KB buffer
-                    val maxBytes = 40 * 1024 * 1024L // 40MB for better keyframe coverage on long GOP videos
+            if (bitmap == null) {
+                Log.d(
+                    "VideoThumbnailFetcher",
+                    "Direct extraction failed, downloading SMB prefix for fallback..."
+                )
+                val tempThumbnailFile = tempFile ?: return createFallbackResult()
+                val headerReadAttemptsBytes = buildSmbReadAttempts(smbFileSizeBytes)
 
-                    var bytesRead = input.read(buffer)
-                    while (bytesRead != -1 && totalBytes < maxBytes) {
-                        output.write(buffer, 0, bytesRead)
-                        totalBytes += bytesRead
+                for ((attemptIndex, maxBytes) in headerReadAttemptsBytes.withIndex()) {
+                    val downloadedBytes = downloadSmbPrefixToTempFile(
+                        smbFile = smbFile,
+                        tempFile = tempThumbnailFile,
+                        maxBytes = maxBytes,
+                    )
+                    Log.d(
+                        "VideoThumbnailFetcher",
+                        "Attempt ${attemptIndex + 1}/${headerReadAttemptsBytes.size}: downloaded $downloadedBytes bytes"
+                    )
 
-                        // Log progress every 5MB or 1 second
-                        val currentTime = System.currentTimeMillis()
-                        if (currentTime - lastLogTime > 1000) {
-                            Log.d("VideoThumbnailFetcher", "Downloading... $totalBytes bytes")
-                            lastLogTime = currentTime
-                        }
+                    if (downloadedBytes <= 0L) {
+                        Log.w(
+                            "VideoThumbnailFetcher",
+                            "Attempt ${attemptIndex + 1} downloaded no data; retrying with deeper read"
+                        )
+                        continue
+                    }
 
-                        bytesRead = input.read(buffer)
+                    retriever.setDataSource(tempThumbnailFile.absolutePath)
+                    durationMs =
+                        retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+                            ?.toLongOrNull() ?: 0L
+                    bitmap = extractBestThumbnailFrame(retriever, durationMs)
+
+                    if (bitmap != null) {
+                        break
+                    }
+
+                    Log.w(
+                        "VideoThumbnailFetcher",
+                        "Failed to extract frame on attempt ${attemptIndex + 1}; retrying with deeper read"
+                    )
+                }
+
+                if (
+                    bitmap == null &&
+                    smbFileSizeBytes > 0L &&
+                    smbFileSizeBytes <= maxFullThumbnailDownloadBytes &&
+                    headerReadAttemptsBytes.lastOrNull() != smbFileSizeBytes
+                ) {
+                    Log.d(
+                        "VideoThumbnailFetcher",
+                        "Retrying thumbnail extraction with full file download (${smbFileSizeBytes} bytes)"
+                    )
+                    val downloadedBytes = downloadSmbPrefixToTempFile(
+                        smbFile = smbFile,
+                        tempFile = tempThumbnailFile,
+                        maxBytes = smbFileSizeBytes,
+                    )
+                    if (downloadedBytes > 0L) {
+                        retriever.setDataSource(tempThumbnailFile.absolutePath)
+                        durationMs =
+                            retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+                                ?.toLongOrNull() ?: 0L
+                        bitmap = extractBestThumbnailFrame(retriever, durationMs)
                     }
                 }
             }
-
-            val downloadTime = System.currentTimeMillis() - startTime
-            Log.d(
-                "VideoThumbnailFetcher",
-                "Downloaded $totalBytes bytes in ${downloadTime}ms. File size: ${tempFile.length()}"
-            )
-
-            // Extract frame from temp file
-            Log.d("VideoThumbnailFetcher", "Setting data source for MediaMetadataRetriever...")
-            retriever.setDataSource(tempFile.absolutePath)
-            val durationMs =
-                retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
-                    ?.toLongOrNull() ?: 0L
-            val bitmap = extractBestThumbnailFrame(retriever, durationMs)
 
             if (bitmap == null) {
                 Log.e(
                     "VideoThumbnailFetcher",
                     "Failed to extract frame from video (bitmap is null)"
                 )
-                // Return fallback image to prevent re-downloading
                 return createFallbackResult()
             }
+
             Log.d("VideoThumbnailFetcher", "Extracted bitmap: ${bitmap.width}x${bitmap.height}")
 
             // Save to permanent local file
@@ -194,17 +230,14 @@ class VideoThumbnailFetcher(
                 Log.e("VideoThumbnailFetcher", "Failed to update DB", e)
             }
 
-            // Convert to Coil result from the SAVED file
-            SourceResult(
+            SourceFetchResult(
                 source = ImageSource(file = localFile.toOkioPath(), fileSystem = FileSystem.SYSTEM),
                 mimeType = "image/jpeg",
                 dataSource = DataSource.NETWORK
             )
-
         } catch (e: Exception) {
             Log.e("VideoThumbnailFetcher", "Error extracting SMB thumbnail: ${e.message}", e)
             e.printStackTrace()
-            // Return fallback image to prevent re-downloading
             return createFallbackResult()
         } finally {
             try {
@@ -212,7 +245,6 @@ class VideoThumbnailFetcher(
             } catch (e: Exception) {
                 Log.e("VideoThumbnailFetcher", "Error releasing retriever", e)
             }
-            // Clean up temp file
             try {
                 if (tempFile?.exists() == true) {
                     val deleted = tempFile.delete()
@@ -224,15 +256,126 @@ class VideoThumbnailFetcher(
         }
     }
 
+    private fun extractFrameDirectlyFromSmb(
+        retriever: MediaMetadataRetriever,
+        smbFile: SmbFile,
+    ): Bitmap? {
+        var dataSource: SMBMediaDataSource? = null
+        return try {
+            dataSource = SMBMediaDataSource(smbFile)
+            retriever.setDataSource(dataSource)
+
+            val durationMs =
+                retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+                    ?.toLongOrNull() ?: 0L
+            val bitmap = extractBestThumbnailFrame(retriever, durationMs)
+            if (bitmap != null) {
+                Log.d(
+                    "VideoThumbnailFetcher",
+                    "Direct SMB extraction succeeded: ${bitmap.width}x${bitmap.height}",
+                )
+            } else {
+                Log.w(
+                    "VideoThumbnailFetcher",
+                    "Direct SMB extraction returned null; using progressive fallback",
+                )
+            }
+            bitmap
+        } catch (e: Exception) {
+            Log.w(
+                "VideoThumbnailFetcher",
+                "Direct SMB extraction failed: ${e.message}; using progressive fallback",
+            )
+            null
+        } finally {
+            try {
+                dataSource?.close()
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    private fun buildSmbReadAttempts(fileSizeBytes: Long): List<Long> {
+        val baseAttempts =
+            listOf(
+                40L * mb,
+                80L * mb,
+                160L * mb,
+                320L * mb,
+                512L * mb,
+            )
+
+        val withOptionalFullRead =
+            if (fileSizeBytes > 0L && fileSizeBytes <= maxFullThumbnailDownloadBytes) {
+                baseAttempts + fileSizeBytes
+            } else {
+                baseAttempts
+            }
+
+        return withOptionalFullRead
+            .map { attempt -> if (fileSizeBytes > 0L) minOf(attempt, fileSizeBytes) else attempt }
+            .filter { it > 0L }
+            .distinct()
+            .sorted()
+    }
+
+    private fun downloadSmbPrefixToTempFile(
+        smbFile: SmbFile,
+        tempFile: java.io.File,
+        maxBytes: Long,
+    ): Long {
+        var totalBytes = 0L
+        val startTime = System.currentTimeMillis()
+        var lastLogTime = startTime
+
+        smbFile.inputStream.use { input: java.io.InputStream ->
+            tempFile.outputStream().use { output ->
+                val buffer = ByteArray(64 * 1024) // 64KB buffer
+                var bytesRead = input.read(buffer)
+
+                while (bytesRead != -1 && totalBytes < maxBytes) {
+                    val bytesToWrite = if (totalBytes + bytesRead > maxBytes) {
+                        (maxBytes - totalBytes).toInt()
+                    } else {
+                        bytesRead
+                    }
+                    output.write(buffer, 0, bytesToWrite)
+                    totalBytes += bytesToWrite
+
+                    val currentTime = System.currentTimeMillis()
+                    if (currentTime - lastLogTime > 1000) {
+                        Log.d("VideoThumbnailFetcher", "Downloading... $totalBytes bytes")
+                        lastLogTime = currentTime
+                    }
+
+                    if (totalBytes >= maxBytes) {
+                        break
+                    }
+                    bytesRead = input.read(buffer)
+                }
+            }
+        }
+
+        val downloadTime = System.currentTimeMillis() - startTime
+        Log.d(
+            "VideoThumbnailFetcher",
+            "Downloaded $totalBytes bytes (limit=$maxBytes) in ${downloadTime}ms. File size: ${tempFile.length()}",
+        )
+
+        return totalBytes
+    }
     private fun extractBestThumbnailFrame(
         retriever: MediaMetadataRetriever,
         durationMs: Long,
     ): Bitmap? {
-        val preferredTimeUs = computePreferredThumbnailTimeUs(durationMs)
-        val candidateTimesUs =
-            listOf(preferredTimeUs, 10_000_000L, 7_500_000L, 5_000_000L, 2_500_000L, 0L).distinct()
+        val candidateTimesUs = buildThumbnailCandidateTimesUs(durationMs)
         val extractionOptions =
-            listOf(MediaMetadataRetriever.OPTION_CLOSEST_SYNC, MediaMetadataRetriever.OPTION_CLOSEST)
+            listOf(
+                MediaMetadataRetriever.OPTION_CLOSEST_SYNC,
+                MediaMetadataRetriever.OPTION_PREVIOUS_SYNC,
+                MediaMetadataRetriever.OPTION_NEXT_SYNC,
+                MediaMetadataRetriever.OPTION_CLOSEST,
+            )
 
         for (candidateTimeUs in candidateTimesUs) {
             for (option in extractionOptions) {
@@ -249,6 +392,20 @@ class VideoThumbnailFetcher(
                         }
                         return normalizedBitmap
                     }
+
+                    val scaledBitmap =
+                        retriever.getScaledFrameAtTime(candidateTimeUs, option, 640, 360)
+                    if (scaledBitmap != null) {
+                        val normalizedBitmap = normalizeThumbnailFrame(scaledBitmap)
+                        Log.d(
+                            "VideoThumbnailFetcher",
+                            "Extracted scaled thumbnail at ${candidateTimeUs / 1_000_000.0}s option=$option (duration=${durationMs}ms), frame=${normalizedBitmap.width}x${normalizedBitmap.height}",
+                        )
+                        if (normalizedBitmap !== scaledBitmap) {
+                            scaledBitmap.recycle()
+                        }
+                        return normalizedBitmap
+                    }
                 } catch (e: Exception) {
                     Log.w(
                         "VideoThumbnailFetcher",
@@ -258,9 +415,108 @@ class VideoThumbnailFetcher(
             }
         }
 
+        val frameCount =
+            retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_FRAME_COUNT)
+                ?.toIntOrNull() ?: 0
+        if (frameCount > 0) {
+            val frameIndexCandidates =
+                listOf(frameCount / 5, frameCount / 3, frameCount / 2, 0)
+                    .map { it.coerceIn(0, frameCount - 1) }
+                    .distinct()
+
+            for (frameIndex in frameIndexCandidates) {
+                try {
+                    val bitmap = retriever.getFrameAtIndex(frameIndex)
+                    if (bitmap != null) {
+                        val normalizedBitmap = normalizeThumbnailFrame(bitmap)
+                        Log.d(
+                            "VideoThumbnailFetcher",
+                            "Extracted thumbnail by frame index=$frameIndex, frame=${normalizedBitmap.width}x${normalizedBitmap.height}",
+                        )
+                        if (normalizedBitmap !== bitmap) {
+                            bitmap.recycle()
+                        }
+                        return normalizedBitmap
+                    }
+                } catch (e: Exception) {
+                    Log.w(
+                        "VideoThumbnailFetcher",
+                        "Failed frame-index extraction at index=$frameIndex: ${e.message}",
+                    )
+                }
+            }
+        }
+
         return null
     }
 
+
+    private fun buildThumbnailCandidateTimesUs(durationMs: Long): List<Long> {
+        val preferredTimeUs = computePreferredThumbnailTimeUs(durationMs)
+        val durationUs = if (durationMs > 0L) durationMs * 1_000L else Long.MAX_VALUE
+
+        val explicitCandidates = listOf(
+            preferredTimeUs,
+            5_000_000L,
+            7_500_000L,
+            10_000_000L,
+            12_500_000L,
+            15_000_000L,
+            20_000_000L,
+            30_000_000L,
+            45_000_000L,
+            60_000_000L,
+        )
+
+        val percentageCandidates =
+            if (durationMs > 0L) {
+                listOf(
+                    (durationMs * 0.25f).toLong() * 1_000L,
+                    (durationMs * 0.35f).toLong() * 1_000L,
+                    (durationMs * 0.50f).toLong() * 1_000L,
+                )
+            } else {
+                emptyList()
+            }
+
+        return (explicitCandidates + percentageCandidates + listOf(0L))
+            .map { candidate ->
+                if (durationUs == Long.MAX_VALUE) candidate else candidate.coerceIn(0L, durationUs)
+            }
+            .distinct()
+    }
+    private class SMBMediaDataSource(
+        smbFile: SmbFile,
+    ) : MediaDataSource() {
+        private val randomAccessFile = SmbRandomAccessFile(smbFile, "r")
+        private val fileSize = randomAccessFile.length()
+        private var closed = false
+
+        @Synchronized
+        override fun readAt(
+            position: Long,
+            buffer: ByteArray,
+            offset: Int,
+            size: Int,
+        ): Int {
+            if (closed || position < 0L || position >= fileSize) {
+                return -1
+            }
+
+            val bytesToRead = minOf(size.toLong(), fileSize - position).toInt()
+            randomAccessFile.seek(position)
+            return randomAccessFile.read(buffer, offset, bytesToRead)
+        }
+
+        override fun getSize(): Long = fileSize
+
+        @Synchronized
+        override fun close() {
+            if (closed) return
+            closed = true
+            randomAccessFile.close()
+        }
+    }
     private fun normalizeThumbnailFrame(bitmap: Bitmap): Bitmap {
         val shouldCropHalfWidth =
             (bitmap.width == 4096 && bitmap.height == 2048) ||
@@ -285,7 +541,7 @@ class VideoThumbnailFetcher(
         return targetMs * 1_000L
     }
 
-    private fun createFallbackResult(): SourceResult {
+    private fun createFallbackResult(): SourceFetchResult {
         Log.d("VideoThumbnailFetcher", "Creating fallback thumbnail")
         val bitmap = Bitmap.createBitmap(320, 180, Bitmap.Config.ARGB_8888)
         val canvas = android.graphics.Canvas(bitmap)
@@ -294,8 +550,8 @@ class VideoThumbnailFetcher(
         val buffer = Buffer()
         bitmap.compress(Bitmap.CompressFormat.JPEG, 85, buffer.outputStream())
 
-        return SourceResult(
-            source = ImageSource(source = buffer, context = options.context),
+        return SourceFetchResult(
+            source = ImageSource(buffer, FileSystem.SYSTEM),
             mimeType = "image/jpeg",
             dataSource = DataSource.MEMORY
         )
@@ -353,6 +609,12 @@ class VideoThumbnailFetcher(
         }
     }
 }
+
+
+
+
+
+
 
 
 

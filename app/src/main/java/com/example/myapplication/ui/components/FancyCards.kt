@@ -53,7 +53,7 @@ import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import coil.compose.AsyncImage
+import coil3.compose.AsyncImage
 import com.example.myapplication.data.database.entity.RecentVideo
 import com.example.myapplication.data.database.entity.SavedServer
 import com.example.myapplication.ui.theme.AccentGold
@@ -358,11 +358,11 @@ fun FancyMovieCard(
                 ) {
                     if (video.filePath.isNotEmpty()) {
                         AsyncImage(
-                            model = coil.request.ImageRequest.Builder(androidx.compose.ui.platform.LocalContext.current)
+                            model = coil3.request.ImageRequest.Builder(androidx.compose.ui.platform.LocalContext.current)
                                 .data(video.filePath)
                                 .diskCacheKey(video.filePath)
-                                .diskCachePolicy(coil.request.CachePolicy.ENABLED)
-                                .memoryCachePolicy(coil.request.CachePolicy.ENABLED)
+                                .diskCachePolicy(coil3.request.CachePolicy.ENABLED)
+                                .memoryCachePolicy(coil3.request.CachePolicy.ENABLED)
                                 .build(),
                             contentDescription = "Video thumbnail",
                             modifier = Modifier.fillMaxSize(),
@@ -514,18 +514,18 @@ fun FancyFileCard(
                         contentAlignment = Alignment.Center
                     ) {
                         AsyncImage(
-                            model = coil.request.ImageRequest.Builder(androidx.compose.ui.platform.LocalContext.current)
+                            model = coil3.request.ImageRequest.Builder(androidx.compose.ui.platform.LocalContext.current)
                                 .data(videoPath)
                                 .diskCacheKey(videoPath) // Explicitly set cache key
-                                .diskCachePolicy(coil.request.CachePolicy.ENABLED)
-                                .memoryCachePolicy(coil.request.CachePolicy.ENABLED)
+                                .diskCachePolicy(coil3.request.CachePolicy.ENABLED)
+                                .memoryCachePolicy(coil3.request.CachePolicy.ENABLED)
                                 .build(),
                             contentDescription = "Video thumbnail",
                             modifier = Modifier.fillMaxSize(),
                             contentScale = ContentScale.Crop,
                             onState = { state ->
                                 android.util.Log.d("FancyFileCard", "AsyncImage state: $state")
-                                if (state is coil.compose.AsyncImagePainter.State.Error) {
+                                if (state is coil3.compose.AsyncImagePainter.State.Error) {
                                     android.util.Log.e(
                                         "FancyFileCard",
                                         "AsyncImage Error: ${state.result.throwable.message}",
@@ -641,3 +641,4 @@ fun EmptyState(
         )
     }
 }
+

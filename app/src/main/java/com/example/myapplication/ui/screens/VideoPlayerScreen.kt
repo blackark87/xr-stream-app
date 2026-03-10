@@ -15,6 +15,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -24,6 +25,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.xr.compose.platform.LocalSession
 import androidx.xr.compose.platform.LocalSpatialCapabilities
 import androidx.xr.compose.spatial.Subspace
 import androidx.xr.compose.subspace.MovePolicy
@@ -38,8 +40,14 @@ import androidx.xr.compose.subspace.layout.SubspaceModifier
 import androidx.xr.compose.subspace.layout.fillMaxSize
 import androidx.xr.compose.subspace.layout.height
 import androidx.xr.compose.subspace.layout.offset
+import androidx.xr.compose.subspace.layout.rotate
 import androidx.xr.compose.subspace.layout.width
-import androidx.xr.compose.subspace.layout.lookAtUser
+import androidx.xr.compose.subspace.layout.rotateToLookAtUser
+import androidx.xr.arcore.ArDevice
+import androidx.xr.runtime.DeviceTrackingMode
+import androidx.xr.runtime.SessionConfigureSuccess
+import androidx.xr.runtime.math.Quaternion
+import androidx.xr.runtime.math.Vector3
 import com.example.myapplication.data.database.AppDatabase
 import com.example.myapplication.data.repository.VideoRepository
 import com.example.myapplication.ui.components.XRPlaybackControls
@@ -51,6 +59,11 @@ import com.example.myapplication.ui.viewmodel.VideoPlayerViewModelFactory
 import kotlinx.coroutines.delay
 
 private const val TAG = "VideoPlayerScreen"
+
+private data class HeadFollowPose(
+    val rotation: Quaternion,
+    val forward: Vector3,
+)
 
 @OptIn(UnstableApi::class)
 @Composable
@@ -116,6 +129,7 @@ fun SpatialVideoPlayerContent(
 ) {
     val exoPlayer by videoPlayerViewModel.playerFlow.collectAsState()
     val showControls = playerState.showControls
+    val session = LocalSession.current
 
     BackHandler {
         onNavigateBack()
@@ -126,6 +140,74 @@ fun SpatialVideoPlayerContent(
     val supportsImmersiveDome = spatialCapabilities.isContent3dEnabled
     val shouldUseImmersiveDome = immersiveRequested && supportsImmersiveDome
     val isSurfaceReady = !playerState.isLoading && playerState.error == null
+
+    val enableHeadFollowIn2D = playerState.videoFormat == VideoFormat.Format2D
+    val enableHeadFollowIn180Stereo =
+        playerState.videoFormat == VideoFormat.Format180 &&
+            playerState.stereoMode != com.example.myapplication.ui.viewmodel.StereoMode.Mono
+    val shouldEnableHeadFollow = enableHeadFollowIn2D || enableHeadFollowIn180Stereo
+
+    val headFollowPose by produceState<HeadFollowPose?>(
+        initialValue = null,
+        session,
+        shouldEnableHeadFollow,
+    ) {
+        value = null
+        if (!shouldEnableHeadFollow) return@produceState
+
+        val activeSession = session ?: return@produceState
+        val arDevice = runCatching { ArDevice.getInstance(activeSession) }.getOrNull()
+        if (arDevice == null) {
+            Log.w(TAG, "ArDevice is unavailable; using default orientation")
+            return@produceState
+        }
+
+        var smoothedRotation: Quaternion? = null
+        var smoothedForward: Vector3? = null
+        arDevice.state.collect { deviceState ->
+            val forward = deviceState.devicePose.forward
+            val horizontalForward = Vector3(forward.x, 0f, forward.z)
+            if (horizontalForward.lengthSquared < 1e-6f) return@collect
+
+            val normalizedForward = horizontalForward.toNormalized()
+            smoothedForward =
+                if (smoothedForward == null) {
+                    normalizedForward
+                } else {
+                    Vector3.lerp(smoothedForward!!, normalizedForward, 0.45f)
+                }
+
+            val targetRotation = Quaternion.fromLookTowards(smoothedForward!!, Vector3.Up)
+            smoothedRotation =
+                if (smoothedRotation == null) {
+                    targetRotation
+                } else {
+                    Quaternion.slerp(smoothedRotation!!, targetRotation, 0.45f)
+                }
+
+            value = HeadFollowPose(rotation = smoothedRotation!!, forward = smoothedForward!!)
+        }
+    }
+
+    // Device tracking must be enabled for head-follow behavior.
+    LaunchedEffect(session, shouldEnableHeadFollow) {
+        val activeSession = session ?: return@LaunchedEffect
+        if (!shouldEnableHeadFollow) return@LaunchedEffect
+
+        val currentConfig = activeSession.config
+        if (currentConfig.deviceTracking != DeviceTrackingMode.DISABLED) {
+            return@LaunchedEffect
+        }
+
+        val updatedConfig =
+            currentConfig.copy(deviceTracking = DeviceTrackingMode.LAST_KNOWN)
+        val result = activeSession.configure(updatedConfig)
+        if (result is SessionConfigureSuccess) {
+            Log.d(TAG, "Enabled XR device tracking for requested head-follow modes")
+        } else {
+            Log.w(TAG, "Failed to enable XR device tracking: ${result::class.java.simpleName}")
+        }
+    }
 
     LaunchedEffect(immersiveRequested, spatialCapabilities.isContent3dEnabled) {
         if (immersiveRequested && !supportsImmersiveDome) {
@@ -166,6 +248,7 @@ fun SpatialVideoPlayerContent(
             videoFormat = playerState.videoFormat,
             stereoMode = xrStereoMode,
             interactionPolicy = toggleInteractionPolicy,
+            headLockedRotation180 = if (enableHeadFollowIn180Stereo) headFollowPose?.rotation else null,
         )
 
         if (showControls && isSurfaceReady) {
@@ -212,6 +295,7 @@ fun SpatialVideoPlayerContent(
             videoPlayerViewModel = videoPlayerViewModel,
             playerState = playerState,
             onNavigateBack = { videoPlayerViewModel.requestNavigateBack() },
+            headFollowPose = if (enableHeadFollowIn2D) headFollowPose else null,
         )
     }
 }
@@ -241,7 +325,7 @@ private fun PlayerLoadingPanel(errorMessage: String?) {
 
 @OptIn(UnstableApi::class)
 @Composable
-fun Standard2DPlayer(
+private fun Standard2DPlayer(
     exoPlayer: ExoPlayer?,
     stereoMode: StereoMode,
     interactionPolicy: InteractionPolicy?,
@@ -250,12 +334,11 @@ fun Standard2DPlayer(
     videoPlayerViewModel: VideoPlayerViewModel,
     playerState: VideoPlayerState,
     onNavigateBack: () -> Unit,
+    headFollowPose: HeadFollowPose? = null,
 ) {
     if (exoPlayer != null) {
         SpatialExternalSurface(
-            modifier = SubspaceModifier
-                .width(1280.dp)
-                .height(720.dp),
+            modifier = buildFlatSurfaceModifier(headFollowPose),
             stereoMode = stereoMode,
             dragPolicy = MovePolicy(),
             interactionPolicy = interactionPolicy,
@@ -287,19 +370,45 @@ fun Standard2DPlayer(
     }
 }
 
+
+private fun buildFlatSurfaceModifier(headFollowPose: HeadFollowPose?): SubspaceModifier {
+    val baseModifier =
+        SubspaceModifier
+            .width(1280.dp)
+            .height(720.dp)
+
+    if (headFollowPose == null) {
+        return baseModifier
+    }
+
+    val followDistanceDp = 900f
+    val followHeightDp = -40f
+    return baseModifier
+        .offset(
+            x = (headFollowPose.forward.x * followDistanceDp).dp,
+            y = followHeightDp.dp,
+            z = (headFollowPose.forward.z * followDistanceDp).dp,
+        )
+        .rotate(headFollowPose.rotation)
+}
 @Composable
 fun ImmersivePlayer(
     exoPlayer: ExoPlayer?,
     videoFormat: VideoFormat,
     stereoMode: StereoMode,
     interactionPolicy: InteractionPolicy?,
+    headLockedRotation180: Quaternion? = null,
 ) {
     if (exoPlayer == null) return
 
     when (videoFormat) {
         VideoFormat.Format180 -> {
+            val hemisphereModifier =
+                headLockedRotation180?.let { rotation ->
+                    SubspaceModifier.rotate(rotation)
+                } ?: SubspaceModifier.rotateToLookAtUser()
             SpatialExternalSurface180Hemisphere(
-                modifier = SubspaceModifier.lookAtUser(),
+                modifier = hemisphereModifier,
                 stereoMode = stereoMode,
                 interactionPolicy = interactionPolicy,
             ) {
@@ -328,9 +437,5 @@ private fun SpatialExternalSurfaceScope.bindExoPlayerSurface(exoPlayer: ExoPlaye
         exoPlayer.setVideoSurface(null)
     }
 }
-
-
-
-
 
 
