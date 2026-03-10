@@ -16,6 +16,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -142,10 +143,9 @@ fun SpatialVideoPlayerContent(
     val isSurfaceReady = !playerState.isLoading && playerState.error == null
 
     val enableHeadFollowIn2D = playerState.videoFormat == VideoFormat.Format2D
-    val enableHeadFollowIn180Stereo =
-        playerState.videoFormat == VideoFormat.Format180 &&
-                playerState.stereoMode != com.example.myapplication.ui.viewmodel.StereoMode.Mono
-    val shouldEnableHeadFollow = enableHeadFollowIn2D || enableHeadFollowIn180Stereo
+    // Disabled for 180 stereo because the custom lock-rotation path can blank hemisphere rendering.
+    val enableHeadFollowIn180Stereo = false
+    val shouldEnableHeadFollow = enableHeadFollowIn2D
 
     val headFollowPose by produceState<HeadFollowPose?>(
         initialValue = null,
@@ -170,12 +170,14 @@ fun SpatialVideoPlayerContent(
             if (horizontalForward.lengthSquared < 1e-6f) return@collect
 
             val normalizedForward = horizontalForward.toNormalized()
-            smoothedForward =
+            val blendedForward =
                 if (smoothedForward == null) {
                     normalizedForward
                 } else {
                     Vector3.lerp(smoothedForward!!, normalizedForward, 0.45f)
                 }
+            if (blendedForward.lengthSquared < 1e-6f) return@collect
+            smoothedForward = blendedForward.toNormalized()
 
             val targetRotation = Quaternion.fromLookTowards(smoothedForward!!, Vector3.Up)
             smoothedRotation =
@@ -337,32 +339,35 @@ private fun Standard2DPlayer(
     headFollowPose: HeadFollowPose? = null,
 ) {
     if (exoPlayer != null) {
-        SpatialExternalSurface(
-            modifier = buildFlatSurfaceModifier(headFollowPose),
-            stereoMode = stereoMode,
-            dragPolicy = MovePolicy(),
-            interactionPolicy = interactionPolicy,
-        ) {
-            bindExoPlayerSurface(exoPlayer)
+        // Recreate the XR surface when stereo layout changes to avoid renderer desync/black frames.
+        key(stereoMode) {
+            SpatialExternalSurface(
+                modifier = buildFlatSurfaceModifier(headFollowPose),
+                stereoMode = stereoMode,
+                dragPolicy = MovePolicy(),
+                interactionPolicy = interactionPolicy,
+            ) {
+                bindExoPlayerSurface(exoPlayer)
 
-            if (showControls && isSurfaceReady) {
-                SpatialPanel(modifier = SubspaceModifier.fillMaxSize()) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .clickable(
-                                interactionSource = remember { MutableInteractionSource() },
-                                indication = null,
-                            ) {
-                                videoPlayerViewModel.toggleControls()
-                            },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        XRPlaybackControls(
-                            videoPlayerViewModel = videoPlayerViewModel,
-                            playerState = playerState,
-                            onNavigateBack = { videoPlayerViewModel.requestNavigateBack() },
-                        )
+                if (showControls && isSurfaceReady) {
+                    SpatialPanel(modifier = SubspaceModifier.fillMaxSize()) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .clickable(
+                                    interactionSource = remember { MutableInteractionSource() },
+                                    indication = null,
+                                ) {
+                                    videoPlayerViewModel.toggleControls()
+                                },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            XRPlaybackControls(
+                                videoPlayerViewModel = videoPlayerViewModel,
+                                playerState = playerState,
+                                onNavigateBack = { videoPlayerViewModel.requestNavigateBack() },
+                            )
+                        }
                     }
                 }
             }
@@ -408,21 +413,25 @@ fun ImmersivePlayer(
                 headLockedRotation180?.let { rotation ->
                     SubspaceModifier.rotate(rotation)
                 } ?: SubspaceModifier.rotateToLookAtUser()
-            SpatialExternalSurface180Hemisphere(
-                modifier = hemisphereModifier,
-                stereoMode = stereoMode,
-                interactionPolicy = interactionPolicy,
-            ) {
-                bindExoPlayerSurface(exoPlayer)
+            key(stereoMode) {
+                SpatialExternalSurface180Hemisphere(
+                    modifier = hemisphereModifier,
+                    stereoMode = stereoMode,
+                    interactionPolicy = interactionPolicy,
+                ) {
+                    bindExoPlayerSurface(exoPlayer)
+                }
             }
         }
 
         VideoFormat.Format360 -> {
-            SpatialExternalSurface360Sphere(
-                stereoMode = stereoMode,
-                interactionPolicy = interactionPolicy,
-            ) {
-                bindExoPlayerSurface(exoPlayer)
+            key(stereoMode) {
+                SpatialExternalSurface360Sphere(
+                    stereoMode = stereoMode,
+                    interactionPolicy = interactionPolicy,
+                ) {
+                    bindExoPlayerSurface(exoPlayer)
+                }
             }
         }
 
@@ -434,11 +443,10 @@ private fun SpatialExternalSurfaceScope.bindExoPlayerSurface(exoPlayer: ExoPlaye
     onSurfaceCreated { surface ->
         exoPlayer.setVideoSurface(surface)
     }
-    onSurfaceDestroyed {
-        exoPlayer.setVideoSurface(null)
+    onSurfaceDestroyed { surface ->
+        // Only clear the surface instance being destroyed; leave any replacement surface intact.
+        exoPlayer.clearVideoSurface(surface)
     }
 }
-
-
 
 
