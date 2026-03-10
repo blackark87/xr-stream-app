@@ -478,6 +478,7 @@ class MainDashboardViewModel(
             )
         }
     }
+
     override fun onCleared() {
         super.onCleared()
         disconnect()

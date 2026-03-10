@@ -364,6 +364,7 @@ class VideoThumbnailFetcher(
 
         return totalBytes
     }
+
     private fun extractBestThumbnailFrame(
         retriever: MediaMetadataRetriever,
         durationMs: Long,
@@ -485,6 +486,7 @@ class VideoThumbnailFetcher(
             }
             .distinct()
     }
+
     private class SMBMediaDataSource(
         smbFile: SmbFile,
     ) : MediaDataSource() {
@@ -517,10 +519,11 @@ class VideoThumbnailFetcher(
             randomAccessFile.close()
         }
     }
+
     private fun normalizeThumbnailFrame(bitmap: Bitmap): Bitmap {
         val shouldCropHalfWidth =
             (bitmap.width == 4096 && bitmap.height == 2048) ||
-                (bitmap.width == 8192 && bitmap.height == 4096)
+                    (bitmap.width == 8192 && bitmap.height == 4096)
 
         if (!shouldCropHalfWidth) {
             return bitmap
@@ -534,6 +537,7 @@ class VideoThumbnailFetcher(
             bitmap
         }
     }
+
     private fun computePreferredThumbnailTimeUs(durationMs: Long): Long {
         if (durationMs <= 0L) return 7_500_000L
 

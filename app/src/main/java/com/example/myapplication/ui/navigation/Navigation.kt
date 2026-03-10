@@ -35,7 +35,14 @@ fun AppNavigation(navController: NavHostController, context: Context) {
         startDestination = Screen.MainDashboard.route,
         enterTransition = { fadeIn(animationSpec = tween(220)) },
         exitTransition = { fadeOut(animationSpec = tween(160)) },
-        popEnterTransition = { fadeIn(animationSpec = tween(durationMillis = 180, delayMillis = 160)) },
+        popEnterTransition = {
+            fadeIn(
+                animationSpec = tween(
+                    durationMillis = 180,
+                    delayMillis = 160
+                )
+            )
+        },
         popExitTransition = { fadeOut(animationSpec = tween(140)) },
     ) {
         composable(Screen.MainDashboard.route) {

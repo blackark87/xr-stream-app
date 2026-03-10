@@ -3,10 +3,10 @@ package com.example.myapplication
 import android.app.Application
 import coil3.ImageLoader
 import coil3.SingletonImageLoader
-import coil3.video.VideoFrameDecoder
 import coil3.disk.DiskCache
 import coil3.memory.MemoryCache
 import coil3.request.CachePolicy
+import coil3.video.VideoFrameDecoder
 import com.example.myapplication.utils.VideoThumbnailFetcher
 import okio.Path.Companion.toOkioPath
 

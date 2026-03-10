@@ -846,7 +846,8 @@ private fun FileBrowserPanel(
             confirmButton = {
                 TextButton(
                     onClick = {
-                        val targets = files.filter { !it.isDirectory && selectedPaths.contains(it.path) }
+                        val targets =
+                            files.filter { !it.isDirectory && selectedPaths.contains(it.path) }
                         if (targets.isEmpty()) {
                             isDeleteMode = false
                             selectedPaths = emptySet()

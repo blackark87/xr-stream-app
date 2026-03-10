@@ -25,6 +25,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.xr.arcore.ArDevice
 import androidx.xr.compose.platform.LocalSession
 import androidx.xr.compose.platform.LocalSpatialCapabilities
 import androidx.xr.compose.spatial.Subspace
@@ -41,9 +42,8 @@ import androidx.xr.compose.subspace.layout.fillMaxSize
 import androidx.xr.compose.subspace.layout.height
 import androidx.xr.compose.subspace.layout.offset
 import androidx.xr.compose.subspace.layout.rotate
-import androidx.xr.compose.subspace.layout.width
 import androidx.xr.compose.subspace.layout.rotateToLookAtUser
-import androidx.xr.arcore.ArDevice
+import androidx.xr.compose.subspace.layout.width
 import androidx.xr.runtime.DeviceTrackingMode
 import androidx.xr.runtime.SessionConfigureSuccess
 import androidx.xr.runtime.math.Quaternion
@@ -144,7 +144,7 @@ fun SpatialVideoPlayerContent(
     val enableHeadFollowIn2D = playerState.videoFormat == VideoFormat.Format2D
     val enableHeadFollowIn180Stereo =
         playerState.videoFormat == VideoFormat.Format180 &&
-            playerState.stereoMode != com.example.myapplication.ui.viewmodel.StereoMode.Mono
+                playerState.stereoMode != com.example.myapplication.ui.viewmodel.StereoMode.Mono
     val shouldEnableHeadFollow = enableHeadFollowIn2D || enableHeadFollowIn180Stereo
 
     val headFollowPose by produceState<HeadFollowPose?>(
@@ -391,6 +391,7 @@ private fun buildFlatSurfaceModifier(headFollowPose: HeadFollowPose?): SubspaceM
         )
         .rotate(headFollowPose.rotation)
 }
+
 @Composable
 fun ImmersivePlayer(
     exoPlayer: ExoPlayer?,
