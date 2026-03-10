@@ -533,6 +533,16 @@ private val videoFileCodePattern = Regex("(?i)([a-z]{2,10})[-_](\\d{2,5})(?!\\d)
 private val makerYearFolderPattern =
     Regex("(^|/)maker/(?:19|20)\\d{2}(/|$)", RegexOption.IGNORE_CASE)
 private val avVrFolderPattern = Regex("(^|/)av/vr(/|$)", RegexOption.IGNORE_CASE)
+private fun shouldEnablePosterPopupForPath(path: String): Boolean {
+    val normalized = path
+        .substringBefore('?')
+        .substringBefore('#')
+        .replace('\\', '/')
+        .lowercase()
+
+    return makerYearFolderPattern.containsMatchIn(normalized) ||
+            avVrFolderPattern.containsMatchIn(normalized)
+}
 
 private fun buildVideoMetadataLookupRequest(filePath: String): VideoMetadataLookupRequest? {
     val normalizedPath = filePath
@@ -1756,14 +1766,19 @@ private fun FileListEntryCard(
     val posterCacheKey = posterUrl?.let { buildFilePosterCacheKey(file.name, it) }
     var posterLoadFailed by remember(file.name, posterUrl) { mutableStateOf(false) }
     val shouldUsePoster = isVideoFile && !posterUrl.isNullOrBlank() && !posterLoadFailed
+    val isPosterPopupEligible = remember(file.path) { shouldEnablePosterPopupForPath(file.path) }
 
-    val previewSpec = remember(shouldUsePoster, posterUrl, posterCacheKey, isVideoFile, file.name) {
-        buildGroupHoverPreviewSpec(
-            shouldUsePoster = shouldUsePoster,
-            posterUrl = posterUrl,
-            posterCacheKey = posterCacheKey,
-            representativePath = if (isVideoFile) file.path else null,
-        )
+    val previewSpec = remember(shouldUsePoster, posterUrl, posterCacheKey, isPosterPopupEligible) {
+        if (!isPosterPopupEligible) {
+            null
+        } else {
+            buildGroupHoverPreviewSpec(
+                shouldUsePoster = shouldUsePoster,
+                posterUrl = posterUrl,
+                posterCacheKey = posterCacheKey,
+                representativePath = null,
+            )
+        }
     }
 
     val previewInteractionSource = remember { MutableInteractionSource() }
@@ -1877,14 +1892,19 @@ private fun FileThumbnailCard(
     val posterCacheKey = posterUrl?.let { buildFilePosterCacheKey(file.name, it) }
     var posterLoadFailed by remember(file.name, posterUrl) { mutableStateOf(false) }
     val shouldUsePoster = isVideoFile && !posterUrl.isNullOrBlank() && !posterLoadFailed
+    val isPosterPopupEligible = remember(file.path) { shouldEnablePosterPopupForPath(file.path) }
 
-    val previewSpec = remember(shouldUsePoster, posterUrl, posterCacheKey, isVideoFile, file.name) {
-        buildGroupHoverPreviewSpec(
-            shouldUsePoster = shouldUsePoster,
-            posterUrl = posterUrl,
-            posterCacheKey = posterCacheKey,
-            representativePath = if (isVideoFile) file.path else null,
-        )
+    val previewSpec = remember(shouldUsePoster, posterUrl, posterCacheKey, isPosterPopupEligible) {
+        if (!isPosterPopupEligible) {
+            null
+        } else {
+            buildGroupHoverPreviewSpec(
+                shouldUsePoster = shouldUsePoster,
+                posterUrl = posterUrl,
+                posterCacheKey = posterCacheKey,
+                representativePath = null,
+            )
+        }
     }
 
     val previewInteractionSource = remember { MutableInteractionSource() }

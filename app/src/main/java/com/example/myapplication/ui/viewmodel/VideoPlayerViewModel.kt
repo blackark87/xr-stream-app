@@ -69,6 +69,11 @@ enum class StereoMode {
 class VideoPlayerViewModel(
     private val videoRepository: VideoRepository
 ) : ViewModel() {
+    private enum class ControllerAxisMode {
+        None,
+        Horizontal,
+        Vertical,
+    }
 
     private val _state = MutableStateFlow(VideoPlayerState())
     val state: StateFlow<VideoPlayerState> = _state.asStateFlow()
@@ -88,14 +93,21 @@ class VideoPlayerViewModel(
     private var appContext: Context? = null
     private var currentSmbConfig: SMBConfig? = null
 
-    private var lastSeekAxisEventTimeMs: Long = 0
-    private var lastVolumeAxisEventTimeMs: Long = 0
+    private var controllerAxisMode = ControllerAxisMode.None
+    private var seekDirection = 0
+    private var volumeDirection = 0
+    private var nextSeekRepeatAtMs = 0L
+    private var nextVolumeRepeatAtMs = 0L
 
-    private val controllerAxisDeadZone = 0.25f
-    private val controllerSeekCooldownMs = 220L
-    private val controllerVolumeCooldownMs = 160L
-    private val controllerSeekStepMs = 10_000L
-    private val controllerVolumeStep = 0.05f
+    private val controllerAxisEngageThreshold = 0.45f
+    private val controllerAxisReleaseThreshold = 0.25f
+    private val controllerAxisDominanceMargin = 0.10f
+    private val controllerSeekStepMs = 7_500L
+    private val controllerSeekInitialRepeatMs = 260L
+    private val controllerSeekRepeatMs = 140L
+    private val controllerVolumeStep = 0.04f
+    private val controllerVolumeInitialRepeatMs = 220L
+    private val controllerVolumeRepeatMs = 130L
     private var pendingVideoFormatToPersist: VideoFormat? = null
     private var pendingStereoModeToPersist: StereoMode? = null
     private val releaseMutex = Mutex()
@@ -200,24 +212,125 @@ class VideoPlayerViewModel(
         val player = exoPlayer ?: return
 
         val now = event.eventTimeMs
-        val x = event.x
-        val y = event.y
+        val x = event.x.coerceIn(-1f, 1f)
+        val y = event.y.coerceIn(-1f, 1f)
 
-        if (abs(x) >= controllerAxisDeadZone && now - lastSeekAxisEventTimeMs >= controllerSeekCooldownMs) {
-            if (x > 0f) {
-                skipForward(controllerSeekStepMs)
-            } else {
-                skipBackward(controllerSeekStepMs)
+        val absX = abs(x)
+        val absY = abs(y)
+
+        controllerAxisMode = when {
+            absX >= controllerAxisEngageThreshold &&
+                absX >= absY + controllerAxisDominanceMargin -> ControllerAxisMode.Horizontal
+
+            absY >= controllerAxisEngageThreshold &&
+                absY >= absX + controllerAxisDominanceMargin -> ControllerAxisMode.Vertical
+
+            absX <= controllerAxisReleaseThreshold &&
+                absY <= controllerAxisReleaseThreshold -> ControllerAxisMode.None
+
+            else -> controllerAxisMode
+        }
+
+        when (controllerAxisMode) {
+            ControllerAxisMode.Horizontal -> {
+                volumeDirection = 0
+                nextVolumeRepeatAtMs = 0L
+                handleSeekFromAxis(x, now)
             }
-            lastSeekAxisEventTimeMs = now
+
+            ControllerAxisMode.Vertical -> {
+                seekDirection = 0
+                nextSeekRepeatAtMs = 0L
+                handleVolumeFromAxis(player, y, now)
+            }
+
+            ControllerAxisMode.None -> {
+                resetControllerAxisState()
+            }
+        }
+    }
+
+    private fun handleSeekFromAxis(xAxis: Float, now: Long) {
+        val desiredDirection = when {
+            xAxis >= controllerAxisEngageThreshold -> 1
+            xAxis <= -controllerAxisEngageThreshold -> -1
+            abs(xAxis) <= controllerAxisReleaseThreshold -> 0
+            else -> seekDirection
         }
 
-        if (abs(y) >= controllerAxisDeadZone && now - lastVolumeAxisEventTimeMs >= controllerVolumeCooldownMs) {
-            val delta = if (y < 0f) controllerVolumeStep else -controllerVolumeStep
-            val newVolume = (player.volume + delta).coerceIn(0f, 1f)
-            setVolume(newVolume)
-            lastVolumeAxisEventTimeMs = now
+        if (desiredDirection == 0) {
+            seekDirection = 0
+            nextSeekRepeatAtMs = 0L
+            return
         }
+
+        if (desiredDirection != seekDirection) {
+            seekDirection = desiredDirection
+            applySeekStep(desiredDirection)
+            nextSeekRepeatAtMs = now + controllerSeekInitialRepeatMs
+            return
+        }
+
+        if (nextSeekRepeatAtMs == 0L || now >= nextSeekRepeatAtMs) {
+            applySeekStep(seekDirection)
+            nextSeekRepeatAtMs = now + controllerSeekRepeatMs
+        }
+    }
+
+    private fun applySeekStep(direction: Int) {
+        if (direction > 0) {
+            skipForward(controllerSeekStepMs)
+        } else {
+            skipBackward(controllerSeekStepMs)
+        }
+    }
+
+    private fun handleVolumeFromAxis(player: ExoPlayer, yAxis: Float, now: Long) {
+        val desiredDirection = when {
+            yAxis <= -controllerAxisEngageThreshold -> 1
+            yAxis >= controllerAxisEngageThreshold -> -1
+            abs(yAxis) <= controllerAxisReleaseThreshold -> 0
+            else -> volumeDirection
+        }
+
+        if (desiredDirection == 0) {
+            volumeDirection = 0
+            nextVolumeRepeatAtMs = 0L
+            return
+        }
+
+        if (desiredDirection != volumeDirection) {
+            volumeDirection = desiredDirection
+            applyVolumeStep(player, desiredDirection)
+            nextVolumeRepeatAtMs = now + controllerVolumeInitialRepeatMs
+            return
+        }
+
+        if (nextVolumeRepeatAtMs == 0L || now >= nextVolumeRepeatAtMs) {
+            applyVolumeStep(player, volumeDirection)
+            nextVolumeRepeatAtMs = now + controllerVolumeRepeatMs
+        }
+    }
+
+    private fun applyVolumeStep(player: ExoPlayer, direction: Int) {
+        val delta = if (direction > 0) controllerVolumeStep else -controllerVolumeStep
+        val newVolume = (player.volume + delta).coerceIn(0f, 1f)
+        setVolume(newVolume)
+    }
+
+    private fun stepVolume(direction: Int, step: Float = 0.05f) {
+        val player = exoPlayer ?: return
+        val delta = if (direction > 0) step else -step
+        val newVolume = (player.volume + delta).coerceIn(0f, 1f)
+        setVolume(newVolume)
+    }
+
+    private fun resetControllerAxisState() {
+        controllerAxisMode = ControllerAxisMode.None
+        seekDirection = 0
+        volumeDirection = 0
+        nextSeekRepeatAtMs = 0L
+        nextVolumeRepeatAtMs = 0L
     }
 
     private fun revealControlsIfHidden(): Boolean {
@@ -264,14 +377,36 @@ class VideoPlayerViewModel(
                 pause()
             }
 
-            android.view.KeyEvent.KEYCODE_DPAD_LEFT -> {
-                if (revealControlsIfHidden()) return
+            android.view.KeyEvent.KEYCODE_DPAD_LEFT,
+            android.view.KeyEvent.KEYCODE_SYSTEM_NAVIGATION_LEFT -> {
+                if (!_state.value.showControls) {
+                    _state.value = _state.value.copy(showControls = true)
+                }
                 seekBackward()
             }
 
-            android.view.KeyEvent.KEYCODE_DPAD_RIGHT -> {
-                if (revealControlsIfHidden()) return
+            android.view.KeyEvent.KEYCODE_DPAD_RIGHT,
+            android.view.KeyEvent.KEYCODE_SYSTEM_NAVIGATION_RIGHT -> {
+                if (!_state.value.showControls) {
+                    _state.value = _state.value.copy(showControls = true)
+                }
                 seekForward()
+            }
+
+            android.view.KeyEvent.KEYCODE_DPAD_UP,
+            android.view.KeyEvent.KEYCODE_SYSTEM_NAVIGATION_UP -> {
+                if (!_state.value.showControls) {
+                    _state.value = _state.value.copy(showControls = true)
+                }
+                stepVolume(direction = 1)
+            }
+
+            android.view.KeyEvent.KEYCODE_DPAD_DOWN,
+            android.view.KeyEvent.KEYCODE_SYSTEM_NAVIGATION_DOWN -> {
+                if (!_state.value.showControls) {
+                    _state.value = _state.value.copy(showControls = true)
+                }
+                stepVolume(direction = -1)
             }
 
             android.view.KeyEvent.KEYCODE_BUTTON_B,
@@ -804,16 +939,20 @@ class VideoPlayerViewModel(
     }
 
     fun skipForward(ms: Long = 10000) {
-        exoPlayer?.let {
-            val newPosition = (it.currentPosition + ms).coerceAtMost(it.duration)
-            it.seekTo(newPosition)
+        exoPlayer?.let { player ->
+            val duration = player.duration
+            val upperBound = if (duration > 0) duration else Long.MAX_VALUE
+            val currentPosition = player.currentPosition.coerceAtLeast(0L)
+            val newPosition = (currentPosition + ms).coerceAtMost(upperBound)
+            player.seekTo(newPosition)
         }
     }
 
     fun skipBackward(ms: Long = 10000) {
-        exoPlayer?.let {
-            val newPosition = (it.currentPosition - ms).coerceAtLeast(0)
-            it.seekTo(newPosition)
+        exoPlayer?.let { player ->
+            val currentPosition = player.currentPosition.coerceAtLeast(0L)
+            val newPosition = (currentPosition - ms).coerceAtLeast(0L)
+            player.seekTo(newPosition)
         }
     }
 
@@ -870,8 +1009,7 @@ class VideoPlayerViewModel(
             currentVideoId = null
             pendingVideoFormatToPersist = null
             pendingStereoModeToPersist = null
-            lastSeekAxisEventTimeMs = 0
-            lastVolumeAxisEventTimeMs = 0
+            resetControllerAxisState()
         }
     }
 
@@ -897,6 +1035,8 @@ class VideoPlayerViewModel(
         releasePlayer()
     }
 }
+
+
 
 
 

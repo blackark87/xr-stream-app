@@ -1,7 +1,6 @@
 package com.example.myapplication
 
 import android.os.Bundle
-import android.view.InputDevice
 import android.view.KeyEvent
 import android.view.MotionEvent
 import androidx.activity.ComponentActivity
@@ -19,6 +18,10 @@ import com.example.myapplication.ui.theme.MyApplicationTheme
 import kotlin.math.abs
 
 class MainActivity : ComponentActivity() {
+    companion object {
+        private const val AXIS_POINTER_VALUE_MAX = 1.5f
+        private const val AXIS_EMIT_THRESHOLD = 0.08f
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -85,50 +88,58 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {
-        val isControllerInput =
-            event.isFromSource(InputDevice.SOURCE_JOYSTICK) ||
-                    event.isFromSource(InputDevice.SOURCE_GAMEPAD)
-
-        if (event.action == MotionEvent.ACTION_MOVE && isControllerInput) {
-            val finalX = maxAbs(
-                event.getAxisValue(MotionEvent.AXIS_X),
-                event.getAxisValue(MotionEvent.AXIS_HAT_X),
-                event.getAxisValue(MotionEvent.AXIS_Z),
-                event.getAxisValue(MotionEvent.AXIS_RX),
-            )
-            val finalY = maxAbs(
-                event.getAxisValue(MotionEvent.AXIS_Y),
-                event.getAxisValue(MotionEvent.AXIS_HAT_Y),
-                event.getAxisValue(MotionEvent.AXIS_RZ),
-                event.getAxisValue(MotionEvent.AXIS_RY),
-            )
-
-            if (abs(finalX) > 0.01f || abs(finalY) > 0.01f) {
-                AppState.controllerAxisEvents.tryEmit(
-                    ControllerAxisEvent(
-                        x = finalX,
-                        y = finalY,
-                        eventTimeMs = event.eventTime,
-                    )
-                )
-            }
+        if (event.action != MotionEvent.ACTION_MOVE) {
+            return super.dispatchGenericMotionEvent(event)
         }
 
-        return super.dispatchGenericMotionEvent(event)
+        // Capture across common OpenXR/controller axis profiles and ignore pointer-like values.
+        val finalX = strongestNormalizedAxis(
+            event,
+            MotionEvent.AXIS_X,
+            MotionEvent.AXIS_HAT_X,
+            MotionEvent.AXIS_Z,
+            MotionEvent.AXIS_RX,
+            MotionEvent.AXIS_HSCROLL,
+        )
+        val finalY = strongestNormalizedAxis(
+            event,
+            MotionEvent.AXIS_Y,
+            MotionEvent.AXIS_HAT_Y,
+            MotionEvent.AXIS_RZ,
+            MotionEvent.AXIS_RY,
+            MotionEvent.AXIS_VSCROLL,
+        )
+
+        if (abs(finalX) < AXIS_EMIT_THRESHOLD && abs(finalY) < AXIS_EMIT_THRESHOLD) {
+            return super.dispatchGenericMotionEvent(event)
+        }
+
+        AppState.controllerAxisEvents.tryEmit(
+            ControllerAxisEvent(
+                x = finalX,
+                y = finalY,
+                eventTimeMs = event.eventTime,
+            )
+        )
+
+        return true
     }
 
-    private fun maxAbs(vararg values: Float): Float {
+    private fun strongestNormalizedAxis(event: MotionEvent, vararg axes: Int): Float {
         var selected = 0f
-        for (value in values) {
+        for (axis in axes) {
+            val value = normalizeAxisValue(event.getAxisValue(axis))
             if (abs(value) > abs(selected)) {
                 selected = value
             }
         }
         return selected
     }
+
+    private fun normalizeAxisValue(value: Float): Float {
+        if (abs(value) > AXIS_POINTER_VALUE_MAX) {
+            return 0f
+        }
+        return value.coerceIn(-1f, 1f)
+    }
 }
-
-
-
-
-
