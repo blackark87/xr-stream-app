@@ -19,6 +19,7 @@ import okio.Buffer
 import okio.FileSystem
 import okio.Path.Companion.toOkioPath
 import java.net.URI
+
 /**
  * Custom Coil Fetcher for extracting video thumbnails from SMB and local files
  */
@@ -28,6 +29,7 @@ class VideoThumbnailFetcher(
 ) : Fetcher {
 
     data class Model(val path: String)
+
     private val tag = "VideoThumbnailFetcher"
     private val mb = 1024L * 1024L
     private val maxFullThumbnailDownloadBytes = 768L * mb
@@ -253,6 +255,7 @@ class VideoThumbnailFetcher(
             }
         }
     }
+
     private suspend fun resolveMetadataPosterThumbnail(
         videoPath: String,
         targetThumbnailFile: java.io.File,
@@ -313,7 +316,10 @@ class VideoThumbnailFetcher(
         updateVideoThumbnailPathInDb(videoPath, targetThumbnailFile.absolutePath, metadata.title)
 
         return SourceFetchResult(
-            source = ImageSource(file = targetThumbnailFile.toOkioPath(), fileSystem = FileSystem.SYSTEM),
+            source = ImageSource(
+                file = targetThumbnailFile.toOkioPath(),
+                fileSystem = FileSystem.SYSTEM
+            ),
             mimeType = null,
             dataSource = DataSource.DISK
         )
@@ -325,7 +331,8 @@ class VideoThumbnailFetcher(
         resolvedTitle: String? = null,
     ) {
         try {
-            val db = com.example.myapplication.data.database.AppDatabase.getDatabase(options.context)
+            val db =
+                com.example.myapplication.data.database.AppDatabase.getDatabase(options.context)
             val fileName = extractFileName(videoPath)
             if (fileName.isBlank()) {
                 Log.d(tag, "No file name extracted for thumbnail update path=$videoPath")
@@ -407,8 +414,11 @@ class VideoThumbnailFetcher(
 
     private fun isMetadataLookupEligible(folderPath: String): Boolean {
         val normalized = folderPath.replace('\\', '/').lowercase()
-        return makerYearPathPattern.containsMatchIn(normalized) || avVrPathPattern.containsMatchIn(normalized)
+        return makerYearPathPattern.containsMatchIn(normalized) || avVrPathPattern.containsMatchIn(
+            normalized
+        )
     }
+
     private fun extractFrameDirectlyFromSmb(
         retriever: MediaMetadataRetriever,
         smbFile: SmbFile,
@@ -744,7 +754,8 @@ class VideoThumbnailFetcher(
 
     companion object {
         private val movieCodePattern = Regex("(?i)([a-z]{2,10})[-_](\\d{2,5})(?!\\d)")
-        private val makerYearPathPattern = Regex("(^|/)maker/(?:19|20)\\d{2}(/|$)", RegexOption.IGNORE_CASE)
+        private val makerYearPathPattern =
+            Regex("(^|/)maker/(?:19|20)\\d{2}(/|$)", RegexOption.IGNORE_CASE)
         private val avVrPathPattern = Regex("(^|/)av/vr(/|$)", RegexOption.IGNORE_CASE)
         private fun createFetcherForPath(
             path: String,

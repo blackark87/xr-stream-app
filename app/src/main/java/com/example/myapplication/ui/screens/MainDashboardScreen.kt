@@ -530,7 +530,8 @@ private data class VideoMetadataLookupRequest(
 )
 
 private val videoFileCodePattern = Regex("(?i)([a-z]{2,10})[-_](\\d{2,5})(?!\\d)")
-private val makerYearFolderPattern = Regex("(^|/)maker/(?:19|20)\\d{2}(/|$)", RegexOption.IGNORE_CASE)
+private val makerYearFolderPattern =
+    Regex("(^|/)maker/(?:19|20)\\d{2}(/|$)", RegexOption.IGNORE_CASE)
 private val avVrFolderPattern = Regex("(^|/)av/vr(/|$)", RegexOption.IGNORE_CASE)
 
 private fun buildVideoMetadataLookupRequest(filePath: String): VideoMetadataLookupRequest? {
@@ -641,6 +642,7 @@ private fun rememberGroupMetadata(groupCode: String, folderPath: String): JvrMov
     }
     return metadataState.value
 }
+
 /**
  * LEFT PANEL: Server List
  */
@@ -990,7 +992,10 @@ private fun FileBrowserPanel(
                                     when (item) {
                                         is FileBrowserDisplayItem.Group -> {
                                             val groupMetadata =
-                                                rememberGroupMetadata(item.virtualGroup.key, currentPath)
+                                                rememberGroupMetadata(
+                                                    item.virtualGroup.key,
+                                                    currentPath
+                                                )
                                             VirtualGroupListCard(
                                                 group = item.virtualGroup,
                                                 metadata = groupMetadata,
@@ -1004,8 +1009,10 @@ private fun FileBrowserPanel(
 
                                         is FileBrowserDisplayItem.Entry -> {
                                             val file = item.file
-                                            val isVideoFile = !file.isDirectory && SMBClient.isVideoFile(file.name)
-                                            val videoInDb = recentVideos.find { it.filePath == file.path }
+                                            val isVideoFile =
+                                                !file.isDirectory && SMBClient.isVideoFile(file.name)
+                                            val videoInDb =
+                                                recentVideos.find { it.filePath == file.path }
                                             val isFavorite = videoInDb?.isFavorite ?: false
                                             val isSelected = selectedPaths.contains(file.path)
 
@@ -1050,7 +1057,10 @@ private fun FileBrowserPanel(
                                     when (item) {
                                         is FileBrowserDisplayItem.Group -> {
                                             val groupMetadata =
-                                                rememberGroupMetadata(item.virtualGroup.key, currentPath)
+                                                rememberGroupMetadata(
+                                                    item.virtualGroup.key,
+                                                    currentPath
+                                                )
                                             VirtualGroupThumbnailCard(
                                                 group = item.virtualGroup,
                                                 metadata = groupMetadata,
@@ -1064,8 +1074,10 @@ private fun FileBrowserPanel(
 
                                         is FileBrowserDisplayItem.Entry -> {
                                             val file = item.file
-                                            val isVideoFile = !file.isDirectory && SMBClient.isVideoFile(file.name)
-                                            val videoInDb = recentVideos.find { it.filePath == file.path }
+                                            val isVideoFile =
+                                                !file.isDirectory && SMBClient.isVideoFile(file.name)
+                                            val videoInDb =
+                                                recentVideos.find { it.filePath == file.path }
                                             val isFavorite = videoInDb?.isFavorite ?: false
                                             val isSelected = selectedPaths.contains(file.path)
 
@@ -1725,6 +1737,7 @@ private fun VirtualGroupThumbnailCard(
         )
     }
 }
+
 @Composable
 private fun FileListEntryCard(
     file: SMBFileItem,
@@ -1844,6 +1857,7 @@ private fun FileListEntryCard(
         onClick = onClick,
     )
 }
+
 @Composable
 private fun FileThumbnailCard(
     file: SMBFileItem,
@@ -2050,6 +2064,7 @@ private fun FileThumbnailCard(
         onClick = onClick,
     )
 }
+
 /**
  * RIGHT PANEL: Favorites
  */
@@ -2185,7 +2200,11 @@ private fun AddServerDialog(
     }
 
     var name by remember(initialServer?.id) { mutableStateOf(initialServer?.serverName ?: "") }
-    var address by remember(initialServer?.id) { mutableStateOf(initialServer?.serverAddress ?: "") }
+    var address by remember(initialServer?.id) {
+        mutableStateOf(
+            initialServer?.serverAddress ?: ""
+        )
+    }
     var shareName by remember(initialServer?.id) { mutableStateOf(initialServer?.shareName ?: "") }
     var username by remember(initialServer?.id, initialUsername) { mutableStateOf(initialUsername) }
     var password by remember(initialServer?.id, initialPassword) { mutableStateOf(initialPassword) }
@@ -2325,7 +2344,11 @@ private fun AddServerDialog(
                                     val result = onTestConnection(serverToSave)
 
                                     if (result.isSuccess) {
-                                        ServerCredentialAutofillStore.save(context, username, password)
+                                        ServerCredentialAutofillStore.save(
+                                            context,
+                                            username,
+                                            password
+                                        )
                                         Log.d(
                                             "AddServerDialog",
                                             "Stored manual autofill credentials (usernameLength=${username.length}, hasPassword=${password.isNotBlank()})"
@@ -2441,6 +2464,7 @@ private fun buildFileBrowserDisplayItems(
 
     return displayItems
 }
+
 private fun extractVirtualGroupKey(fileName: String): String? {
     val stem = fileName.substringBeforeLast('.', fileName)
     val match = multipartVideoPattern.matchEntire(stem) ?: return null
