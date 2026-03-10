@@ -17,6 +17,12 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.FastForward
+import androidx.compose.material.icons.filled.FastRewind
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.SkipNext
+import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -167,89 +173,80 @@ fun XRPlaybackControls(
                 horizontalArrangement = Arrangement.Center,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Previous Video
                 IconButton(
                     onClick = { videoPlayerViewModel.playPreviousVideo() },
                     modifier = Modifier.size(56.dp)
                 ) {
-                    Text(
-                        text = "⏮",
-                        style = MaterialTheme.typography.headlineMedium,
-                        color = Color.White
+                    Icon(
+                        imageVector = Icons.Filled.SkipPrevious,
+                        contentDescription = "Previous Video",
+                        modifier = Modifier.size(32.dp),
+                        tint = Color.White
                     )
                 }
 
                 Spacer(modifier = Modifier.width(16.dp))
 
-                // Rewind button
                 IconButton(
                     onClick = { videoPlayerViewModel.skipBackward() },
                     modifier = Modifier.size(56.dp)
                 ) {
-                    Text(
-                        text = "⏪",
-                        style = MaterialTheme.typography.headlineMedium,
-                        color = Color.White
+                    Icon(
+                        imageVector = Icons.Filled.FastRewind,
+                        contentDescription = "Rewind",
+                        modifier = Modifier.size(32.dp),
+                        tint = Color.White
                     )
                 }
 
                 Spacer(modifier = Modifier.width(32.dp))
 
-                // Play/Pause button - larger and more prominent
-                Box(
-                    modifier = Modifier
-                        .size(72.dp)
-                        .clip(CircleShape)
-                        .background(Color.White.copy(alpha = 0.15f)),
-                    contentAlignment = Alignment.Center
+                IconButton(
+                    onClick = {
+                        if (playerState.isPlaying) {
+                            videoPlayerViewModel.pause()
+                        } else {
+                            videoPlayerViewModel.play()
+                        }
+                    },
+                    modifier = Modifier.size(72.dp)
                 ) {
-                    IconButton(
-                        onClick = {
-                            if (playerState.isPlaying) {
-                                videoPlayerViewModel.pause()
-                            } else {
-                                videoPlayerViewModel.play()
-                            }
-                        },
-                        modifier = Modifier.size(72.dp)
-                    ) {
-                        Text(
-                            text = if (playerState.isPlaying) "⏸" else "▶",
-                            style = MaterialTheme.typography.displayMedium,
-                            color = Color.White
-                        )
-                    }
+                    Icon(
+                        imageVector = if (playerState.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                        contentDescription = if (playerState.isPlaying) "Pause" else "Play",
+                        modifier = Modifier.size(48.dp),
+                        tint = Color.White
+                    )
                 }
 
                 Spacer(modifier = Modifier.width(32.dp))
 
-                // Fast forward button
                 IconButton(
                     onClick = { videoPlayerViewModel.skipForward() },
                     modifier = Modifier.size(56.dp)
                 ) {
-                    Text(
-                        text = "⏩",
-                        style = MaterialTheme.typography.headlineMedium,
-                        color = Color.White
+                    Icon(
+                        imageVector = Icons.Filled.FastForward,
+                        contentDescription = "Fast Forward",
+                        modifier = Modifier.size(32.dp),
+                        tint = Color.White
                     )
                 }
 
                 Spacer(modifier = Modifier.width(16.dp))
 
-                // Next Video
                 IconButton(
                     onClick = { videoPlayerViewModel.playNextVideo() },
                     modifier = Modifier.size(56.dp)
                 ) {
-                    Text(
-                        text = "⏭",
-                        style = MaterialTheme.typography.headlineMedium,
-                        color = Color.White
+                    Icon(
+                        imageVector = Icons.Filled.SkipNext,
+                        contentDescription = "Next Video",
+                        modifier = Modifier.size(32.dp),
+                        tint = Color.White
                     )
                 }
             }
-
             // Bottom row - additional controls
             Row(
                 modifier = Modifier
@@ -487,3 +484,6 @@ fun formatTime(milliseconds: Long): String {
         String.format("%02d:%02d", minutes, seconds)
     }
 }
+
+
+

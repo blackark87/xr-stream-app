@@ -50,10 +50,10 @@ class VideoThumbnailFetcher(
         val retriever = MediaMetadataRetriever()
         return try {
             retriever.setDataSource(path)
-            val bitmap = retriever.getFrameAtTime(
-                0, // Get frame at beginning
-                MediaMetadataRetriever.OPTION_CLOSEST_SYNC
-            ) ?: return null
+            val durationMs =
+                retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+                    ?.toLongOrNull() ?: 0L
+            val bitmap = extractBestThumbnailFrame(retriever, durationMs) ?: return null
 
             // Convert bitmap to Coil-compatible result
             val buffer = Buffer()
@@ -78,17 +78,17 @@ class VideoThumbnailFetcher(
 
     private suspend fun extractSMBThumbnail(smbUrl: String): FetchResult? {
         Log.d("VideoThumbnailFetcher", "Extracting SMB thumbnail for: $smbUrl")
-        
+
         // 1. Check for existing local thumbnail based on hash
         val context = options.context
         val cacheDir = java.io.File(context.filesDir, "thumbnails")
         if (!cacheDir.exists()) cacheDir.mkdirs()
-        
+
         val fileNameHash = java.security.MessageDigest.getInstance("MD5")
             .digest(smbUrl.toByteArray())
             .joinToString("") { "%02x".format(it) }
         val localFile = java.io.File(cacheDir, "$fileNameHash.jpg")
-        
+
         if (localFile.exists()) {
             Log.d("VideoThumbnailFetcher", "Found cached thumbnail: ${localFile.absolutePath}")
             return SourceResult(
@@ -130,7 +130,7 @@ class VideoThumbnailFetcher(
             smbFile.inputStream.use { input: java.io.InputStream ->
                 tempFile.outputStream().use { output ->
                     val buffer = ByteArray(64 * 1024) // 64KB buffer
-                    val maxBytes = 20 * 1024 * 1024L // 20MB limit (reduced from 150MB for speed)
+                    val maxBytes = 40 * 1024 * 1024L // 40MB for better keyframe coverage on long GOP videos
 
                     var bytesRead = input.read(buffer)
                     while (bytesRead != -1 && totalBytes < maxBytes) {
@@ -158,27 +158,10 @@ class VideoThumbnailFetcher(
             // Extract frame from temp file
             Log.d("VideoThumbnailFetcher", "Setting data source for MediaMetadataRetriever...")
             retriever.setDataSource(tempFile.absolutePath)
-
-            // Target: 10% of video or 30 seconds, whichever is smaller
-            // But at least 2 seconds if possible
-            val targetTimeUs = 2000000L // Default to 2s
-
-            var bitmap =
-                retriever.getFrameAtTime(targetTimeUs, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
-
-            if (bitmap == null) {
-                Log.w(
-                    "VideoThumbnailFetcher",
-                    "Failed to extract frame at ${targetTimeUs}us, trying at 5s..."
-                )
-                bitmap =
-                    retriever.getFrameAtTime(5000000, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
-            }
-
-            if (bitmap == null) {
-                Log.w("VideoThumbnailFetcher", "Failed to extract frame at 5s, trying at 0s...")
-                bitmap = retriever.getFrameAtTime(0, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
-            }
+            val durationMs =
+                retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+                    ?.toLongOrNull() ?: 0L
+            val bitmap = extractBestThumbnailFrame(retriever, durationMs)
 
             if (bitmap == null) {
                 Log.e(
@@ -202,7 +185,10 @@ class VideoThumbnailFetcher(
                 val video = db.videoDao().getVideoByPath(smbUrl)
                 if (video != null) {
                     db.videoDao().updateThumbnailPath(video.id, localFile.absolutePath)
-                    Log.d("VideoThumbnailFetcher", "Updated DB thumbnail path for video ${video.id}")
+                    Log.d(
+                        "VideoThumbnailFetcher",
+                        "Updated DB thumbnail path for video ${video.id}"
+                    )
                 }
             } catch (e: Exception) {
                 Log.e("VideoThumbnailFetcher", "Failed to update DB", e)
@@ -236,6 +222,67 @@ class VideoThumbnailFetcher(
                 Log.e("VideoThumbnailFetcher", "Error deleting temp file", e)
             }
         }
+    }
+
+    private fun extractBestThumbnailFrame(
+        retriever: MediaMetadataRetriever,
+        durationMs: Long,
+    ): Bitmap? {
+        val preferredTimeUs = computePreferredThumbnailTimeUs(durationMs)
+        val candidateTimesUs =
+            listOf(preferredTimeUs, 10_000_000L, 7_500_000L, 5_000_000L, 2_500_000L, 0L).distinct()
+        val extractionOptions =
+            listOf(MediaMetadataRetriever.OPTION_CLOSEST_SYNC, MediaMetadataRetriever.OPTION_CLOSEST)
+
+        for (candidateTimeUs in candidateTimesUs) {
+            for (option in extractionOptions) {
+                try {
+                    val bitmap = retriever.getFrameAtTime(candidateTimeUs, option)
+                    if (bitmap != null) {
+                        val normalizedBitmap = normalizeThumbnailFrame(bitmap)
+                        Log.d(
+                            "VideoThumbnailFetcher",
+                            "Extracted thumbnail at ${candidateTimeUs / 1_000_000.0}s option=$option (duration=${durationMs}ms), frame=${normalizedBitmap.width}x${normalizedBitmap.height}",
+                        )
+                        if (normalizedBitmap !== bitmap) {
+                            bitmap.recycle()
+                        }
+                        return normalizedBitmap
+                    }
+                } catch (e: Exception) {
+                    Log.w(
+                        "VideoThumbnailFetcher",
+                        "Failed thumbnail extraction at ${candidateTimeUs / 1_000_000.0}s option=$option: ${e.message}",
+                    )
+                }
+            }
+        }
+
+        return null
+    }
+
+    private fun normalizeThumbnailFrame(bitmap: Bitmap): Bitmap {
+        val shouldCropHalfWidth =
+            (bitmap.width == 4096 && bitmap.height == 2048) ||
+                (bitmap.width == 8192 && bitmap.height == 4096)
+
+        if (!shouldCropHalfWidth) {
+            return bitmap
+        }
+
+        val croppedWidth = bitmap.width / 2
+        return try {
+            Bitmap.createBitmap(bitmap, 0, 0, croppedWidth, bitmap.height)
+        } catch (e: Exception) {
+            Log.w("VideoThumbnailFetcher", "Failed to crop SBS thumbnail frame: ${e.message}")
+            bitmap
+        }
+    }
+    private fun computePreferredThumbnailTimeUs(durationMs: Long): Long {
+        if (durationMs <= 0L) return 7_500_000L
+
+        val targetMs = (durationMs * 0.20f).toLong().coerceIn(5_000L, 10_000L)
+        return targetMs * 1_000L
     }
 
     private fun createFallbackResult(): SourceResult {
@@ -306,3 +353,8 @@ class VideoThumbnailFetcher(
         }
     }
 }
+
+
+
+
+

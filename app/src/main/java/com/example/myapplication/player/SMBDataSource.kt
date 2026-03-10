@@ -63,7 +63,7 @@ class SMBDataSource(
             }
 
             // Parse the file path from the URI
-            val filePath = dataSpec.uri.path ?: throw IOException("Invalid URI path")
+            dataSpec.uri.path ?: throw IOException("Invalid URI path")
 
             // Use the URI directly as it's already correctly formatted by the ViewModel
             val smbUrl = dataSpec.uri.toString()

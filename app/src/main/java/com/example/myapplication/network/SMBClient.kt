@@ -156,6 +156,44 @@ class SMBClient(private val config: SMBConfig) {
         }
     }
 
+    suspend fun deleteFile(path: String): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            val context = cifsContext ?: return@withContext Result.failure(
+                IllegalStateException("Not connected. Call connect() first.")
+            )
+
+            val targetUrl = if (path.startsWith("smb://", ignoreCase = true)) {
+                path
+            } else {
+                val cleanPath = path.removePrefix("/")
+                if (config.shareName.isEmpty()) {
+                    "smb://${config.serverAddress}:${config.port}/$cleanPath"
+                } else {
+                    "smb://${config.serverAddress}:${config.port}/${config.shareName}/$cleanPath"
+                }
+            }
+
+            val smbFile = SmbFile(targetUrl, context)
+
+            if (!smbFile.exists()) {
+                return@withContext Result.failure(
+                    IllegalArgumentException("File does not exist: $path")
+                )
+            }
+
+            if (smbFile.isDirectory) {
+                return@withContext Result.failure(
+                    IllegalArgumentException("Directory deletion is not supported: $path")
+                )
+            }
+
+            smbFile.delete()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     fun getSmbFile(url: String): SmbFile {
         val context = cifsContext ?: throw IllegalStateException("Not connected")
         return SmbFile(url, context)

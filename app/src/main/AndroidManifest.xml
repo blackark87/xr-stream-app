@@ -5,6 +5,7 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.HEAD_TRACKING" />
     <uses-permission android:name="android.permission.EYE_TRACKING" />
+    <uses-permission android:name="android.permission.SCENE_UNDERSTANDING" />
     <!-- Permissions for accessing local storage -->
     <uses-permission
         android:name="android.permission.READ_EXTERNAL_STORAGE"
@@ -48,6 +49,11 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.MyApplication"
         android:usesCleartextTraffic="true">
+
+        <uses-native-library
+            android:name="libopenxr.google.so"
+            android:required="false" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -71,3 +77,4 @@
     </application>
 
 </manifest>
+

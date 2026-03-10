@@ -1,6 +1,7 @@
 package com.example.myapplication.ui.viewmodel
 
 import android.content.Context
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.myapplication.AppState
@@ -29,8 +30,14 @@ data class MainDashboardState(
     val selectedServer: SavedServer? = null,
     val currentPath: String = "",
     val pathHistory: List<String> = emptyList(),
-    val errorMessage: String? = null
+    val errorMessage: String? = null,
+    val fileViewMode: FileBrowserViewMode = FileBrowserViewMode.List
 )
+
+enum class FileBrowserViewMode {
+    List,
+    Thumbnail
+}
 
 class MainDashboardViewModel(
     private val context: Context,
@@ -79,6 +86,15 @@ class MainDashboardViewModel(
 
     private var smbClient: SMBClient? = null
     private var localClient: LocalFileClient? = null
+
+    private fun filterAndSortBrowsableFiles(fileList: List<SMBFileItem>): List<SMBFileItem> {
+        return fileList
+            .filter { it.isDirectory || SMBClient.isVideoFile(it.name) }
+            .sortedWith(
+                compareByDescending<SMBFileItem> { it.isDirectory }
+                    .thenBy { it.name.lowercase() }
+            )
+    }
 
     /**
      * Add a new server to the database
@@ -266,16 +282,7 @@ class MainDashboardViewModel(
             try {
                 if (result.isSuccess) {
                     val fileList = result.getOrNull() ?: emptyList()
-
-                    // Filter and Sort:
-                    // 1. Filter: Keep only directories and video files
-                    // 2. Sort: Directories first, then by name
-                    val sortedFiles = fileList
-                        .filter { it.isDirectory || SMBClient.isVideoFile(it.name) }
-                        .sortedWith(
-                            compareByDescending<SMBFileItem> { it.isDirectory }
-                                .thenBy { it.name.lowercase() }
-                        )
+                    val sortedFiles = filterAndSortBrowsableFiles(fileList)
 
                     _files.value = sortedFiles
                     _uiState.value = _uiState.value.copy(
@@ -342,6 +349,38 @@ class MainDashboardViewModel(
         }
     }
 
+    fun toggleFavoriteForFile(file: SMBFileItem, currentIsFavorite: Boolean) {
+        val nextIsFavorite = !currentIsFavorite
+
+        viewModelScope.launch {
+            val existingVideo = videoRepository.getVideoByPath(file.path)
+            if (existingVideo != null) {
+                videoRepository.toggleFavorite(existingVideo.id, nextIsFavorite)
+                return@launch
+            }
+
+            // If the row does not exist yet, create it when user favorites a file.
+            if (!nextIsFavorite) {
+                return@launch
+            }
+
+            val selectedServer = _uiState.value.selectedServer ?: return@launch
+            val newVideo = RecentVideo(
+                fileName = file.name,
+                filePath = file.path,
+                serverAddress = selectedServer.serverAddress,
+                shareName = selectedServer.shareName,
+                lastPlayed = System.currentTimeMillis(),
+                lastPosition = 0,
+                duration = 0,
+                isFavorite = true,
+                videoFormat = "Format2D",
+                stereoMode = "Mono"
+            )
+            videoRepository.insertVideo(newVideo)
+        }
+    }
+
     /**
      * Toggle favorite status by file path
      */
@@ -351,8 +390,98 @@ class MainDashboardViewModel(
         }
     }
 
+    fun toggleFileViewMode() {
+        _uiState.value = _uiState.value.copy(
+            fileViewMode = when (_uiState.value.fileViewMode) {
+                FileBrowserViewMode.List -> FileBrowserViewMode.Thumbnail
+                FileBrowserViewMode.Thumbnail -> FileBrowserViewMode.List
+            }
+        )
+    }
+
+    suspend fun deleteFiles(files: List<SMBFileItem>): Result<Int> {
+        if (files.isEmpty()) return Result.success(0)
+
+        val targets = files.filterNot { it.isDirectory }
+        if (targets.isEmpty()) {
+            return Result.failure(IllegalArgumentException("Only files can be deleted."))
+        }
+
+        val activeLocalClient = localClient
+        val activeSmbClient = smbClient
+        if (activeLocalClient == null && activeSmbClient == null) {
+            return Result.failure(IllegalStateException("No active connection"))
+        }
+
+        _uiState.value = _uiState.value.copy(
+            isLoadingFiles = true,
+            errorMessage = null
+        )
+
+        var deletedCount = 0
+        val errors = mutableListOf<String>()
+
+        for (file in targets) {
+            val deleteResult = when {
+                activeLocalClient != null -> activeLocalClient.deleteFile(file.path)
+                activeSmbClient != null -> activeSmbClient.deleteFile(file.path)
+                else -> Result.failure(IllegalStateException("No active connection"))
+            }
+
+            if (deleteResult.isSuccess) {
+                deletedCount += 1
+                try {
+                    val existingVideo = videoRepository.getVideoByPath(file.path)
+                    if (existingVideo != null) {
+                        videoRepository.deleteVideoById(existingVideo.id)
+                    }
+                } catch (dbError: Exception) {
+                    Log.w(
+                        "MainDashboardViewModel",
+                        "Failed to remove recent/favorite entry for ${file.path}: ${dbError.message}"
+                    )
+                }
+            } else {
+                val reason = deleteResult.exceptionOrNull()?.message ?: "unknown error"
+                errors += "${file.name}: $reason"
+            }
+        }
+
+        val refreshResult = when {
+            activeLocalClient != null -> activeLocalClient.listFiles(_uiState.value.currentPath)
+            activeSmbClient != null -> activeSmbClient.listFiles(_uiState.value.currentPath)
+            else -> Result.failure(IllegalStateException("No active connection"))
+        }
+
+        if (refreshResult.isSuccess) {
+            val refreshedFiles = refreshResult.getOrNull().orEmpty()
+            _files.value = filterAndSortBrowsableFiles(refreshedFiles)
+            _uiState.value = _uiState.value.copy(
+                isLoadingFiles = false,
+                errorMessage = null
+            )
+        } else {
+            _uiState.value = _uiState.value.copy(
+                isLoadingFiles = false,
+                errorMessage = refreshResult.exceptionOrNull()?.message ?: "Failed to refresh files"
+            )
+        }
+
+        return if (errors.isEmpty()) {
+            Result.success(deletedCount)
+        } else {
+            val detail = errors.take(3).joinToString(" | ")
+            Result.failure(
+                IllegalStateException(
+                    "Deleted $deletedCount of ${targets.size} file(s). $detail"
+                )
+            )
+        }
+    }
     override fun onCleared() {
         super.onCleared()
         disconnect()
     }
 }
+
+

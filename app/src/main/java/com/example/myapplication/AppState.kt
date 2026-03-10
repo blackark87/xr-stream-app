@@ -1,11 +1,15 @@
 package com.example.myapplication
 
-
 import com.example.myapplication.network.SMBClient
 import com.example.myapplication.network.SMBConfig
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 
+data class ControllerAxisEvent(
+    val x: Float,
+    val y: Float,
+    val eventTimeMs: Long,
+)
 
 object AppState {
     var smbClient: SMBClient? = null
@@ -15,9 +19,15 @@ object AppState {
         private set
 
     // Global key event bus
-    val keyEvents = kotlinx.coroutines.flow.MutableSharedFlow<android.view.KeyEvent>(
+    val keyEvents = MutableSharedFlow<android.view.KeyEvent>(
         extraBufferCapacity = 1,
-        onBufferOverflow = BufferOverflow.DROP_OLDEST
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
+
+    // Global 6DoF controller thumbstick (left stick/hat) axis event bus.
+    val controllerAxisEvents = MutableSharedFlow<ControllerAxisEvent>(
+        extraBufferCapacity = 8,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
     )
 
     fun setSMBClient(client: SMBClient, config: SMBConfig) {
@@ -31,3 +41,4 @@ object AppState {
         smbConfig = null
     }
 }
+

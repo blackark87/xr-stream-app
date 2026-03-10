@@ -13,20 +13,23 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import com.example.myapplication.data.database.entity.RecentVideo
 import com.example.myapplication.data.repository.VideoRepository
+import com.example.myapplication.network.SMBClient
 import com.example.myapplication.network.SMBConfig
 import com.example.myapplication.network.SMBFileItem
 import com.example.myapplication.player.SMBDataSource
-
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlin.math.abs
 
 sealed class PlayerEvent {
     object NavigateBack : PlayerEvent()
@@ -79,60 +82,104 @@ class VideoPlayerViewModel(
     private var exoPlayer: ExoPlayer? = null
     private var currentVideoId: Long? = null
     private var pendingSaveJob: Job? = null
+    private var positionTrackingJob: Job? = null
 
     // Store context and config for playlist navigation
     private var appContext: Context? = null
     private var currentSmbConfig: SMBConfig? = null
 
+    private var lastSeekAxisEventTimeMs: Long = 0
+    private var lastVolumeAxisEventTimeMs: Long = 0
+
+    private val controllerAxisDeadZone = 0.25f
+    private val controllerSeekCooldownMs = 220L
+    private val controllerVolumeCooldownMs = 160L
+    private val controllerSeekStepMs = 10_000L
+    private val controllerVolumeStep = 0.05f
+    private var pendingVideoFormatToPersist: VideoFormat? = null
+    private var pendingStereoModeToPersist: StereoMode? = null
+    private val releaseMutex = Mutex()
+
     init {
-        // Observe global key events
+        // Observe global key events.
         viewModelScope.launch {
             com.example.myapplication.AppState.keyEvents.collect { event ->
                 handleKeyEvent(event)
+            }
+        }
+
+        // Observe 6DoF thumbstick axis events.
+        viewModelScope.launch {
+            com.example.myapplication.AppState.controllerAxisEvents.collect { event ->
+                handleControllerAxisEvent(event)
             }
         }
     }
 
     fun setVideoFormat(format: VideoFormat) {
         _state.value = _state.value.copy(videoFormat = format)
-        // Cancel any pending save job
+        pendingVideoFormatToPersist = format
+
         pendingSaveJob?.cancel()
         pendingSaveJob = viewModelScope.launch {
-            currentVideoId?.let { id ->
-                try {
-                    videoRepository.updateVideoFormat(id, format.name)
-                    Log.d(
-                        "VideoPlayerViewModel",
-                        "Saved video format: ${format.name} for video ID: $id"
-                    )
-                } catch (e: Exception) {
-                    Log.e("VideoPlayerViewModel", "Failed to save video format: ${e.message}", e)
-                }
-            } ?: run {
-                Log.w("VideoPlayerViewModel", "Cannot save video format: currentVideoId is null")
-            }
+            persistPendingDisplaySettings()
         }
     }
 
     fun setStereoMode(mode: StereoMode) {
         _state.value = _state.value.copy(stereoMode = mode)
-        // Cancel any pending save job
+        pendingStereoModeToPersist = mode
+
         pendingSaveJob?.cancel()
         pendingSaveJob = viewModelScope.launch {
-            currentVideoId?.let { id ->
-                try {
-                    videoRepository.updateStereoMode(id, mode.name)
-                    Log.d(
-                        "VideoPlayerViewModel",
-                        "Saved stereo mode: ${mode.name} for video ID: $id"
-                    )
-                } catch (e: Exception) {
-                    Log.e("VideoPlayerViewModel", "Failed to save stereo mode: ${e.message}", e)
-                }
-            } ?: run {
-                Log.w("VideoPlayerViewModel", "Cannot save stereo mode: currentVideoId is null")
+            persistPendingDisplaySettings()
+        }
+    }
+
+    private suspend fun persistPendingDisplaySettings() {
+        val videoId = ensureCurrentVideoId()
+        if (videoId == null) {
+            Log.w(
+                "VideoPlayerViewModel",
+                "Cannot persist display settings yet: currentVideoId/video path unavailable"
+            )
+            return
+        }
+
+        pendingVideoFormatToPersist?.let { format ->
+            try {
+                videoRepository.updateVideoFormat(videoId, format.name)
+                pendingVideoFormatToPersist = null
+                Log.d(
+                    "VideoPlayerViewModel",
+                    "Saved video format: ${format.name} for video ID: $videoId"
+                )
+            } catch (e: Exception) {
+                Log.e("VideoPlayerViewModel", "Failed to save video format: ${e.message}", e)
             }
         }
+
+        pendingStereoModeToPersist?.let { mode ->
+            try {
+                videoRepository.updateStereoMode(videoId, mode.name)
+                pendingStereoModeToPersist = null
+                Log.d(
+                    "VideoPlayerViewModel",
+                    "Saved stereo mode: ${mode.name} for video ID: $videoId"
+                )
+            } catch (e: Exception) {
+                Log.e("VideoPlayerViewModel", "Failed to save stereo mode: ${e.message}", e)
+            }
+        }
+    }
+
+    private suspend fun ensureCurrentVideoId(): Long? {
+        currentVideoId?.let { return it }
+
+        val currentPath = _state.value.videoFile?.path ?: return null
+        val existingVideo = videoRepository.getVideoByPath(currentPath) ?: return null
+        currentVideoId = existingVideo.id
+        return existingVideo.id
     }
 
     fun toggleControls() {
@@ -143,35 +190,93 @@ class VideoPlayerViewModel(
         _state.value = _state.value.copy(showControls = visible)
     }
 
+    fun requestNavigateBack() {
+        viewModelScope.launch {
+            _playerEvents.send(PlayerEvent.NavigateBack)
+        }
+    }
 
+    private fun handleControllerAxisEvent(event: com.example.myapplication.ControllerAxisEvent) {
+        val player = exoPlayer ?: return
+
+        val now = event.eventTimeMs
+        val x = event.x
+        val y = event.y
+
+        if (abs(x) >= controllerAxisDeadZone && now - lastSeekAxisEventTimeMs >= controllerSeekCooldownMs) {
+            if (x > 0f) {
+                skipForward(controllerSeekStepMs)
+            } else {
+                skipBackward(controllerSeekStepMs)
+            }
+            lastSeekAxisEventTimeMs = now
+        }
+
+        if (abs(y) >= controllerAxisDeadZone && now - lastVolumeAxisEventTimeMs >= controllerVolumeCooldownMs) {
+            val delta = if (y < 0f) controllerVolumeStep else -controllerVolumeStep
+            val newVolume = (player.volume + delta).coerceIn(0f, 1f)
+            setVolume(newVolume)
+            lastVolumeAxisEventTimeMs = now
+        }
+    }
+
+    private fun revealControlsIfHidden(): Boolean {
+        if (!_state.value.showControls) {
+            _state.value = _state.value.copy(showControls = true)
+            return true
+        }
+        return false
+    }
 
     private fun handleKeyEvent(event: android.view.KeyEvent) {
-        if (event.action == android.view.KeyEvent.ACTION_UP) {
-            Log.d("VideoPlayerViewModel", "Received KeyEvent: code=${event.keyCode}, name=${android.view.KeyEvent.keyCodeToString(event.keyCode)}")
-            when (event.keyCode) {
-                android.view.KeyEvent.KEYCODE_BUTTON_A,
-                android.view.KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> {
-                    togglePlayPause()
-                }
-                
-                android.view.KeyEvent.KEYCODE_BUTTON_R2 -> { // Trigger
-                    toggleControls()
-                }
-                
-                android.view.KeyEvent.KEYCODE_DPAD_LEFT -> {
-                    seekBackward()
-                }
-                
-                android.view.KeyEvent.KEYCODE_DPAD_RIGHT -> {
-                    seekForward()
-                }
+        if (event.action != android.view.KeyEvent.ACTION_UP) return
 
-                android.view.KeyEvent.KEYCODE_BUTTON_B,
-                android.view.KeyEvent.KEYCODE_BACK -> {
-                    viewModelScope.launch {
-                        _playerEvents.send(PlayerEvent.NavigateBack)
-                    }
-                }
+        Log.d(
+            "VideoPlayerViewModel",
+            "Received KeyEvent: code=${event.keyCode}, name=${
+                android.view.KeyEvent.keyCodeToString(
+                    event.keyCode
+                )
+            }"
+        )
+
+        when (event.keyCode) {
+            android.view.KeyEvent.KEYCODE_BUTTON_A,
+            android.view.KeyEvent.KEYCODE_BUTTON_R2,
+            android.view.KeyEvent.KEYCODE_DPAD_CENTER,
+            android.view.KeyEvent.KEYCODE_ENTER,
+            android.view.KeyEvent.KEYCODE_NUMPAD_ENTER -> {
+                toggleControls()
+            }
+
+            android.view.KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> {
+                if (revealControlsIfHidden()) return
+                togglePlayPause()
+            }
+
+            android.view.KeyEvent.KEYCODE_MEDIA_PLAY -> {
+                if (revealControlsIfHidden()) return
+                play()
+            }
+
+            android.view.KeyEvent.KEYCODE_MEDIA_PAUSE -> {
+                if (revealControlsIfHidden()) return
+                pause()
+            }
+
+            android.view.KeyEvent.KEYCODE_DPAD_LEFT -> {
+                if (revealControlsIfHidden()) return
+                seekBackward()
+            }
+
+            android.view.KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                if (revealControlsIfHidden()) return
+                seekForward()
+            }
+
+            android.view.KeyEvent.KEYCODE_BUTTON_B,
+            android.view.KeyEvent.KEYCODE_BACK -> {
+                requestNavigateBack()
             }
         }
     }
@@ -188,6 +293,12 @@ class VideoPlayerViewModel(
 
         viewModelScope.launch {
             try {
+                // Release previous player first so its final position is saved to the correct video ID.
+                releaseCurrentPlayer(resetUiState = false)
+                currentVideoId = null
+                pendingVideoFormatToPersist = null
+                pendingStereoModeToPersist = null
+
                 // Check for saved video settings
                 Log.d("VideoPlayerViewModel", "Looking up video by path: ${videoFile.path}")
                 val savedVideo = videoRepository.getVideoByPath(videoFile.path)
@@ -240,14 +351,12 @@ class VideoPlayerViewModel(
                     error = null,
                     videoFile = videoFile,
                     stereoMode = initialStereoMode,
-                    videoFormat = initialVideoFormat
+                    videoFormat = initialVideoFormat,
+                    showControls = true
                 )
 
-                // Save to recent videos immediately to ensure we have an ID for updates
+                // Save to recent videos immediately to ensure we have an ID for updates.
                 saveToRecentVideos(videoFile, smbConfig, savedVideo)
-
-                // Release existing player if any
-                releasePlayer()
 
                 // Create ExoPlayer instance with larger buffer for SMB streaming
                 // Use 1MB allocation size to match SMB buffer
@@ -407,6 +516,9 @@ class VideoPlayerViewModel(
                 // Start position tracking
                 startPositionTracking()
 
+                // Always refresh playlist for current file to keep index/order in sync with file screen.
+                refreshPlaylist(videoFile, smbConfig)
+
             } catch (e: Exception) {
                 Log.e("VideoPlayerViewModel", "Error initializing player: ${e.message}", e)
                 _state.value = _state.value.copy(
@@ -415,93 +527,164 @@ class VideoPlayerViewModel(
                 )
             }
         }
+    }
 
-        // Fetch playlist if empty
-        if (_state.value.playlist.isEmpty()) {
-            fetchPlaylist(videoFile, smbConfig)
+    private suspend fun refreshPlaylist(
+        currentFile: SMBFileItem,
+        smbConfig: SMBConfig,
+    ): Pair<List<SMBFileItem>, Int>? {
+        return try {
+            val relativeParentPath = resolveRelativeParentPath(currentFile.path, smbConfig)
+            Log.d("VideoPlayerViewModel", "Fetching playlist for path: $relativeParentPath")
+
+            val client = SMBClient(smbConfig)
+            val connectResult = client.connect()
+            if (connectResult.isFailure) {
+                Log.w(
+                    "VideoPlayerViewModel",
+                    "Failed to connect while fetching playlist: ${connectResult.exceptionOrNull()?.message}"
+                )
+                return null
+            }
+
+            val listResult = client.listFiles(relativeParentPath)
+            client.disconnect()
+
+            if (listResult.isFailure) {
+                Log.w(
+                    "VideoPlayerViewModel",
+                    "Failed to list files for playlist: ${listResult.exceptionOrNull()?.message}"
+                )
+                return null
+            }
+
+            val allFiles = listResult.getOrNull().orEmpty()
+            val sortedFiles = allFiles
+                .filter { it.isDirectory || SMBClient.isVideoFile(it.name) }
+                .sortedWith(
+                    compareByDescending<SMBFileItem> { it.isDirectory }
+                        .thenBy { it.name.lowercase() }
+                )
+            val videoFiles =
+                sortedFiles.filter { !it.isDirectory && SMBClient.isVideoFile(it.name) }
+
+            val currentIndex = resolveCurrentPlaylistIndex(videoFiles, currentFile)
+
+            _state.value = _state.value.copy(
+                playlist = videoFiles,
+                currentPlaylistIndex = currentIndex,
+            )
+
+            Log.d(
+                "VideoPlayerViewModel",
+                "Playlist fetched: ${videoFiles.size} videos, current index: $currentIndex"
+            )
+
+            videoFiles to currentIndex
+        } catch (e: Exception) {
+            Log.e("VideoPlayerViewModel", "Failed to fetch playlist: ${e.message}", e)
+            null
         }
     }
 
-    private fun fetchPlaylist(currentFile: SMBFileItem, smbConfig: SMBConfig) {
-        viewModelScope.launch {
-            try {
-                // Get parent path
-                val parentPath = currentFile.path.substringBeforeLast('/', "")
-                val relativeParentPath = parentPath.replace(
+    private fun resolveRelativeParentPath(currentPath: String, smbConfig: SMBConfig): String {
+        return try {
+            val uriPath = java.net.URI(currentPath).path.orEmpty().trimStart('/')
+            val withoutShare = if (smbConfig.shareName.isNotEmpty()) {
+                when {
+                    uriPath.equals(smbConfig.shareName, ignoreCase = true) -> ""
+                    uriPath.startsWith("${smbConfig.shareName}/", ignoreCase = true) ->
+                        uriPath.substring(smbConfig.shareName.length + 1)
+
+                    else -> uriPath
+                }
+            } else {
+                uriPath
+            }
+
+            withoutShare.substringBeforeLast('/', "")
+        } catch (_: Exception) {
+            // Fallback path parsing for unusual SMB URLs.
+            val parentPath = currentPath.substringBeforeLast('/', "")
+            parentPath
+                .replace(
                     "smb://${smbConfig.serverAddress}:${smbConfig.port}/${smbConfig.shareName}/",
                     ""
                 )
-                    .removePrefix("/")
-
-                Log.d("VideoPlayerViewModel", "Fetching playlist for path: $relativeParentPath")
-
-                // Use SMBClient to list files
-                val client = com.example.myapplication.network.SMBClient(smbConfig)
-                val connectResult = client.connect()
-                if (connectResult.isSuccess) {
-                    val listResult = client.listFiles(relativeParentPath)
-                    if (listResult.isSuccess) {
-                        val allFiles = listResult.getOrNull() ?: emptyList()
-                        // Filter for video files and sort
-                        val videoExtensions =
-                            listOf("mp4", "mkv", "avi", "mov", "wmv", "flv", "webm")
-                        val videoFiles = allFiles.filter { file ->
-                            !file.isDirectory && videoExtensions.any { ext ->
-                                file.name.endsWith(
-                                    ext,
-                                    ignoreCase = true
-                                )
-                            }
-                        }.sortedBy { it.name.lowercase() }
-
-                        val currentIndex = videoFiles.indexOfFirst { it.path == currentFile.path }
-
-                        _state.value = _state.value.copy(
-                            playlist = videoFiles,
-                            currentPlaylistIndex = currentIndex
-                        )
-                        Log.d(
-                            "VideoPlayerViewModel",
-                            "Playlist fetched: ${videoFiles.size} videos, current index: $currentIndex"
-                        )
-                    }
-                    client.disconnect()
-                }
-            } catch (e: Exception) {
-                Log.e("VideoPlayerViewModel", "Failed to fetch playlist: ${e.message}")
-            }
+                .replace("smb://${smbConfig.serverAddress}/${smbConfig.shareName}/", "")
+                .removePrefix("/")
         }
     }
 
-    fun playNextVideo() {
-        val state = _state.value
-        if (state.playlist.isNotEmpty() && state.currentPlaylistIndex < state.playlist.size - 1) {
-            val nextIndex = state.currentPlaylistIndex + 1
-            val nextFile = state.playlist[nextIndex]
+    private fun normalizeSmbPath(path: String): String {
+        return path
+            .trim()
+            .replace('\\', '/')
+            .removeSuffix("/")
+            .lowercase()
+    }
 
-            appContext?.let { ctx ->
-                currentSmbConfig?.let { config ->
-                    // Update index immediately to prevent double clicks
-                    _state.value = _state.value.copy(currentPlaylistIndex = nextIndex)
-                    initializePlayer(ctx, config, nextFile)
-                }
+    private fun resolveCurrentPlaylistIndex(
+        playlist: List<SMBFileItem>,
+        currentFile: SMBFileItem,
+    ): Int {
+        if (playlist.isEmpty()) return -1
+
+        val normalizedCurrent = normalizeSmbPath(currentFile.path)
+        val byPath = playlist.indexOfFirst { normalizeSmbPath(it.path) == normalizedCurrent }
+        if (byPath >= 0) return byPath
+
+        return playlist.indexOfFirst { it.name.equals(currentFile.name, ignoreCase = true) }
+    }
+
+    private suspend fun ensurePlaylistReady(): Pair<List<SMBFileItem>, Int>? {
+        val currentFile = _state.value.videoFile ?: return null
+        val smbConfig = currentSmbConfig ?: return null
+
+        val currentPlaylist = _state.value.playlist
+        val currentIndex = resolveCurrentPlaylistIndex(currentPlaylist, currentFile)
+
+        if (currentPlaylist.isNotEmpty() && currentIndex >= 0) {
+            if (currentIndex != _state.value.currentPlaylistIndex) {
+                _state.value = _state.value.copy(currentPlaylistIndex = currentIndex)
             }
+            return currentPlaylist to currentIndex
+        }
+
+        return refreshPlaylist(currentFile, smbConfig)
+    }
+
+    fun playNextVideo() {
+        viewModelScope.launch {
+            val playlistResult = ensurePlaylistReady() ?: return@launch
+            val (playlist, currentIndex) = playlistResult
+            if (currentIndex < 0 || currentIndex >= playlist.lastIndex) return@launch
+
+            val ctx = appContext ?: return@launch
+            val config = currentSmbConfig ?: return@launch
+
+            val nextIndex = currentIndex + 1
+            val nextFile = playlist[nextIndex]
+
+            _state.value = _state.value.copy(currentPlaylistIndex = nextIndex)
+            initializePlayer(ctx, config, nextFile)
         }
     }
 
     fun playPreviousVideo() {
-        val state = _state.value
-        if (state.playlist.isNotEmpty() && state.currentPlaylistIndex > 0) {
-            val prevIndex = state.currentPlaylistIndex - 1
-            val prevFile = state.playlist[prevIndex]
+        viewModelScope.launch {
+            val playlistResult = ensurePlaylistReady() ?: return@launch
+            val (playlist, currentIndex) = playlistResult
+            if (currentIndex <= 0 || currentIndex >= playlist.size) return@launch
 
-            appContext?.let { ctx ->
-                currentSmbConfig?.let { config ->
-                    // Update index immediately
-                    _state.value = _state.value.copy(currentPlaylistIndex = prevIndex)
-                    initializePlayer(ctx, config, prevFile)
-                }
-            }
+            val ctx = appContext ?: return@launch
+            val config = currentSmbConfig ?: return@launch
+
+            val prevIndex = currentIndex - 1
+            val prevFile = playlist[prevIndex]
+
+            _state.value = _state.value.copy(currentPlaylistIndex = prevIndex)
+            initializePlayer(ctx, config, prevFile)
         }
     }
 
@@ -546,7 +729,8 @@ class VideoPlayerViewModel(
     }
 
     private fun startPositionTracking() {
-        viewModelScope.launch {
+        positionTrackingJob?.cancel()
+        positionTrackingJob = viewModelScope.launch {
             while (isActive) {
                 exoPlayer?.let { player ->
                     _state.value = _state.value.copy(
@@ -644,46 +828,68 @@ class VideoPlayerViewModel(
         }
     }
 
-    fun releasePlayer() {
-        // Use runBlocking to ensure all saves complete before releasing the player
-        // This is safe because releasePlayer() is called from onCleared() during ViewModel destruction
-        runBlocking {
-            // Wait for any pending format/stereo mode saves to complete
-            pendingSaveJob?.join()
-            Log.d("VideoPlayerViewModel", "Pending save job completed")
+    private suspend fun releaseCurrentPlayer(resetUiState: Boolean) = releaseMutex.withLock {
+        positionTrackingJob?.cancel()
+        positionTrackingJob = null
 
-            // Save final position and duration
-            currentVideoId?.let { videoId ->
-                exoPlayer?.let { player ->
-                    try {
-                        // Update only playback state
-                        val duration = if (player.duration > 0) player.duration else 0L
-                        videoRepository.updatePlaybackState(
-                            videoId = videoId,
-                            position = player.currentPosition,
-                            duration = duration,
-                            timestamp = System.currentTimeMillis()
-                        )
-                        Log.d(
-                            "VideoPlayerViewModel",
-                            "Saved final position: ${player.currentPosition}ms, duration: ${player.duration}ms"
-                        )
-                    } catch (e: Exception) {
-                        Log.e(
-                            "VideoPlayerViewModel",
-                            "Failed to save final position: ${e.message}",
-                            e
-                        )
-                    }
-                }
+        // Wait for any pending format/stereo mode saves before releasing.
+        pendingSaveJob?.join()
+        Log.d("VideoPlayerViewModel", "Pending save job completed")
+
+        val player = exoPlayer
+        val videoId = currentVideoId
+        if (player != null && videoId != null) {
+            try {
+                val duration = if (player.duration > 0) player.duration else 0L
+                videoRepository.updatePlaybackState(
+                    videoId = videoId,
+                    position = player.currentPosition,
+                    duration = duration,
+                    timestamp = System.currentTimeMillis()
+                )
+                Log.d(
+                    "VideoPlayerViewModel",
+                    "Saved final position: ${player.currentPosition}ms, duration: ${player.duration}ms"
+                )
+            } catch (e: Exception) {
+                Log.e(
+                    "VideoPlayerViewModel",
+                    "Failed to save final position: ${e.message}",
+                    e
+                )
             }
         }
 
-        exoPlayer?.release()
+        player?.release()
         exoPlayer = null
         _playerFlow.value = null
-        _state.value = VideoPlayerState()
         pendingSaveJob = null
+
+        if (resetUiState) {
+            _state.value = VideoPlayerState()
+            currentVideoId = null
+            pendingVideoFormatToPersist = null
+            pendingStereoModeToPersist = null
+            lastSeekAxisEventTimeMs = 0
+            lastVolumeAxisEventTimeMs = 0
+        }
+    }
+
+    suspend fun releasePlayerBeforeNavigateBack() {
+        releaseCurrentPlayer(resetUiState = true)
+    }
+
+    fun releasePlayerAsync() {
+        viewModelScope.launch {
+            releaseCurrentPlayer(resetUiState = true)
+        }
+    }
+
+    fun releasePlayer() {
+        // This is safe because releasePlayer() is called from onCleared()/onDispose during teardown.
+        runBlocking {
+            releaseCurrentPlayer(resetUiState = true)
+        }
     }
 
     override fun onCleared() {
@@ -691,3 +897,17 @@ class VideoPlayerViewModel(
         releasePlayer()
     }
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+

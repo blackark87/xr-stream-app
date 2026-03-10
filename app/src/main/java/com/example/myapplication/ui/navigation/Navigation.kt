@@ -1,6 +1,9 @@
 package com.example.myapplication.ui.navigation
 
 import android.content.Context
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.runtime.Composable
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
@@ -29,7 +32,11 @@ sealed class Screen(val route: String) {
 fun AppNavigation(navController: NavHostController, context: Context) {
     NavHost(
         navController = navController,
-        startDestination = Screen.MainDashboard.route
+        startDestination = Screen.MainDashboard.route,
+        enterTransition = { fadeIn(animationSpec = tween(220)) },
+        exitTransition = { fadeOut(animationSpec = tween(160)) },
+        popEnterTransition = { fadeIn(animationSpec = tween(durationMillis = 180, delayMillis = 160)) },
+        popExitTransition = { fadeOut(animationSpec = tween(140)) },
     ) {
         composable(Screen.MainDashboard.route) {
             // Create repositories
@@ -72,3 +79,6 @@ fun AppNavigation(navController: NavHostController, context: Context) {
         }
     }
 }
+
+
+

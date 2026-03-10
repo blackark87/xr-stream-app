@@ -1,6 +1,16 @@
 package com.example.myapplication.ui.screens
 
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.hoverable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,18 +24,27 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ViewList
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.Minimize
 import androidx.compose.material.icons.filled.Movie
+import androidx.compose.material.icons.filled.ViewModule
 import androidx.compose.material.icons.outlined.FavoriteBorder
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -43,17 +62,35 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavController
+import androidx.xr.compose.spatial.ContentEdge
+import androidx.xr.compose.spatial.Orbiter
+import androidx.xr.compose.spatial.OrbiterOffsetType
+import androidx.xr.compose.spatial.Subspace
+import androidx.xr.compose.subspace.MovePolicy
+import androidx.xr.compose.subspace.SpatialMainPanel
+import coil.compose.AsyncImage
+import coil.request.CachePolicy
+import coil.request.ImageRequest
+import com.example.myapplication.R
 import com.example.myapplication.data.database.entity.RecentVideo
 import com.example.myapplication.data.database.entity.SavedServer
 import com.example.myapplication.network.SMBClient
@@ -75,6 +112,7 @@ import com.example.myapplication.ui.theme.SuccessGreen
 import com.example.myapplication.ui.theme.TextPrimary
 import com.example.myapplication.ui.theme.TextSecondary
 import com.example.myapplication.ui.theme.TextTertiary
+import com.example.myapplication.ui.viewmodel.FileBrowserViewMode
 import com.example.myapplication.ui.viewmodel.MainDashboardViewModel
 import kotlinx.coroutines.launch
 
@@ -87,6 +125,9 @@ fun MainDashboardScreen(
     navController: NavController,
     viewModel: MainDashboardViewModel
 ) {
+    val context = LocalContext.current
+    val activity = remember(context) { context.findActivity() }
+
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val servers by viewModel.servers.collectAsStateWithLifecycle()
     val files by viewModel.files.collectAsStateWithLifecycle()
@@ -95,6 +136,12 @@ fun MainDashboardScreen(
 
     var showAddServerDialog by remember { mutableStateOf(false) }
     var serverToEdit by remember { mutableStateOf<SavedServer?>(null) }
+
+
+    Subspace {
+        // Keep the dashboard window movable in spatial mode.
+        SpatialMainPanel(dragPolicy = MovePolicy())
+    }
 
     Box(
         modifier = Modifier
@@ -106,7 +153,8 @@ fun MainDashboardScreen(
             )
     ) {
         Column(
-            modifier = Modifier.fillMaxSize()
+            modifier = Modifier
+                .fillMaxSize()
         ) {
             // Top App Bar
             TopAppBar(
@@ -197,17 +245,24 @@ fun MainDashboardScreen(
                     isConnected = uiState.isConnected,
                     isLoading = uiState.isLoadingFiles,
                     errorMessage = uiState.errorMessage,
+                    viewMode = uiState.fileViewMode,
                     onFileClick = { file ->
                         viewModel.navigateToFile(file)
                     },
                     onBackClick = {
                         viewModel.navigateBack()
                     },
+                    onToggleViewMode = {
+                        viewModel.toggleFileViewMode()
+                    },
+                    onDeleteFiles = { selectedFiles ->
+                        viewModel.deleteFiles(selectedFiles)
+                    },
                     onPlayVideo = { filePath, fileName ->
                         navController.navigate(Screen.VideoPlayer.createRoute(filePath, fileName))
                     },
-                    onFavoriteToggle = { filePath, isFavorite ->
-                        viewModel.toggleFavoriteByPath(filePath, !isFavorite)
+                    onFavoriteToggle = { file, isFavorite ->
+                        viewModel.toggleFavoriteForFile(file, isFavorite)
                     },
                     modifier = Modifier
                         .weight(0.44f) // Decreased from 0.5f
@@ -236,6 +291,23 @@ fun MainDashboardScreen(
                         .fillMaxHeight()
                 )
             }
+        }
+        Orbiter(
+            position = ContentEdge.Top,
+            offset = 66.dp,
+            offsetType = OrbiterOffsetType.OuterEdge,
+            alignment = Alignment.CenterHorizontally,
+            elevation = 24.dp,
+            shouldRenderInNonSpatial = true,
+        ) {
+            DashboardOrbitArea(
+                onMinimize = {
+                    activity?.moveTaskToBack(true)
+                },
+                onClose = {
+                    activity?.finishAffinity()
+                }
+            )
         }
 
         // Add/Edit Server Dialog
@@ -294,6 +366,93 @@ fun MainDashboardScreen(
             }
         }
     }
+}
+
+@Composable
+private fun DashboardOrbitArea(
+    onMinimize: () -> Unit,
+    onClose: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier,
+        color = StreamingBlack.copy(alpha = 0.90f),
+        shape = RoundedCornerShape(20.dp),
+        tonalElevation = 8.dp,
+        shadowElevation = 12.dp
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(44.dp)
+                    .background(Color.White.copy(alpha = 0.08f), RoundedCornerShape(12.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    painter = painterResource(id = R.drawable.ic_launcher_foreground),
+                    contentDescription = "App Icon",
+                    tint = Color.Unspecified,
+                    modifier = Modifier.size(30.dp)
+                )
+            }
+
+            OrbiterActionButton(
+                imageVector = Icons.Filled.Minimize,
+                contentDescription = "Minimize",
+                onClick = onMinimize
+            )
+
+            OrbiterActionButton(
+                imageVector = Icons.Filled.Close,
+                contentDescription = "Close",
+                onClick = onClose
+            )
+        }
+    }
+}
+
+@Composable
+private fun OrbiterActionButton(
+    imageVector: ImageVector,
+    contentDescription: String,
+    onClick: () -> Unit,
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isHovered by interactionSource.collectIsHoveredAsState()
+    val isFocused by interactionSource.collectIsFocusedAsState()
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val isActivePointer = isHovered || isFocused
+
+    val iconTint = when {
+        isPressed -> NetflixRed
+        isActivePointer -> NetflixRed.copy(alpha = 0.85f)
+        else -> TextPrimary
+    }
+
+    IconButton(
+        onClick = onClick,
+        interactionSource = interactionSource,
+        modifier = Modifier
+            .size(44.dp)
+            .hoverable(interactionSource = interactionSource)
+    ) {
+        Icon(
+            imageVector = imageVector,
+            contentDescription = contentDescription,
+            tint = iconTint,
+            modifier = Modifier.size(24.dp)
+        )
+    }
+}
+
+private tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
 }
 
 /**
@@ -389,12 +548,39 @@ private fun FileBrowserPanel(
     isConnected: Boolean,
     isLoading: Boolean,
     errorMessage: String?,
+    viewMode: FileBrowserViewMode,
     onFileClick: (SMBFileItem) -> Unit,
     onBackClick: () -> Unit,
+    onToggleViewMode: () -> Unit,
+    onDeleteFiles: suspend (List<SMBFileItem>) -> Result<Int>,
     onPlayVideo: (String, String) -> Unit,
-    onFavoriteToggle: (String, Boolean) -> Unit,
+    onFavoriteToggle: (SMBFileItem, Boolean) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val scope = rememberCoroutineScope()
+    var isDeleteMode by remember { mutableStateOf(false) }
+    var selectedPaths by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var showDeleteConfirmDialog by remember { mutableStateOf(false) }
+    var isDeleteInProgress by remember { mutableStateOf(false) }
+
+    LaunchedEffect(files, isDeleteMode) {
+        selectedPaths = if (isDeleteMode) {
+            val currentPaths = files.map { it.path }.toSet()
+            selectedPaths.filter { it in currentPaths }.toSet()
+        } else {
+            emptySet()
+        }
+    }
+
+    fun toggleSelection(file: SMBFileItem) {
+        if (file.isDirectory) return
+        selectedPaths = if (selectedPaths.contains(file.path)) {
+            selectedPaths - file.path
+        } else {
+            selectedPaths + file.path
+        }
+    }
+
     Card(
         modifier = modifier,
         colors = CardDefaults.cardColors(
@@ -419,24 +605,88 @@ private fun FileBrowserPanel(
                         style = MaterialTheme.typography.headlineSmall,
                         color = TextPrimary
                     )
-                    if (isConnected && currentPath.isNotEmpty()) {
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = currentPath,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = TextTertiary,
-                            maxLines = 1
-                        )
+                    when {
+                        isDeleteMode -> {
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "${selectedPaths.size} selected",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (selectedPaths.isEmpty()) TextTertiary else NetflixRed,
+                                maxLines = 1
+                            )
+                        }
+
+                        isConnected && currentPath.isNotEmpty() -> {
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = currentPath,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextTertiary,
+                                maxLines = 1
+                            )
+                        }
                     }
                 }
 
-                if (currentPath.isNotEmpty() && currentPath != "/") {
-                    IconButton(onClick = onBackClick) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    IconButton(
+                        onClick = onToggleViewMode,
+                        enabled = isConnected && !isLoading && !isDeleteMode && !isDeleteInProgress
+                    ) {
                         Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back",
-                            tint = TextSecondary
+                            imageVector = if (viewMode == FileBrowserViewMode.List) {
+                                Icons.Filled.ViewModule
+                            } else {
+                                Icons.AutoMirrored.Filled.ViewList
+                            },
+                            contentDescription = if (viewMode == FileBrowserViewMode.List) {
+                                "Switch to thumbnail view"
+                            } else {
+                                "Switch to list view"
+                            },
+                            tint = if (isDeleteMode) TextTertiary else TextSecondary
                         )
+                    }
+
+                    IconButton(
+                        onClick = {
+                            if (!isDeleteMode) {
+                                isDeleteMode = true
+                                selectedPaths = emptySet()
+                                return@IconButton
+                            }
+
+                            if (selectedPaths.isEmpty()) {
+                                isDeleteMode = false
+                                return@IconButton
+                            }
+
+                            showDeleteConfirmDialog = true
+                        },
+                        enabled = isConnected && !isLoading && !isDeleteInProgress
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Delete,
+                            contentDescription = if (isDeleteMode) {
+                                "Confirm selected file deletion"
+                            } else {
+                                "Select files to delete"
+                            },
+                            tint = if (isDeleteMode) NetflixRed else TextSecondary
+                        )
+                    }
+
+                    if (currentPath.isNotEmpty() && currentPath != "/" && !isDeleteMode) {
+                        IconButton(onClick = onBackClick) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = "Back",
+                                tint = TextSecondary
+                            )
+                        }
                     }
                 }
             }
@@ -496,36 +746,252 @@ private fun FileBrowserPanel(
                 }
 
                 else -> {
-                    LazyColumn(
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        items(files) { file ->
-                            val isVideoFile = SMBClient.isVideoFile(file.name)
-                            // Check if this file is in recent videos and get its favorite status
-                            val videoInDb = recentVideos.find { it.filePath == file.path }
-                            val isFavorite = videoInDb?.isFavorite ?: false
+                    when (viewMode) {
+                        FileBrowserViewMode.List -> {
+                            LazyColumn(
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                items(files) { file ->
+                                    val isVideoFile = SMBClient.isVideoFile(file.name)
+                                    val videoInDb = recentVideos.find { it.filePath == file.path }
+                                    val isFavorite = videoInDb?.isFavorite ?: false
+                                    val isSelected = selectedPaths.contains(file.path)
 
-                            FancyFileCard(
-                                fileName = file.name,
-                                isDirectory = file.isDirectory,
-                                isVideoFile = isVideoFile,
-                                fileSize = if (!file.isDirectory) formatFileSizeHelper(file.size) else null,
-                                isFavorite = isFavorite,
-                                videoPath = if (isVideoFile) file.path else null,
-                                onFavoriteToggle = if (isVideoFile) {
-                                    { onFavoriteToggle(file.path, isFavorite) }
-                                } else null,
-                                onClick = {
-                                    if (isVideoFile) {
-                                        onPlayVideo(file.path, file.name)
-                                    } else {
-                                        onFileClick(file)
-                                    }
+                                    FancyFileCard(
+                                        fileName = file.name,
+                                        isDirectory = file.isDirectory,
+                                        isVideoFile = isVideoFile,
+                                        fileSize = if (!file.isDirectory) formatFileSizeHelper(file.size) else null,
+                                        isFavorite = isFavorite,
+                                        videoPath = if (isVideoFile) file.path else null,
+                                        onFavoriteToggle = if (isDeleteMode || !isVideoFile) {
+                                            null
+                                        } else {
+                                            { onFavoriteToggle(file, isFavorite) }
+                                        },
+                                        isSelected = isSelected,
+                                        onClick = {
+                                            if (isDeleteMode) {
+                                                toggleSelection(file)
+                                            } else if (isVideoFile) {
+                                                onPlayVideo(file.path, file.name)
+                                            } else {
+                                                onFileClick(file)
+                                            }
+                                        }
+                                    )
                                 }
-                            )
+                            }
+                        }
+
+                        FileBrowserViewMode.Thumbnail -> {
+                            LazyVerticalGrid(
+                                columns = GridCells.Adaptive(minSize = 180.dp),
+                                verticalArrangement = Arrangement.spacedBy(10.dp),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                items(
+                                    items = files,
+                                    key = { fileItem -> fileItem.path }
+                                ) { file ->
+                                    val isVideoFile = SMBClient.isVideoFile(file.name)
+                                    val videoInDb = recentVideos.find { it.filePath == file.path }
+                                    val isFavorite = videoInDb?.isFavorite ?: false
+                                    val isSelected = selectedPaths.contains(file.path)
+
+                                    FileThumbnailCard(
+                                        file = file,
+                                        isVideoFile = isVideoFile,
+                                        isFavorite = isFavorite,
+                                        isSelectionMode = isDeleteMode,
+                                        isSelected = isSelected,
+                                        onFavoriteToggle = if (isDeleteMode || !isVideoFile) {
+                                            null
+                                        } else {
+                                            { onFavoriteToggle(file, isFavorite) }
+                                        },
+                                        onClick = {
+                                            if (isDeleteMode) {
+                                                toggleSelection(file)
+                                            } else if (isVideoFile) {
+                                                onPlayVideo(file.path, file.name)
+                                            } else {
+                                                onFileClick(file)
+                                            }
+                                        }
+                                    )
+                                }
+                            }
                         }
                     }
                 }
+            }
+        }
+    }
+
+    if (showDeleteConfirmDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                if (!isDeleteInProgress) {
+                    showDeleteConfirmDialog = false
+                }
+            },
+            title = {
+                Text("Delete selected files?")
+            },
+            text = {
+                Text("This will permanently delete ${selectedPaths.size} file(s).")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val targets = files.filter { !it.isDirectory && selectedPaths.contains(it.path) }
+                        if (targets.isEmpty()) {
+                            isDeleteMode = false
+                            selectedPaths = emptySet()
+                            showDeleteConfirmDialog = false
+                            return@TextButton
+                        }
+
+                        scope.launch {
+                            isDeleteInProgress = true
+                            val result = onDeleteFiles(targets)
+                            isDeleteInProgress = false
+                            showDeleteConfirmDialog = false
+
+                            if (result.isSuccess) {
+                                isDeleteMode = false
+                                selectedPaths = emptySet()
+                            }
+                        }
+                    },
+                    enabled = !isDeleteInProgress
+                ) {
+                    if (isDeleteInProgress) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp,
+                            color = NetflixRed
+                        )
+                    } else {
+                        Text("Delete", color = NetflixRed)
+                    }
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { showDeleteConfirmDialog = false },
+                    enabled = !isDeleteInProgress
+                ) {
+                    Text("Cancel", color = TextSecondary)
+                }
+            }
+        )
+    }
+}
+
+@Composable
+private fun FileThumbnailCard(
+    file: SMBFileItem,
+    isVideoFile: Boolean,
+    isFavorite: Boolean,
+    isSelectionMode: Boolean,
+    isSelected: Boolean,
+    onFavoriteToggle: (() -> Unit)?,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+        colors = CardDefaults.cardColors(
+            containerColor = CardBackground
+        ),
+        shape = RoundedCornerShape(10.dp),
+        border = if (isSelected) BorderStroke(2.dp, NetflixRed) else null
+    ) {
+        Column(
+            modifier = Modifier.padding(10.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(120.dp)
+                    .background(DividerGray),
+                contentAlignment = Alignment.Center
+            ) {
+                if (isVideoFile) {
+                    AsyncImage(
+                        model = ImageRequest.Builder(LocalContext.current)
+                            .data(file.path)
+                            .diskCacheKey(file.path)
+                            .diskCachePolicy(CachePolicy.ENABLED)
+                            .memoryCachePolicy(CachePolicy.ENABLED)
+                            .build(),
+                        contentDescription = "Video thumbnail",
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop
+                    )
+                } else {
+                    Icon(
+                        imageVector = Icons.Filled.FolderOpen,
+                        contentDescription = null,
+                        tint = TextSecondary,
+                        modifier = Modifier.size(40.dp)
+                    )
+                }
+
+                if (!isSelectionMode && isVideoFile && onFavoriteToggle != null) {
+                    IconButton(
+                        onClick = onFavoriteToggle,
+                        modifier = Modifier.align(Alignment.TopEnd)
+                    ) {
+                        Icon(
+                            imageVector = if (isFavorite) {
+                                Icons.Filled.Favorite
+                            } else {
+                                Icons.Outlined.FavoriteBorder
+                            },
+                            contentDescription = if (isFavorite) {
+                                "Remove from favorites"
+                            } else {
+                                "Add to favorites"
+                            },
+                            tint = if (isFavorite) NetflixRed else TextPrimary
+                        )
+                    }
+                }
+
+                if (isSelectionMode && isSelected) {
+                    Icon(
+                        imageVector = Icons.Filled.CheckCircle,
+                        contentDescription = "Selected for deletion",
+                        tint = NetflixRed,
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(8.dp)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Text(
+                text = file.name,
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (isVideoFile) TextPrimary else TextSecondary,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+
+            if (!file.isDirectory) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = formatFileSizeHelper(file.size),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = TextTertiary
+                )
             }
         }
     }
@@ -802,3 +1268,10 @@ private fun formatFileSizeHelper(bytes: Long): String {
     val gb = mb / 1024.0
     return String.format("%.2f GB", gb)
 }
+
+
+
+
+
+
+

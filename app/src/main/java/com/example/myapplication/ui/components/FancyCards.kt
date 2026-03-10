@@ -8,6 +8,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -81,6 +82,7 @@ fun LocalStorageCard(
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val isHovered by interactionSource.collectIsHoveredAsState()
+    val isFocused by interactionSource.collectIsFocusedAsState()
 
     val elevation by animateDpAsState(
         targetValue = if (isHovered) 12.dp else 4.dp,
@@ -111,7 +113,7 @@ fun LocalStorageCard(
             defaultElevation = elevation
         ),
         shape = RoundedCornerShape(12.dp),
-        border = if (isSelected || isHovered) BorderStroke(2.dp, AccentGold) else null
+        border = if (isSelected || isHovered || isFocused) BorderStroke(2.dp, AccentGold) else null
     ) {
         Row(
             modifier = Modifier
@@ -188,6 +190,7 @@ fun FancyServerCard(
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val isHovered by interactionSource.collectIsHoveredAsState()
+    val isFocused by interactionSource.collectIsFocusedAsState()
 
     val elevation by animateDpAsState(
         targetValue = if (isHovered) 12.dp else 4.dp,
@@ -217,7 +220,7 @@ fun FancyServerCard(
             defaultElevation = elevation
         ),
         shape = RoundedCornerShape(12.dp),
-        border = if (isHovered) BorderStroke(2.dp, NetflixRed) else null
+        border = if (isHovered || isFocused) BorderStroke(2.dp, NetflixRed) else null
     ) {
         Row(
             modifier = Modifier
@@ -256,14 +259,6 @@ fun FancyServerCard(
                     style = MaterialTheme.typography.titleMedium,
                     color = TextPrimary,
                     maxLines = 2, // Increased maxLines
-                    overflow = TextOverflow.Ellipsis
-                )
-                Spacer(modifier = Modifier.height(2.dp)) // Reduced spacing
-                Text(
-                    text = "${server.serverAddress}/${server.shareName}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = TextSecondary,
-                    maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
             }
@@ -308,6 +303,7 @@ fun FancyMovieCard(
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val isHovered by interactionSource.collectIsHoveredAsState()
+    val isFocused by interactionSource.collectIsFocusedAsState()
 
     val elevation by animateDpAsState(
         targetValue = if (isHovered) 12.dp else 4.dp,
@@ -337,7 +333,7 @@ fun FancyMovieCard(
             defaultElevation = elevation
         ),
         shape = RoundedCornerShape(12.dp),
-        border = if (isHovered) BorderStroke(2.dp, NetflixRed) else null
+        border = if (isHovered || isFocused) BorderStroke(2.dp, NetflixRed) else null
     ) {
         Column(
             modifier = Modifier
@@ -464,11 +460,13 @@ fun FancyFileCard(
     isFavorite: Boolean = false,
     videoPath: String? = null,
     onFavoriteToggle: (() -> Unit)? = null,
+    isSelected: Boolean = false,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val isHovered by interactionSource.collectIsHoveredAsState()
+    val isFocused by interactionSource.collectIsFocusedAsState()
 
     val backgroundColor by animateColorAsState(
         targetValue = if (isHovered) CardBackgroundHover else CardBackground,
@@ -488,7 +486,10 @@ fun FancyFileCard(
             containerColor = backgroundColor
         ),
         shape = RoundedCornerShape(8.dp),
-        border = if (isVideoFile && isHovered) BorderStroke(1.dp, NetflixRed) else null
+        border = if (isSelected || (isVideoFile && isHovered) || isFocused) BorderStroke(
+            2.dp,
+            if (isSelected) AccentGold else NetflixRed
+        ) else null
     ) {
         Row(
             modifier = Modifier
@@ -586,6 +587,17 @@ fun FancyFileCard(
                         tint = if (isFavorite) NetflixRed else TextSecondary
                     )
                 }
+            }
+
+            if (isSelected) {
+                Icon(
+                    imageVector = Icons.Filled.CheckCircle,
+                    contentDescription = "Selected for deletion",
+                    tint = AccentGold,
+                    modifier = Modifier
+                        .size(20.dp)
+                        .padding(end = 6.dp)
+                )
             }
 
             // Arrow for directories

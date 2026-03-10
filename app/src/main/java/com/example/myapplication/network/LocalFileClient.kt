@@ -211,6 +211,34 @@ class LocalFileClient(private val context: Context) {
         }
     }
 
+    suspend fun deleteFile(path: String): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            val file = File(path)
+
+            if (!file.exists()) {
+                return@withContext Result.failure(
+                    IllegalArgumentException("File does not exist: $path")
+                )
+            }
+
+            if (file.isDirectory) {
+                return@withContext Result.failure(
+                    IllegalArgumentException("Directory deletion is not supported: $path")
+                )
+            }
+
+            if (!file.delete()) {
+                return@withContext Result.failure(
+                    IllegalStateException("Failed to delete file: $path")
+                )
+            }
+
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     fun disconnect() {
         // Nothing to disconnect for local storage
     }
