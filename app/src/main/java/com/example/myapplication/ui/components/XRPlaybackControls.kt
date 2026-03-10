@@ -57,17 +57,25 @@ import kotlin.math.roundToInt
 fun XRPlaybackControls(
     videoPlayerViewModel: VideoPlayerViewModel,
     playerState: VideoPlayerState,
-    onNavigateBack: () -> Unit
+    onNavigateBack: () -> Unit,
 ) {
     var showSpeedMenu by remember { mutableStateOf(false) }
     var showVolumeSlider by remember { mutableStateOf(false) }
     var showFormatMenu by remember { mutableStateOf(false) }
 
-    // Scrubbing state
+    // Scrubbing state.
     var isScrubbing by remember { mutableStateOf(false) }
     var sliderPosition by remember { mutableFloatStateOf(0f) }
 
-    // Update slider position from player state only when NOT scrubbing
+    val colors = MaterialTheme.colorScheme
+    val accent = colors.primary
+    val onAccent = colors.onPrimary
+    val controlText = colors.onSurface
+    val mutedText = colors.onSurface.copy(alpha = 0.9f)
+    val controlSurface = colors.surface.copy(alpha = 0.96f)
+    val controlSurfaceVariant = colors.surfaceVariant.copy(alpha = 0.78f)
+
+    // Update slider position from player state only when NOT scrubbing.
     LaunchedEffect(playerState.currentPosition, playerState.duration) {
         if (!isScrubbing && playerState.duration > 0) {
             sliderPosition = playerState.currentPosition.toFloat() / playerState.duration.toFloat()
@@ -80,52 +88,52 @@ fun XRPlaybackControls(
             .background(
                 Brush.verticalGradient(
                     colors = listOf(
-                        Color.Black.copy(alpha = 0.0f),
-                        Color.Black.copy(alpha = 0.0f),
-                        Color.Black.copy(alpha = 0.95f)
-                    )
-                )
+                        Color.Transparent,
+                        Color.Transparent,
+                        colors.scrim.copy(alpha = 0.92f),
+                    ),
+                ),
             )
-            .padding(horizontal = 24.dp, vertical = 20.dp)
+            .padding(horizontal = 24.dp, vertical = 20.dp),
     ) {
         Column(
             modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            // Top row - title and back button
+            // Top row - title and back button.
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween, // Space between back button and title
-                verticalAlignment = Alignment.CenterVertically
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
             ) {
                 IconButton(
                     onClick = onNavigateBack,
                     modifier = Modifier
                         .size(40.dp)
                         .clip(CircleShape)
-                        .background(Color.White.copy(alpha = 0.1f))
+                        .background(controlSurfaceVariant),
                 ) {
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                         contentDescription = "Back",
-                        tint = Color.White
+                        tint = controlText,
                     )
                 }
 
                 Text(
                     text = playerState.videoFile?.name ?: "Video Player",
                     style = MaterialTheme.typography.titleLarge,
-                    color = Color.White,
+                    color = controlText,
                     modifier = Modifier
                         .weight(1f)
                         .padding(horizontal = 16.dp),
-                    maxLines = 1
+                    maxLines = 1,
                 )
 
                 Spacer(modifier = Modifier.width(40.dp))
             }
 
-            // Progress bar
+            // Progress bar.
             Column(modifier = Modifier.fillMaxWidth()) {
                 Slider(
                     value = sliderPosition,
@@ -139,49 +147,55 @@ fun XRPlaybackControls(
                         isScrubbing = false
                     },
                     colors = SliderDefaults.colors(
-                        thumbColor = Color(0xFF00B4D8), // Modern cyan/blue
-                        activeTrackColor = Color(0xFF00B4D8),
-                        inactiveTrackColor = Color.White.copy(alpha = 0.3f)
+                        thumbColor = accent,
+                        activeTrackColor = accent,
+                        inactiveTrackColor = mutedText.copy(alpha = 0.35f),
                     ),
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth(),
                 )
 
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 4.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween
+                    horizontalArrangement = Arrangement.SpaceBetween,
                 ) {
                     Text(
-                        text = formatTime(if (isScrubbing) (sliderPosition * playerState.duration).toLong() else playerState.currentPosition),
+                        text = formatTime(
+                            if (isScrubbing) {
+                                (sliderPosition * playerState.duration).toLong()
+                            } else {
+                                playerState.currentPosition
+                            },
+                        ),
                         style = MaterialTheme.typography.bodySmall,
-                        color = Color.White.copy(alpha = 0.9f)
+                        color = mutedText,
                     )
                     Text(
                         text = formatTime(playerState.duration),
                         style = MaterialTheme.typography.bodySmall,
-                        color = Color.White.copy(alpha = 0.9f)
+                        color = mutedText,
                     )
                 }
             }
 
-            // Main controls
+            // Main controls.
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(vertical = 8.dp),
                 horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.CenterVertically
+                verticalAlignment = Alignment.CenterVertically,
             ) {
                 IconButton(
                     onClick = { videoPlayerViewModel.playPreviousVideo() },
-                    modifier = Modifier.size(56.dp)
+                    modifier = Modifier.size(56.dp),
                 ) {
                     Icon(
                         imageVector = Icons.Filled.SkipPrevious,
                         contentDescription = "Previous Video",
                         modifier = Modifier.size(32.dp),
-                        tint = Color.White
+                        tint = controlText,
                     )
                 }
 
@@ -189,13 +203,13 @@ fun XRPlaybackControls(
 
                 IconButton(
                     onClick = { videoPlayerViewModel.skipBackward() },
-                    modifier = Modifier.size(56.dp)
+                    modifier = Modifier.size(56.dp),
                 ) {
                     Icon(
                         imageVector = Icons.Filled.FastRewind,
                         contentDescription = "Rewind",
                         modifier = Modifier.size(32.dp),
-                        tint = Color.White
+                        tint = controlText,
                     )
                 }
 
@@ -209,13 +223,13 @@ fun XRPlaybackControls(
                             videoPlayerViewModel.play()
                         }
                     },
-                    modifier = Modifier.size(72.dp)
+                    modifier = Modifier.size(72.dp),
                 ) {
                     Icon(
                         imageVector = if (playerState.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
                         contentDescription = if (playerState.isPlaying) "Pause" else "Play",
                         modifier = Modifier.size(48.dp),
-                        tint = Color.White
+                        tint = controlText,
                     )
                 }
 
@@ -223,13 +237,13 @@ fun XRPlaybackControls(
 
                 IconButton(
                     onClick = { videoPlayerViewModel.skipForward() },
-                    modifier = Modifier.size(56.dp)
+                    modifier = Modifier.size(56.dp),
                 ) {
                     Icon(
                         imageVector = Icons.Filled.FastForward,
                         contentDescription = "Fast Forward",
                         modifier = Modifier.size(32.dp),
-                        tint = Color.White
+                        tint = controlText,
                     )
                 }
 
@@ -237,90 +251,88 @@ fun XRPlaybackControls(
 
                 IconButton(
                     onClick = { videoPlayerViewModel.playNextVideo() },
-                    modifier = Modifier.size(56.dp)
+                    modifier = Modifier.size(56.dp),
                 ) {
                     Icon(
                         imageVector = Icons.Filled.SkipNext,
                         contentDescription = "Next Video",
                         modifier = Modifier.size(32.dp),
-                        tint = Color.White
+                        tint = controlText,
                     )
                 }
             }
-            // Bottom row - additional controls
+
+            // Bottom row - additional controls.
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(top = 4.dp),
                 horizontalArrangement = Arrangement.SpaceEvenly,
-                verticalAlignment = Alignment.CenterVertically
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                // Speed control
+                // Speed control.
                 TextButton(
                     onClick = { showSpeedMenu = !showSpeedMenu },
                     modifier = Modifier
                         .clip(RoundedCornerShape(8.dp))
-                        .background(if (showSpeedMenu) Color.White.copy(alpha = 0.15f) else Color.Transparent)
+                        .background(if (showSpeedMenu) controlSurfaceVariant else Color.Transparent),
                 ) {
                     Text(
                         text = "Speed: ${playerState.playbackSpeed}x",
-                        color = Color.White,
-                        style = MaterialTheme.typography.bodyMedium
+                        color = controlText,
+                        style = MaterialTheme.typography.bodyMedium,
                     )
                 }
 
-                // Volume control
+                // Volume control.
                 TextButton(
                     onClick = { showVolumeSlider = !showVolumeSlider },
                     modifier = Modifier
                         .clip(RoundedCornerShape(8.dp))
-                        .background(if (showVolumeSlider) Color.White.copy(alpha = 0.15f) else Color.Transparent)
+                        .background(if (showVolumeSlider) controlSurfaceVariant else Color.Transparent),
                 ) {
                     Text(
                         text = "Volume: ${(playerState.volume * 100).roundToInt()}%",
-                        color = Color.White,
-                        style = MaterialTheme.typography.bodyMedium
+                        color = controlText,
+                        style = MaterialTheme.typography.bodyMedium,
                     )
                 }
 
-                // Format control
+                // Format control.
                 TextButton(
                     onClick = { showFormatMenu = !showFormatMenu },
                     modifier = Modifier
                         .clip(RoundedCornerShape(8.dp))
-                        .background(if (showFormatMenu) Color.White.copy(alpha = 0.15f) else Color.Transparent)
+                        .background(if (showFormatMenu) controlSurfaceVariant else Color.Transparent),
                 ) {
                     Text(
                         text = "Format",
-                        color = Color.White,
-                        style = MaterialTheme.typography.bodyMedium
+                        color = controlText,
+                        style = MaterialTheme.typography.bodyMedium,
                     )
                 }
-
-
             }
 
-
-            // Speed menu
+            // Speed menu.
             if (showSpeedMenu) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(12.dp))
-                        .background(Color.Black.copy(alpha = 0.85f))
-                        .padding(16.dp)
+                        .background(controlSurface)
+                        .padding(16.dp),
                 ) {
                     Column {
                         Text(
                             text = "Playback Speed",
                             style = MaterialTheme.typography.titleMedium,
                             modifier = Modifier.padding(bottom = 12.dp),
-                            color = Color.White
+                            color = controlText,
                         )
 
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
                             listOf(0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f).forEach { speed ->
                                 Button(
@@ -330,17 +342,17 @@ fun XRPlaybackControls(
                                     },
                                     colors = if (playerState.playbackSpeed == speed) {
                                         ButtonDefaults.buttonColors(
-                                            containerColor = Color(0xFF00B4D8),
-                                            contentColor = Color.White
+                                            containerColor = accent,
+                                            contentColor = onAccent,
                                         )
                                     } else {
                                         ButtonDefaults.buttonColors(
-                                            containerColor = Color.White.copy(alpha = 0.15f),
-                                            contentColor = Color.White
+                                            containerColor = controlSurfaceVariant,
+                                            contentColor = controlText,
                                         )
                                     },
                                     shape = RoundedCornerShape(8.dp),
-                                    modifier = Modifier.weight(1f)
+                                    modifier = Modifier.weight(1f),
                                 ) {
                                     Text("${speed}x")
                                 }
@@ -350,49 +362,47 @@ fun XRPlaybackControls(
                 }
             }
 
-            // Format Menu
+            // Format menu.
             if (showFormatMenu) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(12.dp))
-                        .background(Color.Black.copy(alpha = 0.85f))
-                        .padding(16.dp)
+                        .background(controlSurface)
+                        .padding(16.dp),
                 ) {
                     Column {
                         Text(
                             text = "Video Format",
                             style = MaterialTheme.typography.titleMedium,
                             modifier = Modifier.padding(bottom = 12.dp),
-                            color = Color.White
+                            color = controlText,
                         )
 
-                        // Video Type
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
-                            VideoFormat.entries
-                                .forEach { format ->
-                                    Button(
-                                        onClick = { videoPlayerViewModel.setVideoFormat(format) },
-                                        colors = if (playerState.videoFormat == format) {
-                                            ButtonDefaults.buttonColors(
-                                                containerColor = Color(0xFF00B4D8),
-                                                contentColor = Color.White
-                                            )
-                                        } else {
-                                            ButtonDefaults.buttonColors(
-                                                containerColor = Color.White.copy(alpha = 0.15f),
-                                                contentColor = Color.White
-                                            )
-                                        },
-                                        shape = RoundedCornerShape(8.dp),
-                                        modifier = Modifier.weight(1f)
-                                    ) {
-                                        Text(format.name.replace("Format", ""))
-                                    }
+                            VideoFormat.entries.forEach { format ->
+                                Button(
+                                    onClick = { videoPlayerViewModel.setVideoFormat(format) },
+                                    colors = if (playerState.videoFormat == format) {
+                                        ButtonDefaults.buttonColors(
+                                            containerColor = accent,
+                                            contentColor = onAccent,
+                                        )
+                                    } else {
+                                        ButtonDefaults.buttonColors(
+                                            containerColor = controlSurfaceVariant,
+                                            contentColor = controlText,
+                                        )
+                                    },
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.weight(1f),
+                                ) {
+                                    Text(format.name.replace("Format", ""))
                                 }
+                            }
                         }
 
                         Spacer(modifier = Modifier.height(16.dp))
@@ -401,66 +411,64 @@ fun XRPlaybackControls(
                             text = "Stereo Mode",
                             style = MaterialTheme.typography.titleMedium,
                             modifier = Modifier.padding(bottom = 12.dp),
-                            color = Color.White
+                            color = controlText,
                         )
 
-                        // Stereo Mode
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
-                            StereoMode.entries
-                                .forEach { mode ->
-                                    Button(
-                                        onClick = { videoPlayerViewModel.setStereoMode(mode) },
-                                        colors = if (playerState.stereoMode == mode) {
-                                            ButtonDefaults.buttonColors(
-                                                containerColor = Color(0xFF00B4D8),
-                                                contentColor = Color.White
-                                            )
-                                        } else {
-                                            ButtonDefaults.buttonColors(
-                                                containerColor = Color.White.copy(alpha = 0.15f),
-                                                contentColor = Color.White
-                                            )
-                                        },
-                                        shape = RoundedCornerShape(8.dp),
-                                        modifier = Modifier.weight(1f)
-                                    ) {
-                                        Text(mode.name)
-                                    }
+                            StereoMode.entries.forEach { mode ->
+                                Button(
+                                    onClick = { videoPlayerViewModel.setStereoMode(mode) },
+                                    colors = if (playerState.stereoMode == mode) {
+                                        ButtonDefaults.buttonColors(
+                                            containerColor = accent,
+                                            contentColor = onAccent,
+                                        )
+                                    } else {
+                                        ButtonDefaults.buttonColors(
+                                            containerColor = controlSurfaceVariant,
+                                            contentColor = controlText,
+                                        )
+                                    },
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.weight(1f),
+                                ) {
+                                    Text(mode.name)
                                 }
+                            }
                         }
                     }
                 }
             }
 
-            // Volume slider
+            // Volume slider.
             if (showVolumeSlider) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(12.dp))
-                        .background(Color.Black.copy(alpha = 0.85f))
-                        .padding(16.dp)
+                        .background(controlSurface)
+                        .padding(16.dp),
                 ) {
                     Column {
                         Text(
                             text = "Volume",
                             style = MaterialTheme.typography.titleMedium,
                             modifier = Modifier.padding(bottom = 12.dp),
-                            color = Color.White
+                            color = controlText,
                         )
 
                         Slider(
                             value = playerState.volume,
                             onValueChange = { videoPlayerViewModel.setVolume(it) },
                             colors = SliderDefaults.colors(
-                                thumbColor = Color(0xFF00B4D8),
-                                activeTrackColor = Color(0xFF00B4D8),
-                                inactiveTrackColor = Color.White.copy(alpha = 0.3f)
+                                thumbColor = accent,
+                                activeTrackColor = accent,
+                                inactiveTrackColor = mutedText.copy(alpha = 0.35f),
                             ),
-                            modifier = Modifier.fillMaxWidth()
+                            modifier = Modifier.fillMaxWidth(),
                         )
                     }
                 }
@@ -484,6 +492,3 @@ fun formatTime(milliseconds: Long): String {
         String.format("%02d:%02d", minutes, seconds)
     }
 }
-
-
-

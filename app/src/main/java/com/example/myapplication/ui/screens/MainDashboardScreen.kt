@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.ContextWrapper
 import android.util.Log
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.hoverable
@@ -14,6 +15,7 @@ import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -22,6 +24,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -53,17 +56,21 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationRail
+import androidx.compose.material3.NavigationRailItem
+import androidx.compose.material3.NavigationRailItemDefaults
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -78,7 +85,11 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -86,6 +97,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntRect
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupPositionProvider
@@ -98,10 +110,13 @@ import androidx.xr.compose.spatial.OrbiterOffsetType
 import androidx.xr.compose.spatial.Subspace
 import androidx.xr.compose.subspace.MovePolicy
 import androidx.xr.compose.subspace.SpatialMainPanel
+import androidx.xr.compose.subspace.SpatialPanel
 import androidx.xr.compose.subspace.layout.SubspaceModifier
 import androidx.xr.compose.subspace.layout.height
+import androidx.xr.compose.subspace.layout.offset
 import androidx.xr.compose.subspace.layout.width
 import coil3.compose.AsyncImage
+import coil3.compose.rememberAsyncImagePainter
 import coil3.request.CachePolicy
 import coil3.request.ImageRequest
 import com.example.myapplication.BuildConfig
@@ -117,10 +132,9 @@ import com.example.myapplication.ui.components.FancyServerCard
 import com.example.myapplication.ui.components.LocalStorageCard
 import com.example.myapplication.ui.navigation.Screen
 import com.example.myapplication.ui.theme.CardBackground
+import com.example.myapplication.ui.theme.CardBackgroundHover
 import com.example.myapplication.ui.theme.DividerGray
 import com.example.myapplication.ui.theme.ErrorRed
-import com.example.myapplication.ui.theme.GradientEnd
-import com.example.myapplication.ui.theme.GradientStart
 import com.example.myapplication.ui.theme.NetflixRed
 import com.example.myapplication.ui.theme.StreamingBlack
 import com.example.myapplication.ui.theme.SuccessGreen
@@ -134,12 +148,502 @@ import com.example.myapplication.utils.JvrMovieMetadata
 import com.example.myapplication.utils.ServerCredentialAutofillStore
 import com.example.myapplication.utils.ThumbnailImageLoaderProvider
 import com.example.myapplication.utils.VideoThumbnailFetcher
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 
 /**
- * Main Dashboard Screen - Netflix/Disney+ style 3-panel layout
+ * Main Dashboard Screen - Material 3 dashboard with XR pane layout support.
  */
+private enum class DashboardPaneDestination(val label: String) {
+    Servers("Servers"),
+    Browser("Browse"),
+    Library("Library"),
+}
+
+private enum class DashboardPaneLayoutMode(val label: String) {
+    Balanced("Balanced"),
+    Focused("Focused");
+
+    fun toggle(): DashboardPaneLayoutMode = if (this == Balanced) Focused else Balanced
+}
+
+private enum class DashboardWidthClass {
+    Compact,
+    Medium,
+    Expanded,
+}
+
+private enum class ConnectedDashboardTab {
+    Files,
+    Library,
+}
+private data class DashboardPaneVisibility(
+    val showServers: Boolean,
+    val showBrowser: Boolean,
+    val showLibrary: Boolean,
+)
+
+private data class DashboardPaneWeights(
+    val servers: Float,
+    val browser: Float,
+    val library: Float,
+)
+
+private data class DashboardPreviewItem(
+    val title: String,
+    val subtitle: String,
+    val previewSpec: GroupHoverPreviewSpec?,
+    val onOpen: (() -> Unit)? = null,
+)
+
+private fun DashboardPaneDestination.icon(): ImageVector = when (this) {
+    DashboardPaneDestination.Servers -> Icons.Filled.Cloud
+    DashboardPaneDestination.Browser -> Icons.Filled.FolderOpen
+    DashboardPaneDestination.Library -> Icons.Filled.Favorite
+}
+
+private fun resolveDashboardWidthClass(width: Dp): DashboardWidthClass = when {
+    width >= 1500.dp -> DashboardWidthClass.Expanded
+    width >= 1050.dp -> DashboardWidthClass.Medium
+    else -> DashboardWidthClass.Compact
+}
+
+private fun resolvePaneVisibility(
+    widthClass: DashboardWidthClass,
+    selectedPane: DashboardPaneDestination,
+    paneLayoutMode: DashboardPaneLayoutMode,
+): DashboardPaneVisibility = when (widthClass) {
+    DashboardWidthClass.Expanded -> DashboardPaneVisibility(
+        showServers = true,
+        showBrowser = true,
+        showLibrary = true,
+    )
+
+    DashboardWidthClass.Medium -> {
+        if (paneLayoutMode == DashboardPaneLayoutMode.Focused) {
+            when (selectedPane) {
+                DashboardPaneDestination.Servers -> DashboardPaneVisibility(
+                    showServers = true,
+                    showBrowser = false,
+                    showLibrary = false,
+                )
+
+                DashboardPaneDestination.Browser -> DashboardPaneVisibility(
+                    showServers = false,
+                    showBrowser = true,
+                    showLibrary = false,
+                )
+
+                DashboardPaneDestination.Library -> DashboardPaneVisibility(
+                    showServers = false,
+                    showBrowser = false,
+                    showLibrary = true,
+                )
+            }
+        } else {
+            when (selectedPane) {
+                DashboardPaneDestination.Servers -> DashboardPaneVisibility(
+                    showServers = true,
+                    showBrowser = true,
+                    showLibrary = false,
+                )
+
+                DashboardPaneDestination.Browser,
+                DashboardPaneDestination.Library -> DashboardPaneVisibility(
+                    showServers = false,
+                    showBrowser = true,
+                    showLibrary = true,
+                )
+            }
+        }
+    }
+
+    DashboardWidthClass.Compact -> when (selectedPane) {
+        DashboardPaneDestination.Servers -> DashboardPaneVisibility(
+            showServers = true,
+            showBrowser = false,
+            showLibrary = false,
+        )
+
+        DashboardPaneDestination.Browser -> DashboardPaneVisibility(
+            showServers = false,
+            showBrowser = true,
+            showLibrary = false,
+        )
+
+        DashboardPaneDestination.Library -> DashboardPaneVisibility(
+            showServers = false,
+            showBrowser = false,
+            showLibrary = true,
+        )
+    }
+}
+
+private fun resolvePaneWeights(
+    widthClass: DashboardWidthClass,
+    paneLayoutMode: DashboardPaneLayoutMode,
+    selectedPane: DashboardPaneDestination,
+): DashboardPaneWeights = when (widthClass) {
+    DashboardWidthClass.Expanded -> {
+        if (paneLayoutMode == DashboardPaneLayoutMode.Balanced) {
+            DashboardPaneWeights(
+                servers = 0.22f,
+                browser = 0.56f,
+                library = 0.22f,
+            )
+        } else {
+            when (selectedPane) {
+                DashboardPaneDestination.Servers -> DashboardPaneWeights(
+                    servers = 0.32f,
+                    browser = 0.46f,
+                    library = 0.22f,
+                )
+
+                DashboardPaneDestination.Browser -> DashboardPaneWeights(
+                    servers = 0.18f,
+                    browser = 0.64f,
+                    library = 0.18f,
+                )
+
+                DashboardPaneDestination.Library -> DashboardPaneWeights(
+                    servers = 0.22f,
+                    browser = 0.46f,
+                    library = 0.32f,
+                )
+            }
+        }
+    }
+
+    DashboardWidthClass.Medium -> {
+        if (paneLayoutMode == DashboardPaneLayoutMode.Focused) {
+            when (selectedPane) {
+                DashboardPaneDestination.Servers -> DashboardPaneWeights(
+                    servers = 1f,
+                    browser = 0f,
+                    library = 0f,
+                )
+
+                DashboardPaneDestination.Browser -> DashboardPaneWeights(
+                    servers = 0f,
+                    browser = 1f,
+                    library = 0f,
+                )
+
+                DashboardPaneDestination.Library -> DashboardPaneWeights(
+                    servers = 0f,
+                    browser = 0f,
+                    library = 1f,
+                )
+            }
+        } else {
+            when (selectedPane) {
+                DashboardPaneDestination.Servers -> DashboardPaneWeights(
+                    servers = 0.36f,
+                    browser = 0.64f,
+                    library = 0f,
+                )
+
+                DashboardPaneDestination.Browser -> DashboardPaneWeights(
+                    servers = 0f,
+                    browser = 0.62f,
+                    library = 0.38f,
+                )
+
+                DashboardPaneDestination.Library -> DashboardPaneWeights(
+                    servers = 0f,
+                    browser = 0.58f,
+                    library = 0.42f,
+                )
+            }
+        }
+    }
+
+    DashboardWidthClass.Compact -> when (selectedPane) {
+        DashboardPaneDestination.Servers -> DashboardPaneWeights(
+            servers = 1f,
+            browser = 0f,
+            library = 0f,
+        )
+
+        DashboardPaneDestination.Browser -> DashboardPaneWeights(
+            servers = 0f,
+            browser = 1f,
+            library = 0f,
+        )
+
+        DashboardPaneDestination.Library -> DashboardPaneWeights(
+            servers = 0f,
+            browser = 0f,
+            library = 1f,
+        )
+    }
+}
+
+@Composable
+private fun DashboardNavigationRail(
+    selectedPane: DashboardPaneDestination,
+    paneLayoutMode: DashboardPaneLayoutMode,
+    widthClass: DashboardWidthClass,
+    onPaneSelected: (DashboardPaneDestination) -> Unit,
+    onToggleLayoutMode: () -> Unit,
+    onAddServerClick: () -> Unit,
+    destinations: List<DashboardPaneDestination> = DashboardPaneDestination.values().toList(),
+    showLayoutToggle: Boolean = true,
+    modifier: Modifier = Modifier,
+) {
+    NavigationRail(
+        modifier = modifier,
+        containerColor = CardBackground.copy(alpha = 0.92f),
+    ) {
+        Surface(
+            color = NetflixRed.copy(alpha = 0.18f),
+            shape = RoundedCornerShape(14.dp),
+        ) {
+            IconButton(onClick = onAddServerClick) {
+                Icon(
+                    imageVector = Icons.Filled.Add,
+                    contentDescription = "Add server",
+                    tint = NetflixRed,
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        destinations.forEach { destination ->
+            NavigationRailItem(
+                selected = selectedPane == destination,
+                onClick = { onPaneSelected(destination) },
+                icon = {
+                    Icon(
+                        imageVector = destination.icon(),
+                        contentDescription = destination.label,
+                    )
+                },
+                label = { Text(destination.label) },
+                alwaysShowLabel = widthClass == DashboardWidthClass.Compact,
+                colors = NavigationRailItemDefaults.colors(
+                    selectedIconColor = TextPrimary,
+                    selectedTextColor = TextPrimary,
+                    unselectedIconColor = TextSecondary,
+                    unselectedTextColor = TextTertiary,
+                    indicatorColor = NetflixRed.copy(alpha = 0.26f),
+                ),
+            )
+        }
+
+        Spacer(modifier = Modifier.weight(1f))
+
+        if (showLayoutToggle) {
+            TextButton(onClick = onToggleLayoutMode) {
+                Icon(
+                    imageVector = if (paneLayoutMode == DashboardPaneLayoutMode.Balanced) {
+                        Icons.Filled.ViewModule
+                    } else {
+                        Icons.AutoMirrored.Filled.ViewList
+                    },
+                    contentDescription = "Toggle pane layout",
+                    tint = TextSecondary,
+                )
+            }
+
+            Text(
+                text = paneLayoutMode.label,
+                style = MaterialTheme.typography.labelSmall,
+                color = TextTertiary,
+                modifier = Modifier.padding(bottom = 12.dp),
+            )
+        }
+    }
+}
+@Composable
+private fun ConnectedSectionRail(
+    selectedTab: ConnectedDashboardTab,
+    onTabSelected: (ConnectedDashboardTab) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    NavigationRail(
+        modifier = modifier,
+        containerColor = CardBackground.copy(alpha = 0.92f),
+    ) {
+        NavigationRailItem(
+            selected = selectedTab == ConnectedDashboardTab.Files,
+            onClick = { onTabSelected(ConnectedDashboardTab.Files) },
+            icon = {
+                Icon(
+                    imageVector = Icons.Filled.FolderOpen,
+                    contentDescription = "Files",
+                )
+            },
+            label = { Text("Files") },
+            alwaysShowLabel = true,
+            colors = NavigationRailItemDefaults.colors(
+                selectedIconColor = TextPrimary,
+                selectedTextColor = TextPrimary,
+                unselectedIconColor = TextSecondary,
+                unselectedTextColor = TextTertiary,
+                indicatorColor = NetflixRed.copy(alpha = 0.26f),
+            ),
+        )
+
+        NavigationRailItem(
+            selected = selectedTab == ConnectedDashboardTab.Library,
+            onClick = { onTabSelected(ConnectedDashboardTab.Library) },
+            icon = {
+                Icon(
+                    imageVector = Icons.Filled.Favorite,
+                    contentDescription = "Library",
+                )
+            },
+            label = { Text("Library") },
+            alwaysShowLabel = true,
+            colors = NavigationRailItemDefaults.colors(
+                selectedIconColor = TextPrimary,
+                selectedTextColor = TextPrimary,
+                unselectedIconColor = TextSecondary,
+                unselectedTextColor = TextTertiary,
+                indicatorColor = NetflixRed.copy(alpha = 0.26f),
+            ),
+        )
+    }
+}
+
+@Composable
+private fun DashboardPreviewPanel(
+    previewItem: DashboardPreviewItem?,
+    modifier: Modifier = Modifier,
+) {
+    val context = LocalContext.current
+
+    Card(
+        modifier = modifier,
+        colors = CardDefaults.cardColors(containerColor = CardBackground),
+        shape = RoundedCornerShape(16.dp),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(16.dp),
+        ) {
+            Text(
+                text = "Preview",
+                style = MaterialTheme.typography.headlineSmall,
+                color = TextPrimary,
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            HorizontalDivider(color = DividerGray)
+            Spacer(modifier = Modifier.height(12.dp))
+
+            if (previewItem == null) {
+                EmptyState(
+                    icon = Icons.Filled.Movie,
+                    message = "Hover or focus an item to preview",
+                )
+            } else {
+                val previewSpec = previewItem.previewSpec
+                if (previewSpec != null) {
+                    val requestBuilder = ImageRequest.Builder(context)
+                        .data(previewSpec.model)
+                        .diskCachePolicy(CachePolicy.ENABLED)
+                        .memoryCachePolicy(CachePolicy.ENABLED)
+
+                    if (!previewSpec.diskCacheKey.isNullOrBlank()) {
+                        requestBuilder.diskCacheKey(previewSpec.diskCacheKey)
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .aspectRatio(1.6f)
+                            .background(DividerGray.copy(alpha = 0.30f)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        AsyncImage(
+                            model = requestBuilder.build(),
+                            imageLoader = ThumbnailImageLoaderProvider.get(context),
+                            contentDescription = "Preview image",
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Fit,
+                        )
+                    }
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(180.dp)
+                            .background(DividerGray.copy(alpha = 0.30f)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Movie,
+                            contentDescription = null,
+                            tint = TextSecondary,
+                            modifier = Modifier.size(48.dp),
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    text = previewItem.title,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = TextPrimary,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = previewItem.subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextTertiary,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+
+                if (previewItem.onOpen != null) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    TextButton(onClick = previewItem.onOpen) {
+                        Text(text = "Open", color = NetflixRed)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ConnectionStatusChip(isConnected: Boolean) {
+    val containerColor = if (isConnected) SuccessGreen else CardBackground
+    val contentColor = if (isConnected) StreamingBlack else TextSecondary
+
+    Surface(
+        color = containerColor,
+        shape = RoundedCornerShape(999.dp),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Icon(
+                imageVector = if (isConnected) {
+                    Icons.Filled.CheckCircle
+                } else {
+                    Icons.Filled.Cloud
+                },
+                contentDescription = null,
+                tint = contentColor,
+                modifier = Modifier.size(16.dp),
+            )
+            Text(
+                text = if (isConnected) "Connected" else "Offline",
+                style = MaterialTheme.typography.labelMedium,
+                color = contentColor,
+            )
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainDashboardScreen(
@@ -148,7 +652,6 @@ fun MainDashboardScreen(
 ) {
     val context = LocalContext.current
     val activity = remember(context) { context.findActivity() }
-
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val servers by viewModel.servers.collectAsStateWithLifecycle()
     val files by viewModel.files.collectAsStateWithLifecycle()
@@ -157,10 +660,20 @@ fun MainDashboardScreen(
 
     var showAddServerDialog by remember { mutableStateOf(false) }
     var serverToEdit by remember { mutableStateOf<SavedServer?>(null) }
+    var compactConnectedTab by remember { mutableStateOf(ConnectedDashboardTab.Files) }
+    var dashboardPreviewItem by remember { mutableStateOf<DashboardPreviewItem?>(null) }
 
+    LaunchedEffect(compactConnectedTab, uiState.selectedServer?.id) {
+        dashboardPreviewItem = null
+    }
+
+    val quickSwitchServers = remember(servers) {
+        servers
+            .sortedByDescending { it.lastConnected }
+            .take(6)
+    }
 
     Subspace {
-        // Keep the dashboard window movable and slightly larger in spatial mode.
         SpatialMainPanel(
             modifier = SubspaceModifier
                 .width(1920.dp)
@@ -174,167 +687,188 @@ fun MainDashboardScreen(
             .fillMaxSize()
             .background(
                 brush = Brush.verticalGradient(
-                    colors = listOf(GradientStart, GradientEnd)
+                    colors = listOf(
+                        MaterialTheme.colorScheme.background,
+                        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.92f),
+                    )
                 )
             )
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-        ) {
-            // Top App Bar
-            TopAppBar(
-                title = {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Filled.Movie,
-                            contentDescription = null,
-                            tint = NetflixRed,
-                            modifier = Modifier.size(32.dp)
-                        )
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Text(
-                            text = "XR Stream",
-                            style = MaterialTheme.typography.headlineMedium,
-                            color = TextPrimary
+        Scaffold(
+            containerColor = Color.Transparent,
+        ) { innerPadding ->
+            BoxWithConstraints(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+                    .padding(horizontal = 16.dp, vertical = 12.dp)
+            ) {
+
+                if (!uiState.isConnected) {
+                    val panelWidth = if (maxWidth > 920.dp) 760.dp else maxWidth - 24.dp
+
+                    Column(
+                        modifier = Modifier.fillMaxSize(),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center,
+                    ) {
+                        Spacer(modifier = Modifier.height(20.dp))
+
+                        ServerListPanel(
+                            servers = servers,
+                            selectedServer = uiState.selectedServer,
+                            isConnecting = uiState.isConnecting,
+                            onServerClick = { server ->
+                                compactConnectedTab = ConnectedDashboardTab.Files
+                                viewModel.connectToServer(server)
+                            },
+                            onServerEdit = { server ->
+                                serverToEdit = server
+                            },
+                            onServerDelete = { server ->
+                                viewModel.deleteServer(server)
+                            },
+                            onAddServerClick = {
+                                showAddServerDialog = true
+                            },
+                            modifier = Modifier
+                                .width(panelWidth)
+                                .fillMaxHeight(0.78f)
                         )
                     }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = StreamingBlack
-                ),
-                actions = {
-                    // Connection status indicator
-                    if (uiState.isConnected) {
-                        Surface(
-                            color = SuccessGreen,
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.padding(end = 8.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Filled.CheckCircle,
-                                    contentDescription = null,
-                                    tint = StreamingBlack,
-                                    modifier = Modifier.size(16.dp)
+                } else {
+                    Column(modifier = Modifier.fillMaxSize()) {
+                        DashboardOrbitArea(
+                            isConnected = true,
+                            selectedServer = uiState.selectedServer,
+                            registeredServers = quickSwitchServers,
+                            onBackToServerSelection = {
+                                compactConnectedTab = ConnectedDashboardTab.Files
+                                viewModel.disconnect()
+                            },
+                            onSelectServer = { server ->
+                                compactConnectedTab = ConnectedDashboardTab.Files
+                                viewModel.connectToServer(server)
+                            },
+                            onAddServerClick = {
+                                showAddServerDialog = true
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        Row(modifier = Modifier.fillMaxSize()) {
+                            ConnectedSectionRail(
+                                selectedTab = compactConnectedTab,
+                                onTabSelected = { compactConnectedTab = it },
+                                modifier = Modifier.fillMaxHeight(),
+                            )
+
+                            Spacer(modifier = Modifier.width(12.dp))
+
+                            if (compactConnectedTab == ConnectedDashboardTab.Files) {
+                                FileBrowserPanel(
+                                    files = files,
+                                    recentVideos = recentVideos,
+                                    currentPath = uiState.currentPath,
+                                    isConnected = uiState.isConnected,
+                                    isLoading = uiState.isLoadingFiles,
+                                    errorMessage = uiState.errorMessage,
+                                    viewMode = uiState.fileViewMode,
+                                    onFileClick = { file ->
+                                        viewModel.navigateToFile(file)
+                                    },
+                                    onBackClick = {
+                                        viewModel.navigateBack()
+                                    },
+                                    onToggleViewMode = {
+                                        viewModel.toggleFileViewMode()
+                                    },
+                                    onDeleteFiles = { selectedFiles ->
+                                        viewModel.deleteFiles(selectedFiles)
+                                    },
+                                    onPlayVideo = { filePath, fileName ->
+                                        navController.navigate(
+                                            Screen.VideoPlayer.createRoute(filePath, fileName)
+                                        )
+                                    },
+                                    onFavoriteToggle = { file, isFavorite ->
+                                        viewModel.toggleFavoriteForFile(file, isFavorite)
+                                    },
+                                    onPreviewFocused = { preview ->
+                                        dashboardPreviewItem = preview
+                                    },
+                                    modifier = Modifier
+                                        .weight(0.64f)
+                                        .fillMaxHeight()
                                 )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text(
-                                    text = "Connected",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = StreamingBlack
+                            } else {
+                                FavoritesPanel(
+                                    favorites = favorites,
+                                    recentVideos = recentVideos,
+                                    isConnected = uiState.isConnected,
+                                    onFavoriteClick = { video ->
+                                        navController.navigate(
+                                            Screen.VideoPlayer.createRoute(
+                                                video.filePath,
+                                                video.fileName
+                                            )
+                                        )
+                                    },
+                                    onRecentClick = { video ->
+                                        navController.navigate(
+                                            Screen.VideoPlayer.createRoute(
+                                                video.filePath,
+                                                video.fileName
+                                            )
+                                        )
+                                    },
+                                    onFavoriteToggle = { video ->
+                                        viewModel.toggleFavorite(video.id, !video.isFavorite)
+                                    },
+                                    onPreviewFocused = { preview ->
+                                        dashboardPreviewItem = preview
+                                    },
+                                    modifier = Modifier
+                                        .weight(0.64f)
+                                        .fillMaxHeight()
                                 )
                             }
+
+                            Spacer(modifier = Modifier.width(12.dp))
+
+                            DashboardPreviewPanel(
+                                previewItem = dashboardPreviewItem,
+                                modifier = Modifier
+                                    .weight(0.36f)
+                                    .fillMaxHeight(),
+                            )
                         }
                     }
                 }
-            )
-
-            // Three-Panel Layout
-            Row(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(16.dp)
-            ) {
-                // LEFT PANEL: Server List
-                ServerListPanel(
-                    servers = servers,
-                    selectedServer = uiState.selectedServer,
-                    isConnecting = uiState.isConnecting,
-                    onServerClick = { server ->
-                        viewModel.connectToServer(server)
-                    },
-                    onServerEdit = { server ->
-                        serverToEdit = server
-                    },
-                    onServerDelete = { server ->
-                        viewModel.deleteServer(server)
-                    },
-                    onAddServerClick = {
-                        showAddServerDialog = true
-                    },
-                    modifier = Modifier
-                        .weight(0.22f) // Shrink side panel to prioritize thumbnails
-                        .fillMaxHeight()
-                )
-
-                Spacer(modifier = Modifier.width(16.dp))
-
-                // CENTER PANEL: File Browser
-                FileBrowserPanel(
-                    files = files,
-                    recentVideos = recentVideos,
-                    currentPath = uiState.currentPath,
-                    isConnected = uiState.isConnected,
-                    isLoading = uiState.isLoadingFiles,
-                    errorMessage = uiState.errorMessage,
-                    viewMode = uiState.fileViewMode,
-                    onFileClick = { file ->
-                        viewModel.navigateToFile(file)
-                    },
-                    onBackClick = {
-                        viewModel.navigateBack()
-                    },
-                    onToggleViewMode = {
-                        viewModel.toggleFileViewMode()
-                    },
-                    onDeleteFiles = { selectedFiles ->
-                        viewModel.deleteFiles(selectedFiles)
-                    },
-                    onPlayVideo = { filePath, fileName ->
-                        navController.navigate(Screen.VideoPlayer.createRoute(filePath, fileName))
-                    },
-                    onFavoriteToggle = { file, isFavorite ->
-                        viewModel.toggleFavoriteForFile(file, isFavorite)
-                    },
-                    modifier = Modifier
-                        .weight(0.56f) // Wider center panel for larger thumbnails
-                        .fillMaxHeight()
-                )
-
-                Spacer(modifier = Modifier.width(16.dp))
-
-                // RIGHT PANEL: Favorites
-                FavoritesPanel(
-                    favorites = favorites,
-                    isConnected = uiState.isConnected,
-                    onFavoriteClick = { video ->
-                        navController.navigate(
-                            Screen.VideoPlayer.createRoute(
-                                video.filePath,
-                                video.fileName
-                            )
-                        )
-                    },
-                    onFavoriteToggle = { video ->
-                        viewModel.toggleFavorite(video.id, !video.isFavorite)
-                    },
-                    modifier = Modifier
-                        .weight(0.22f) // Shrink side panel to prioritize thumbnails
-                        .fillMaxHeight()
-                )
             }
         }
-        Orbiter(
-            position = ContentEdge.Top,
-            offset = 66.dp,
-            offsetType = OrbiterOffsetType.OuterEdge,
-            alignment = Alignment.CenterHorizontally,
-            elevation = 24.dp,
-            shouldRenderInNonSpatial = true,
-        ) {
-            DashboardOrbitArea(
-                onMinimize = {
-                    activity?.moveTaskToBack(true)
-                },
-                onClose = {
-                    activity?.finishAndRemoveTask()
-                    activity?.finishAffinity()
-                }
-            )
+
+        if (!uiState.isConnected) {
+            Orbiter(
+                position = ContentEdge.Top,
+                offset = 66.dp,
+                offsetType = OrbiterOffsetType.OuterEdge,
+                alignment = Alignment.CenterHorizontally,
+                elevation = 24.dp,
+                shouldRenderInNonSpatial = true,
+            ) {
+                DashboardWindowControls(
+                    onMinimize = {
+                        activity?.moveTaskToBack(true)
+                    },
+                    onClose = {
+                        activity?.finishAndRemoveTask()
+                        activity?.finishAffinity()
+                    }
+                )
+            }
         }
 
         // Add/Edit Server Dialog
@@ -377,7 +911,7 @@ fun MainDashboardScreen(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(StreamingBlack.copy(alpha = 0.7f)),
+                    .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.68f)),
                 contentAlignment = Alignment.Center
             ) {
                 Card(
@@ -406,16 +940,149 @@ fun MainDashboardScreen(
         }
     }
 }
-
 @Composable
 private fun DashboardOrbitArea(
+    isConnected: Boolean,
+    selectedServer: SavedServer?,
+    registeredServers: List<SavedServer>,
+    onBackToServerSelection: () -> Unit,
+    onSelectServer: (SavedServer) -> Unit,
+    onAddServerClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var showServerMenu by remember { mutableStateOf(false) }
+
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        color = CardBackgroundHover.copy(alpha = 0.95f),
+        shape = RoundedCornerShape(22.dp),
+        tonalElevation = 10.dp,
+        shadowElevation = 14.dp
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            if (isConnected) {
+                OrbiterActionButton(
+                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = "Back to server selection",
+                    onClick = onBackToServerSelection
+                )
+            }
+
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.Center
+            ) {
+                Text(
+                    text = if (isConnected) {
+                        selectedServer?.serverName ?: "Connected"
+                    } else {
+                        "Select Server"
+                    },
+                    style = MaterialTheme.typography.titleMedium,
+                    color = TextPrimary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = if (isConnected) {
+                        "Files + Library ready"
+                    } else {
+                        "Local storage or registered SMB servers"
+                    },
+                    style = MaterialTheme.typography.labelMedium,
+                    color = TextTertiary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+
+            ConnectionStatusChip(isConnected = isConnected)
+
+            Box {
+                TextButton(onClick = { showServerMenu = true }) {
+                    Icon(
+                        imageVector = Icons.Filled.Cloud,
+                        contentDescription = null,
+                        tint = TextSecondary,
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Servers", color = TextPrimary)
+                }
+
+                DropdownMenu(
+                    expanded = showServerMenu,
+                    onDismissRequest = { showServerMenu = false }
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("Local Storage") },
+                        onClick = {
+                            showServerMenu = false
+                            onSelectServer(SavedServer.createLocalStorageServer())
+                        },
+                        trailingIcon = {
+                            if (selectedServer?.isLocalStorage == true) {
+                                Icon(
+                                    imageVector = Icons.Filled.CheckCircle,
+                                    contentDescription = null,
+                                    tint = SuccessGreen,
+                                )
+                            }
+                        }
+                    )
+
+                    if (registeredServers.isNotEmpty()) {
+                        HorizontalDivider(color = DividerGray)
+                    }
+
+                    registeredServers.forEach { server ->
+                        DropdownMenuItem(
+                            text = {
+                                Text(
+                                    text = server.serverName,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            },
+                            onClick = {
+                                showServerMenu = false
+                                onSelectServer(server)
+                            },
+                            trailingIcon = {
+                                if (selectedServer?.id == server.id && selectedServer.isLocalStorage.not()) {
+                                    Icon(
+                                        imageVector = Icons.Filled.CheckCircle,
+                                        contentDescription = null,
+                                        tint = SuccessGreen,
+                                    )
+                                }
+                            }
+                        )
+                    }
+                }
+            }
+
+            OrbiterActionButton(
+                imageVector = Icons.Filled.Add,
+                contentDescription = "Register server",
+                onClick = onAddServerClick
+            )
+}
+    }
+}
+
+@Composable
+private fun DashboardWindowControls(
     onMinimize: () -> Unit,
     onClose: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
 ) {
     Surface(
         modifier = modifier,
-        color = StreamingBlack.copy(alpha = 0.90f),
+        color = CardBackgroundHover.copy(alpha = 0.94f),
         shape = RoundedCornerShape(20.dp),
         tonalElevation = 8.dp,
         shadowElevation = 12.dp
@@ -428,7 +1095,7 @@ private fun DashboardOrbitArea(
             Box(
                 modifier = Modifier
                     .size(44.dp)
-                    .background(Color.White.copy(alpha = 0.08f), RoundedCornerShape(12.dp)),
+                    .background(CardBackground.copy(alpha = 0.75f), RoundedCornerShape(12.dp)),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
@@ -533,6 +1200,7 @@ private val videoFileCodePattern = Regex("(?i)([a-z]{2,10})[-_](\\d{2,5})(?!\\d)
 private val makerYearFolderPattern =
     Regex("(^|/)maker/(?:19|20)\\d{2}(/|$)", RegexOption.IGNORE_CASE)
 private val avVrFolderPattern = Regex("(^|/)av/vr(/|$)", RegexOption.IGNORE_CASE)
+
 private fun shouldEnablePosterPopupForPath(path: String): Boolean {
     val normalized = path
         .substringBefore('?')
@@ -543,7 +1211,6 @@ private fun shouldEnablePosterPopupForPath(path: String): Boolean {
     return makerYearFolderPattern.containsMatchIn(normalized) ||
             avVrFolderPattern.containsMatchIn(normalized)
 }
-
 private fun buildVideoMetadataLookupRequest(filePath: String): VideoMetadataLookupRequest? {
     val normalizedPath = filePath
         .substringBefore('?')
@@ -670,9 +1337,11 @@ private fun ServerListPanel(
     Card(
         modifier = modifier,
         colors = CardDefaults.cardColors(
-            containerColor = StreamingBlack
+            containerColor = CardBackgroundHover
         ),
-        shape = RoundedCornerShape(16.dp)
+        shape = RoundedCornerShape(16.dp),
+        border = BorderStroke(1.5.dp, DividerGray.copy(alpha = 0.92f)),
+        elevation = CardDefaults.cardElevation(defaultElevation = 10.dp),
     ) {
         Column(
             modifier = Modifier
@@ -708,6 +1377,7 @@ private fun ServerListPanel(
 
             // Server List with Local Storage option
             LazyColumn(
+                contentPadding = PaddingValues(horizontal = 2.dp, vertical = 2.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 // Local Storage card (always first)
@@ -753,6 +1423,7 @@ private fun FileBrowserPanel(
     onDeleteFiles: suspend (List<SMBFileItem>) -> Result<Int>,
     onPlayVideo: (String, String) -> Unit,
     onFavoriteToggle: (SMBFileItem, Boolean) -> Unit,
+    onPreviewFocused: (DashboardPreviewItem?) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val scope = rememberCoroutineScope()
@@ -800,6 +1471,19 @@ private fun FileBrowserPanel(
             activeVirtualGroupKey = null
         }
     }
+    LaunchedEffect(
+        isConnected,
+        isLoading,
+        errorMessage,
+        displayItems,
+        isDeleteMode,
+        activeVirtualGroupKey,
+        viewMode,
+    ) {
+        if (!isConnected || isLoading || errorMessage != null || displayItems.isEmpty() || isDeleteMode) {
+            onPreviewFocused(null)
+        }
+    }
 
     fun toggleSelection(file: SMBFileItem) {
         if (file.isDirectory) return
@@ -828,7 +1512,7 @@ private fun FileBrowserPanel(
     Card(
         modifier = modifier,
         colors = CardDefaults.cardColors(
-            containerColor = StreamingBlack
+            containerColor = CardBackground
         ),
         shape = RoundedCornerShape(16.dp)
     ) {
@@ -1009,11 +1693,11 @@ private fun FileBrowserPanel(
                                             VirtualGroupListCard(
                                                 group = item.virtualGroup,
                                                 metadata = groupMetadata,
-                                                onClick = {
-                                                    if (!isDeleteMode) {
-                                                        openVirtualGroup(item.virtualGroup.key)
-                                                    }
-                                                }
+                                                onClick = {},
+                                                onPopupClick = {
+                                                    openVirtualGroup(item.virtualGroup.key)
+                                                },
+                                                onPreviewFocused = onPreviewFocused,
                                             )
                                         }
 
@@ -1040,12 +1724,18 @@ private fun FileBrowserPanel(
                                                 onClick = {
                                                     if (isDeleteMode) {
                                                         toggleSelection(file)
-                                                    } else if (isVideoFile) {
+                                                    } else if (!isVideoFile) {
+                                                        onFileClick(file)
+                                                    }
+                                                },
+                                                onPopupClick = {
+                                                    if (isVideoFile) {
                                                         onPlayVideo(file.path, file.name)
                                                     } else {
                                                         onFileClick(file)
                                                     }
                                                 },
+                                                onPreviewFocused = onPreviewFocused,
                                                 modifier = Modifier
                                             )
                                         }
@@ -1074,11 +1764,11 @@ private fun FileBrowserPanel(
                                             VirtualGroupThumbnailCard(
                                                 group = item.virtualGroup,
                                                 metadata = groupMetadata,
-                                                onClick = {
-                                                    if (!isDeleteMode) {
-                                                        openVirtualGroup(item.virtualGroup.key)
-                                                    }
-                                                }
+                                                onClick = {},
+                                                onPopupClick = {
+                                                    openVirtualGroup(item.virtualGroup.key)
+                                                },
+                                                onPreviewFocused = onPreviewFocused,
                                             )
                                         }
 
@@ -1105,12 +1795,18 @@ private fun FileBrowserPanel(
                                                 onClick = {
                                                     if (isDeleteMode) {
                                                         toggleSelection(file)
-                                                    } else if (isVideoFile) {
+                                                    } else if (!isVideoFile) {
+                                                        onFileClick(file)
+                                                    }
+                                                },
+                                                onPopupClick = {
+                                                    if (isVideoFile) {
                                                         onPlayVideo(file.path, file.name)
                                                     } else {
                                                         onFileClick(file)
                                                     }
-                                                }
+                                                },
+                                                onPreviewFocused = onPreviewFocused,
                                             )
                                         }
                                     }
@@ -1215,57 +1911,143 @@ private fun buildGroupHoverPreviewSpec(
 }
 
 
-private object CenteredPopupPositionProvider : PopupPositionProvider {
+private fun buildLibraryPreviewSpec(video: RecentVideo): GroupHoverPreviewSpec? {
+    return when {
+        !video.thumbnailPath.isNullOrBlank() -> GroupHoverPreviewSpec(
+            model = video.thumbnailPath,
+            diskCacheKey = video.thumbnailPath,
+            source = "cached",
+        )
+
+        video.filePath.isNotBlank() -> GroupHoverPreviewSpec(
+            model = VideoThumbnailFetcher.Model(video.filePath),
+            diskCacheKey = video.filePath,
+            source = "generated",
+        )
+
+        else -> null
+    }
+}
+
+private class FileAnchoredPopupPositionProvider(
+    private val anchorBoundsOverride: IntRect?,
+) : PopupPositionProvider {
     override fun calculatePosition(
         anchorBounds: IntRect,
         windowSize: IntSize,
         layoutDirection: LayoutDirection,
         popupContentSize: IntSize
     ): IntOffset {
+        val effectiveAnchor = anchorBoundsOverride ?: anchorBounds
+        val horizontalMargin = 16
+        val verticalMargin = 16
+        val popupGap = 10
+
+        val maxX = (windowSize.width - popupContentSize.width - horizontalMargin)
+            .coerceAtLeast(horizontalMargin)
+        val maxY = (windowSize.height - popupContentSize.height - verticalMargin)
+            .coerceAtLeast(verticalMargin)
+
+        val anchorCenterX = (effectiveAnchor.left + effectiveAnchor.right) / 2
+        val centeredX = anchorCenterX - popupContentSize.width / 2
+        val resolvedX = centeredX.coerceIn(horizontalMargin, maxX)
+
+        val preferAbove = effectiveAnchor.top - popupContentSize.height - popupGap
+        val preferBelow = effectiveAnchor.bottom + popupGap
+        val resolvedY = when {
+            preferAbove >= verticalMargin -> preferAbove
+            preferBelow <= maxY -> preferBelow
+            else -> preferAbove
+        }.coerceIn(verticalMargin, maxY)
+
         return IntOffset(
-            x = (windowSize.width - popupContentSize.width) / 2,
-            y = (windowSize.height - popupContentSize.height) / 2,
+            x = resolvedX,
+            y = resolvedY,
         )
     }
 }
-
 @Composable
 private fun GroupHoverPreviewPopup(
     show: Boolean,
     groupKey: String,
     title: String,
     previewSpec: GroupHoverPreviewSpec?,
+    anchorBounds: IntRect? = null,
     interactionSource: MutableInteractionSource? = null,
     onClick: (() -> Unit)? = null,
 ) {
     if (!show || previewSpec == null) return
 
     val context = LocalContext.current
-    val requestBuilder = ImageRequest.Builder(context)
-        .data(previewSpec.model)
-        .diskCachePolicy(CachePolicy.ENABLED)
-        .memoryCachePolicy(CachePolicy.ENABLED)
+    val imageLoader = ThumbnailImageLoaderProvider.get(context)
+    val imageRequest = remember(previewSpec.model, previewSpec.diskCacheKey) {
+        ImageRequest.Builder(context)
+            .data(previewSpec.model)
+            .diskCachePolicy(CachePolicy.ENABLED)
+            .memoryCachePolicy(CachePolicy.ENABLED)
+            .apply {
+                if (!previewSpec.diskCacheKey.isNullOrBlank()) {
+                    diskCacheKey(previewSpec.diskCacheKey)
+                }
+            }
+            .build()
+    }
+    val previewPainter = rememberAsyncImagePainter(
+        model = imageRequest,
+        imageLoader = imageLoader,
+    )
+    val intrinsicSize = previewPainter.intrinsicSize
+    val density = LocalDensity.current
+    val configuration = LocalConfiguration.current
 
-    if (!previewSpec.diskCacheKey.isNullOrBlank()) {
-        requestBuilder.diskCacheKey(previewSpec.diskCacheKey)
+    val intrinsicWidthPx = remember(intrinsicSize) {
+        intrinsicSize.width.takeIf { it.isFinite() && it > 0f } ?: 800f
+    }
+    val intrinsicHeightPx = remember(intrinsicSize) {
+        intrinsicSize.height.takeIf { it.isFinite() && it > 0f } ?: 540f
+    }
+    val isSmallPreviewImage = intrinsicWidthPx <= 1000f && intrinsicHeightPx <= 700f
+    val targetScale = if (isSmallPreviewImage) 1.5f else 1f
+    val maxPreviewWidthPx = with(density) { (configuration.screenWidthDp.dp * 0.72f).toPx() }
+    val maxPreviewHeightPx = with(density) { (configuration.screenHeightDp.dp * 0.70f).toPx() }
+    val previewScale = remember(
+        intrinsicWidthPx,
+        intrinsicHeightPx,
+        targetScale,
+        maxPreviewWidthPx,
+        maxPreviewHeightPx,
+    ) {
+        minOf(
+            targetScale,
+            maxPreviewWidthPx / intrinsicWidthPx,
+            maxPreviewHeightPx / intrinsicHeightPx,
+        )
+    }
+    val previewWidthDp = with(density) { (intrinsicWidthPx * previewScale).toDp() }
+    val previewHeightDp = with(density) { (intrinsicHeightPx * previewScale).toDp() }
+    val popupWidth = (previewWidthDp + 24.dp).coerceAtLeast(220.dp)
+    val textMaxWidth = (previewWidthDp + 6.dp).coerceAtLeast(196.dp)
+
+    val popupPositionProvider = remember(anchorBounds) {
+        FileAnchoredPopupPositionProvider(anchorBounds)
     }
 
     Popup(
-        popupPositionProvider = CenteredPopupPositionProvider,
+        popupPositionProvider = popupPositionProvider,
         properties = PopupProperties(
             focusable = false,
             dismissOnBackPress = false,
-            dismissOnClickOutside = false,
+            dismissOnClickOutside = true,
             clippingEnabled = false,
         )
     ) {
         Card(
-            colors = CardDefaults.cardColors(containerColor = StreamingBlack.copy(alpha = 0.96f)),
+            colors = CardDefaults.cardColors(containerColor = CardBackground.copy(alpha = 0.96f)),
             shape = RoundedCornerShape(16.dp),
             border = BorderStroke(1.dp, NetflixRed.copy(alpha = 0.45f)),
             modifier = Modifier
-                .width(520.dp)
-                .padding(10.dp)
+                .width(popupWidth)
+                .padding(8.dp)
                 .let { base ->
                     if (interactionSource != null) {
                         base.hoverable(interactionSource = interactionSource)
@@ -1286,14 +2068,13 @@ private fun GroupHoverPreviewPopup(
             ) {
                 Box(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .aspectRatio(800f / 540f)
-                        .background(Color.Black.copy(alpha = 0.24f)),
+                        .width(previewWidthDp)
+                        .height(previewHeightDp)
+                        .background(DividerGray.copy(alpha = 0.30f)),
                     contentAlignment = Alignment.Center
                 ) {
-                    AsyncImage(
-                        model = requestBuilder.build(),
-                        imageLoader = ThumbnailImageLoaderProvider.get(context),
+                    Image(
+                        painter = previewPainter,
                         contentDescription = "Expanded poster preview",
                         modifier = Modifier.fillMaxSize(),
                         contentScale = ContentScale.Fit
@@ -1306,13 +2087,16 @@ private fun GroupHoverPreviewPopup(
                     style = MaterialTheme.typography.bodyLarge,
                     color = TextPrimary,
                     maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.width(textMaxWidth),
                 )
                 Text(
                     text = "$groupKey · ${previewSpec.source}",
                     style = MaterialTheme.typography.labelSmall,
                     color = TextTertiary,
-                    maxLines = 1
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.width(textMaxWidth),
                 )
             }
         }
@@ -1324,6 +2108,8 @@ private fun VirtualGroupListCard(
     group: VirtualVideoGroup,
     metadata: JvrMovieMetadata?,
     onClick: () -> Unit,
+    onPopupClick: () -> Unit = onClick,
+    onPreviewFocused: (DashboardPreviewItem?) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -1342,45 +2128,37 @@ private fun VirtualGroupListCard(
 
     var posterLoadFailed by remember(group.key, posterUrl) { mutableStateOf(false) }
     val shouldUsePoster = !posterUrl.isNullOrBlank() && !posterLoadFailed
-    val previewSpec = remember(shouldUsePoster, posterUrl, posterCacheKey, representativePath) {
-        buildGroupHoverPreviewSpec(
-            shouldUsePoster = shouldUsePoster,
-            posterUrl = posterUrl,
-            posterCacheKey = posterCacheKey,
-            representativePath = representativePath,
+    val isPosterPopupEligible = remember(representativePath) {
+        representativePath?.let(::shouldEnablePosterPopupForPath) == true
+    }
+    val previewSpec = remember(
+        shouldUsePoster,
+        posterUrl,
+        posterCacheKey,
+        representativePath,
+        isPosterPopupEligible,
+    ) {
+        if (!isPosterPopupEligible) {
+            null
+        } else {
+            buildGroupHoverPreviewSpec(
+                shouldUsePoster = shouldUsePoster,
+                posterUrl = posterUrl,
+                posterCacheKey = posterCacheKey,
+                representativePath = representativePath,
+            )
+        }
+    }
+    val previewItem = remember(displayTitle, secondaryText, previewSpec, onPopupClick) {
+        DashboardPreviewItem(
+            title = displayTitle,
+            subtitle = secondaryText,
+            previewSpec = previewSpec,
+            onOpen = onPopupClick,
         )
     }
 
-    val previewInteractionSource = remember { MutableInteractionSource() }
-    val previewPopupInteractionSource = remember { MutableInteractionSource() }
-    val isPreviewHovered by previewInteractionSource.collectIsHoveredAsState()
-    val isPreviewFocused by previewInteractionSource.collectIsFocusedAsState()
-    val isPreviewPopupHovered by previewPopupInteractionSource.collectIsHoveredAsState()
-    var showPreviewPopup by remember(group.key, previewSpec) { mutableStateOf(false) }
-
-    LaunchedEffect(previewSpec, isPreviewHovered, isPreviewFocused, isPreviewPopupHovered) {
-        if (previewSpec == null) {
-            showPreviewPopup = false
-            return@LaunchedEffect
-        }
-
-        if (isPreviewHovered || isPreviewFocused || isPreviewPopupHovered) {
-            if (!showPreviewPopup) {
-                delay(500)
-                if (isPreviewHovered || isPreviewFocused || isPreviewPopupHovered) {
-                    showPreviewPopup = true
-                }
-            }
-            return@LaunchedEffect
-        }
-
-        delay(120)
-        if (!isPreviewHovered && !isPreviewFocused && !isPreviewPopupHovered) {
-            showPreviewPopup = false
-        }
-    }
-
-    LaunchedEffect(group.key, posterUrl, representativePath, posterLoadFailed, showPreviewPopup) {
+    LaunchedEffect(group.key, posterUrl, representativePath, posterLoadFailed) {
         val source = when {
             shouldUsePoster -> "remote-poster"
             !representativePath.isNullOrBlank() -> "generated-video-frame"
@@ -1398,18 +2176,32 @@ private fun VirtualGroupListCard(
 
         Log.d(
             GROUP_THUMBNAIL_LOG_TAG,
-            "Render group=${group.key} source=$source posterFailed=$posterLoadFailed previewPopup=$showPreviewPopup posterUrl=${posterUrl ?: "<none>"} posterCacheKey=${posterCacheKey ?: "<none>"} posterCached=$posterCached representativePath=${representativePath ?: "<none>"}"
+            "Render group=${group.key} source=$source posterFailed=$posterLoadFailed posterUrl=${posterUrl ?: "<none>"} posterCacheKey=${posterCacheKey ?: "<none>"} posterCached=$posterCached representativePath=${representativePath ?: "<none>"}"
         )
     }
+
+    val cardInteractionSource = remember { MutableInteractionSource() }
+    val isCardHovered by cardInteractionSource.collectIsHoveredAsState()
+    val isCardFocused by cardInteractionSource.collectIsFocusedAsState()
+    var popupAnchorBounds by remember(group.key) { mutableStateOf<IntRect?>(null) }
 
     Card(
         modifier = modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick),
+            .hoverable(interactionSource = cardInteractionSource)
+            .clickable(
+                interactionSource = cardInteractionSource,
+                indication = null,
+                onClick = {
+                    onPreviewFocused(previewItem)
+                    onClick()
+                }
+            ),
         colors = CardDefaults.cardColors(
             containerColor = CardBackground
         ),
-        shape = RoundedCornerShape(8.dp)
+        shape = RoundedCornerShape(8.dp),
+        border = if (isCardHovered || isCardFocused) BorderStroke(1.dp, NetflixRed.copy(alpha = 0.7f)) else null,
     ) {
         Row(
             modifier = Modifier
@@ -1421,7 +2213,15 @@ private fun VirtualGroupListCard(
                 modifier = Modifier
                     .size(80.dp, 60.dp)
                     .background(DividerGray)
-                    .hoverable(interactionSource = previewInteractionSource),
+                    .onGloballyPositioned { coordinates ->
+                        val bounds = coordinates.boundsInWindow()
+                        popupAnchorBounds = IntRect(
+                            bounds.left.roundToInt(),
+                            bounds.top.roundToInt(),
+                            bounds.right.roundToInt(),
+                            bounds.bottom.roundToInt(),
+                        )
+                    },
                 contentAlignment = Alignment.Center
             ) {
                 when {
@@ -1523,12 +2323,12 @@ private fun VirtualGroupListCard(
         }
 
         GroupHoverPreviewPopup(
-            show = showPreviewPopup,
+            show = false,
             groupKey = group.key,
             title = displayTitle,
             previewSpec = previewSpec,
-            interactionSource = previewPopupInteractionSource,
-            onClick = onClick,
+            anchorBounds = popupAnchorBounds,
+            onClick = onPopupClick,
         )
     }
 }
@@ -1538,6 +2338,8 @@ private fun VirtualGroupThumbnailCard(
     group: VirtualVideoGroup,
     metadata: JvrMovieMetadata?,
     onClick: () -> Unit,
+    onPopupClick: () -> Unit = onClick,
+    onPreviewFocused: (DashboardPreviewItem?) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -1556,45 +2358,37 @@ private fun VirtualGroupThumbnailCard(
 
     var posterLoadFailed by remember(group.key, posterUrl) { mutableStateOf(false) }
     val shouldUsePoster = !posterUrl.isNullOrBlank() && !posterLoadFailed
-    val previewSpec = remember(shouldUsePoster, posterUrl, posterCacheKey, representativePath) {
-        buildGroupHoverPreviewSpec(
-            shouldUsePoster = shouldUsePoster,
-            posterUrl = posterUrl,
-            posterCacheKey = posterCacheKey,
-            representativePath = representativePath,
+    val isPosterPopupEligible = remember(representativePath) {
+        representativePath?.let(::shouldEnablePosterPopupForPath) == true
+    }
+    val previewSpec = remember(
+        shouldUsePoster,
+        posterUrl,
+        posterCacheKey,
+        representativePath,
+        isPosterPopupEligible,
+    ) {
+        if (!isPosterPopupEligible) {
+            null
+        } else {
+            buildGroupHoverPreviewSpec(
+                shouldUsePoster = shouldUsePoster,
+                posterUrl = posterUrl,
+                posterCacheKey = posterCacheKey,
+                representativePath = representativePath,
+            )
+        }
+    }
+    val previewItem = remember(displayTitle, secondaryText, previewSpec, onPopupClick) {
+        DashboardPreviewItem(
+            title = displayTitle,
+            subtitle = secondaryText,
+            previewSpec = previewSpec,
+            onOpen = onPopupClick,
         )
     }
 
-    val previewInteractionSource = remember { MutableInteractionSource() }
-    val previewPopupInteractionSource = remember { MutableInteractionSource() }
-    val isPreviewHovered by previewInteractionSource.collectIsHoveredAsState()
-    val isPreviewFocused by previewInteractionSource.collectIsFocusedAsState()
-    val isPreviewPopupHovered by previewPopupInteractionSource.collectIsHoveredAsState()
-    var showPreviewPopup by remember(group.key, previewSpec) { mutableStateOf(false) }
-
-    LaunchedEffect(previewSpec, isPreviewHovered, isPreviewFocused, isPreviewPopupHovered) {
-        if (previewSpec == null) {
-            showPreviewPopup = false
-            return@LaunchedEffect
-        }
-
-        if (isPreviewHovered || isPreviewFocused || isPreviewPopupHovered) {
-            if (!showPreviewPopup) {
-                delay(500)
-                if (isPreviewHovered || isPreviewFocused || isPreviewPopupHovered) {
-                    showPreviewPopup = true
-                }
-            }
-            return@LaunchedEffect
-        }
-
-        delay(120)
-        if (!isPreviewHovered && !isPreviewFocused && !isPreviewPopupHovered) {
-            showPreviewPopup = false
-        }
-    }
-
-    LaunchedEffect(group.key, posterUrl, representativePath, posterLoadFailed, showPreviewPopup) {
+    LaunchedEffect(group.key, posterUrl, representativePath, posterLoadFailed) {
         val source = when {
             shouldUsePoster -> "remote-poster"
             !representativePath.isNullOrBlank() -> "generated-video-frame"
@@ -1612,28 +2406,50 @@ private fun VirtualGroupThumbnailCard(
 
         Log.d(
             GROUP_THUMBNAIL_LOG_TAG,
-            "Render group=${group.key} source=$source posterFailed=$posterLoadFailed previewPopup=$showPreviewPopup posterUrl=${posterUrl ?: "<none>"} posterCacheKey=${posterCacheKey ?: "<none>"} posterCached=$posterCached representativePath=${representativePath ?: "<none>"}"
+            "Render group=${group.key} source=$source posterFailed=$posterLoadFailed posterUrl=${posterUrl ?: "<none>"} posterCacheKey=${posterCacheKey ?: "<none>"} posterCached=$posterCached representativePath=${representativePath ?: "<none>"}"
         )
     }
+
+    val cardInteractionSource = remember { MutableInteractionSource() }
+    val isCardHovered by cardInteractionSource.collectIsHoveredAsState()
+    val isCardFocused by cardInteractionSource.collectIsFocusedAsState()
+    var popupAnchorBounds by remember(group.key) { mutableStateOf<IntRect?>(null) }
 
     Card(
         modifier = modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick),
+            .hoverable(interactionSource = cardInteractionSource)
+            .clickable(
+                interactionSource = cardInteractionSource,
+                indication = null,
+                onClick = {
+                    onPreviewFocused(previewItem)
+                    onClick()
+                }
+            ),
         colors = CardDefaults.cardColors(
             containerColor = CardBackground
         ),
-        shape = RoundedCornerShape(10.dp)
+        shape = RoundedCornerShape(10.dp),
+        border = if (isCardHovered || isCardFocused) BorderStroke(1.dp, NetflixRed.copy(alpha = 0.7f)) else null,
     ) {
         Column(
-            modifier = Modifier.padding(10.dp)
+            modifier = Modifier.padding(8.dp)
         ) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(150.dp)
                     .background(DividerGray)
-                    .hoverable(interactionSource = previewInteractionSource),
+                    .onGloballyPositioned { coordinates ->
+                        val bounds = coordinates.boundsInWindow()
+                        popupAnchorBounds = IntRect(
+                            bounds.left.roundToInt(),
+                            bounds.top.roundToInt(),
+                            bounds.right.roundToInt(),
+                            bounds.bottom.roundToInt(),
+                        )
+                    },
                 contentAlignment = Alignment.Center
             ) {
                 when {
@@ -1738,12 +2554,12 @@ private fun VirtualGroupThumbnailCard(
         }
 
         GroupHoverPreviewPopup(
-            show = showPreviewPopup,
+            show = false,
             groupKey = group.key,
             title = displayTitle,
             previewSpec = previewSpec,
-            interactionSource = previewPopupInteractionSource,
-            onClick = onClick,
+            anchorBounds = popupAnchorBounds,
+            onClick = onPopupClick,
         )
     }
 }
@@ -1757,6 +2573,8 @@ private fun FileListEntryCard(
     isSelected: Boolean,
     onFavoriteToggle: (() -> Unit)?,
     onClick: () -> Unit,
+    onPopupClick: () -> Unit = onClick,
+    onPreviewFocused: (DashboardPreviewItem?) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val metadata = rememberVideoFileMetadata(file, isVideoFile)
@@ -1776,39 +2594,20 @@ private fun FileListEntryCard(
                 shouldUsePoster = shouldUsePoster,
                 posterUrl = posterUrl,
                 posterCacheKey = posterCacheKey,
-                representativePath = null,
+                representativePath = file.path,
             )
         }
     }
-
-    val previewInteractionSource = remember { MutableInteractionSource() }
-    val previewPopupInteractionSource = remember { MutableInteractionSource() }
-    val isPreviewHovered by previewInteractionSource.collectIsHoveredAsState()
-    val isPreviewFocused by previewInteractionSource.collectIsFocusedAsState()
-    val isPreviewPopupHovered by previewPopupInteractionSource.collectIsHoveredAsState()
-    var showPreviewPopup by remember(file.name, previewSpec) { mutableStateOf(false) }
-
-    LaunchedEffect(previewSpec, isPreviewHovered, isPreviewFocused, isPreviewPopupHovered) {
-        if (previewSpec == null || !isVideoFile) {
-            showPreviewPopup = false
-            return@LaunchedEffect
-        }
-
-        if (isPreviewHovered || isPreviewFocused || isPreviewPopupHovered) {
-            if (!showPreviewPopup) {
-                delay(500)
-                if (isPreviewHovered || isPreviewFocused || isPreviewPopupHovered) {
-                    showPreviewPopup = true
-                }
-            }
-            return@LaunchedEffect
-        }
-
-        delay(120)
-        if (!isPreviewHovered && !isPreviewFocused && !isPreviewPopupHovered) {
-            showPreviewPopup = false
-        }
+    val previewItem = remember(displayTitle, metadata?.code, file.name, previewSpec, onPopupClick) {
+        DashboardPreviewItem(
+            title = displayTitle,
+            subtitle = metadata?.code ?: file.name,
+            previewSpec = previewSpec,
+            onOpen = onPopupClick,
+        )
     }
+
+    var popupAnchorBounds by remember(file.path) { mutableStateOf<IntRect?>(null) }
 
     FancyFileCard(
         fileName = displayTitle,
@@ -1859,17 +2658,31 @@ private fun FileListEntryCard(
             onFavoriteToggle
         },
         isSelected = isSelected,
-        onClick = onClick,
-        modifier = modifier.hoverable(interactionSource = previewInteractionSource),
+        onClick = {
+            if (isVideoFile) {
+                onPreviewFocused(previewItem)
+            }
+            onClick()
+        },
+        modifier = modifier
+            .onGloballyPositioned { coordinates ->
+                val bounds = coordinates.boundsInWindow()
+                popupAnchorBounds = IntRect(
+                    bounds.left.roundToInt(),
+                    bounds.top.roundToInt(),
+                    bounds.right.roundToInt(),
+                    bounds.bottom.roundToInt(),
+                )
+            },
     )
 
     GroupHoverPreviewPopup(
-        show = showPreviewPopup,
+        show = false,
         groupKey = metadata?.code ?: file.name,
         title = displayTitle,
         previewSpec = previewSpec,
-        interactionSource = previewPopupInteractionSource,
-        onClick = onClick,
+        anchorBounds = popupAnchorBounds,
+        onClick = onPopupClick,
     )
 }
 
@@ -1882,6 +2695,8 @@ private fun FileThumbnailCard(
     isSelected: Boolean,
     onFavoriteToggle: (() -> Unit)?,
     onClick: () -> Unit,
+    onPopupClick: () -> Unit = onClick,
+    onPreviewFocused: (DashboardPreviewItem?) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -1902,59 +2717,65 @@ private fun FileThumbnailCard(
                 shouldUsePoster = shouldUsePoster,
                 posterUrl = posterUrl,
                 posterCacheKey = posterCacheKey,
-                representativePath = null,
+                representativePath = file.path,
             )
         }
     }
-
-    val previewInteractionSource = remember { MutableInteractionSource() }
-    val previewPopupInteractionSource = remember { MutableInteractionSource() }
-    val isPreviewHovered by previewInteractionSource.collectIsHoveredAsState()
-    val isPreviewFocused by previewInteractionSource.collectIsFocusedAsState()
-    val isPreviewPopupHovered by previewPopupInteractionSource.collectIsHoveredAsState()
-    var showPreviewPopup by remember(file.name, previewSpec) { mutableStateOf(false) }
-
-    LaunchedEffect(previewSpec, isPreviewHovered, isPreviewFocused, isPreviewPopupHovered) {
-        if (previewSpec == null || !isVideoFile) {
-            showPreviewPopup = false
-            return@LaunchedEffect
-        }
-
-        if (isPreviewHovered || isPreviewFocused || isPreviewPopupHovered) {
-            if (!showPreviewPopup) {
-                delay(500)
-                if (isPreviewHovered || isPreviewFocused || isPreviewPopupHovered) {
-                    showPreviewPopup = true
-                }
-            }
-            return@LaunchedEffect
-        }
-
-        delay(120)
-        if (!isPreviewHovered && !isPreviewFocused && !isPreviewPopupHovered) {
-            showPreviewPopup = false
-        }
+    val previewItem = remember(displayTitle, metadata?.code, file.name, previewSpec, onPopupClick) {
+        DashboardPreviewItem(
+            title = displayTitle,
+            subtitle = metadata?.code ?: file.name,
+            previewSpec = previewSpec,
+            onOpen = onPopupClick,
+        )
     }
+
+    val cardInteractionSource = remember { MutableInteractionSource() }
+    val isCardHovered by cardInteractionSource.collectIsHoveredAsState()
+    val isCardFocused by cardInteractionSource.collectIsFocusedAsState()
+    var popupAnchorBounds by remember(file.path) { mutableStateOf<IntRect?>(null) }
 
     Card(
         modifier = modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick),
+            .hoverable(interactionSource = cardInteractionSource)
+            .clickable(
+                interactionSource = cardInteractionSource,
+                indication = null,
+                onClick = {
+                    if (isVideoFile) {
+                        onPreviewFocused(previewItem)
+                    }
+                    onClick()
+                }
+            ),
         colors = CardDefaults.cardColors(
             containerColor = CardBackground
         ),
         shape = RoundedCornerShape(10.dp),
-        border = if (isSelected) BorderStroke(2.dp, NetflixRed) else null
+        border = if (isSelected || isCardHovered || isCardFocused) {
+            BorderStroke(2.dp, if (isSelected) NetflixRed else NetflixRed.copy(alpha = 0.9f))
+        } else {
+            null
+        }
     ) {
         Column(
-            modifier = Modifier.padding(10.dp)
+            modifier = Modifier.padding(8.dp)
         ) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(150.dp)
                     .background(DividerGray)
-                    .hoverable(interactionSource = previewInteractionSource),
+                    .onGloballyPositioned { coordinates ->
+                        val bounds = coordinates.boundsInWindow()
+                        popupAnchorBounds = IntRect(
+                            bounds.left.roundToInt(),
+                            bounds.top.roundToInt(),
+                            bounds.right.roundToInt(),
+                            bounds.bottom.roundToInt(),
+                        )
+                    },
                 contentAlignment = Alignment.Center
             ) {
                 if (isVideoFile) {
@@ -2076,87 +2897,208 @@ private fun FileThumbnailCard(
     }
 
     GroupHoverPreviewPopup(
-        show = showPreviewPopup,
+        show = false,
         groupKey = metadata?.code ?: file.name,
         title = displayTitle,
         previewSpec = previewSpec,
-        interactionSource = previewPopupInteractionSource,
-        onClick = onClick,
+        anchorBounds = popupAnchorBounds,
+        onClick = onPopupClick,
     )
 }
 
 /**
- * RIGHT PANEL: Favorites
+ * RIGHT PANEL: Favorites + Recent
  */
+private enum class LibraryTab {
+    Favorites,
+    Recent,
+}
+
+@Composable
+private fun LibraryTabChip(
+    text: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier.clickable(onClick = onClick),
+        color = if (selected) NetflixRed.copy(alpha = 0.18f) else CardBackground,
+        shape = RoundedCornerShape(999.dp),
+        border = BorderStroke(1.dp, if (selected) NetflixRed else DividerGray),
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelLarge,
+            color = if (selected) TextPrimary else TextSecondary,
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+        )
+    }
+}
+
 @Composable
 private fun FavoritesPanel(
     favorites: List<RecentVideo>,
+    recentVideos: List<RecentVideo>,
     isConnected: Boolean,
     onFavoriteClick: (RecentVideo) -> Unit,
+    onRecentClick: (RecentVideo) -> Unit,
     onFavoriteToggle: (RecentVideo) -> Unit,
-    modifier: Modifier = Modifier
+    onPreviewFocused: (DashboardPreviewItem?) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
+    var selectedTab by remember { mutableStateOf(LibraryTab.Favorites) }
+    val recentItems = remember(recentVideos) {
+        recentVideos.sortedByDescending { it.lastPlayed }
+    }
+
+    LaunchedEffect(isConnected, selectedTab, favorites, recentItems) {
+        val shouldClearPreview = !isConnected ||
+                (selectedTab == LibraryTab.Favorites && favorites.isEmpty()) ||
+                (selectedTab == LibraryTab.Recent && recentItems.isEmpty())
+        if (shouldClearPreview) {
+            onPreviewFocused(null)
+        }
+    }
+
     Card(
         modifier = modifier,
         colors = CardDefaults.cardColors(
-            containerColor = StreamingBlack
+            containerColor = CardBackground,
         ),
-        shape = RoundedCornerShape(16.dp)
+        shape = RoundedCornerShape(16.dp),
     ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(16.dp)
+                .padding(16.dp),
         ) {
-            // Panel Header
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    text = "Favorites",
+                    text = "Library",
                     style = MaterialTheme.typography.headlineSmall,
-                    color = TextPrimary
+                    color = TextPrimary,
                 )
                 Icon(
-                    imageVector = Icons.Filled.Favorite,
+                    imageVector = Icons.Filled.Movie,
                     contentDescription = null,
                     tint = NetflixRed,
-                    modifier = Modifier.size(24.dp)
+                    modifier = Modifier.size(24.dp),
                 )
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
-            HorizontalDivider(color = DividerGray)
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(12.dp))
 
-            // Content
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                LibraryTabChip(
+                    text = "Favorites",
+                    selected = selectedTab == LibraryTab.Favorites,
+                    onClick = { selectedTab = LibraryTab.Favorites },
+                )
+                LibraryTabChip(
+                    text = "Recent",
+                    selected = selectedTab == LibraryTab.Recent,
+                    onClick = { selectedTab = LibraryTab.Recent },
+                )
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+            HorizontalDivider(color = DividerGray)
+            Spacer(modifier = Modifier.height(12.dp))
+
             when {
                 !isConnected -> {
                     EmptyState(
-                        icon = Icons.Outlined.FavoriteBorder,
-                        message = "Connect to view favorites"
+                        icon = Icons.Filled.Cloud,
+                        message = "Connect to view library",
                     )
                 }
 
-                favorites.isEmpty() -> {
+                selectedTab == LibraryTab.Favorites && favorites.isEmpty() -> {
                     EmptyState(
                         icon = Icons.Outlined.FavoriteBorder,
-                        message = "No favorites yet"
+                        message = "No favorites yet",
                     )
                 }
 
-                else -> {
+                selectedTab == LibraryTab.Recent && recentItems.isEmpty() -> {
+                    EmptyState(
+                        icon = Icons.Filled.Movie,
+                        message = "No recent videos yet",
+                    )
+                }
+
+                selectedTab == LibraryTab.Favorites -> {
                     LazyColumn(
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
                         items(favorites) { video ->
+                            val previewItem = remember(
+                                video.id,
+                                video.filePath,
+                                video.fileName,
+                                video.resolvedTitle,
+                                video.thumbnailPath,
+                            ) {
+                                DashboardPreviewItem(
+                                    title = video.resolvedTitle?.takeIf { it.isNotBlank() } ?: video.fileName,
+                                    subtitle = video.fileName,
+                                    previewSpec = buildLibraryPreviewSpec(video),
+                                    onOpen = { onFavoriteClick(video) },
+                                )
+                            }
+
                             FancyMovieCard(
                                 video = video,
                                 isFavorite = true,
                                 onClick = { onFavoriteClick(video) },
-                                onFavoriteToggle = { onFavoriteToggle(video) }
+                                onFavoriteToggle = { onFavoriteToggle(video) },
+                                onHoverFocusChanged = { isFocused ->
+                                    if (isFocused) onPreviewFocused(previewItem)
+                                },
+                            )
+                        }
+                    }
+                }
+
+                else -> {
+                    LazyColumn(
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        items(recentItems) { video ->
+                            val isFavorite = video.isFavorite || favorites.any { it.id == video.id }
+                            val previewItem = remember(
+                                video.id,
+                                video.filePath,
+                                video.fileName,
+                                video.resolvedTitle,
+                                video.thumbnailPath,
+                            ) {
+                                DashboardPreviewItem(
+                                    title = video.resolvedTitle?.takeIf { it.isNotBlank() } ?: video.fileName,
+                                    subtitle = video.fileName,
+                                    previewSpec = buildLibraryPreviewSpec(video),
+                                    onOpen = { onRecentClick(video) },
+                                )
+                            }
+
+                            FancyMovieCard(
+                                video = video,
+                                isFavorite = isFavorite,
+                                onClick = { onRecentClick(video) },
+                                onFavoriteToggle = {
+                                    onFavoriteToggle(video.copy(isFavorite = isFavorite))
+                                },
+                                onHoverFocusChanged = { isFocused ->
+                                    if (isFocused) onPreviewFocused(previewItem)
+                                },
                             )
                         }
                     }
@@ -2165,7 +3107,6 @@ private fun FavoritesPanel(
         }
     }
 }
-
 /**
  * Add Server Dialog
  */
@@ -2510,45 +3451,6 @@ private fun formatFileSizeHelper(bytes: Long): String {
     val gb = mb / 1024.0
     return String.format("%.2f GB", gb)
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 

@@ -76,8 +76,19 @@ class MainDashboardViewModel(
             initialValue = emptyList()
         )
 
-    // All recent videos from database - for checking favorite status in file browser
-    val recentVideos: StateFlow<List<RecentVideo>> = videoRepository.getRecentVideos(limit = 1000)
+    // Recent videos from database - filtered by currently connected server
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val recentVideos: StateFlow<List<RecentVideo>> = _uiState
+        .flatMapLatest { state ->
+            if (state.isConnected && state.selectedServer != null) {
+                videoRepository.getRecentVideosByServer(
+                    serverAddress = state.selectedServer.serverAddress,
+                    limit = 1000,
+                )
+            } else {
+                flowOf(emptyList())
+            }
+        }
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5000),

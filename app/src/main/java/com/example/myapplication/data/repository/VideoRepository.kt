@@ -11,6 +11,10 @@ class VideoRepository(private val videoDao: VideoDao) {
         return videoDao.getRecentVideos(limit)
     }
 
+    fun getRecentVideosByServer(serverAddress: String, limit: Int = 20): Flow<List<RecentVideo>> {
+        return videoDao.getRecentVideosByServer(serverAddress, limit)
+    }
+
     suspend fun getVideoById(videoId: Long): RecentVideo? {
         return videoDao.getVideoById(videoId)
     }

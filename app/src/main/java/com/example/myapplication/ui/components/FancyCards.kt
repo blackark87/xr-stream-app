@@ -42,6 +42,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -60,8 +61,6 @@ import com.example.myapplication.ui.theme.AccentGold
 import com.example.myapplication.ui.theme.CardBackground
 import com.example.myapplication.ui.theme.CardBackgroundHover
 import com.example.myapplication.ui.theme.DividerGray
-import com.example.myapplication.ui.theme.GradientEnd
-import com.example.myapplication.ui.theme.GradientStart
 import com.example.myapplication.ui.theme.NetflixDarkRed
 import com.example.myapplication.ui.theme.NetflixRed
 import com.example.myapplication.ui.theme.StreamingBlack
@@ -93,7 +92,7 @@ fun LocalStorageCard(
     )
 
     val scale by animateFloatAsState(
-        targetValue = if (isHovered) 1.05f else 1f,
+        targetValue = 1f,
         animationSpec = tween(300),
         label = "scale"
     )
@@ -180,7 +179,7 @@ fun LocalStorageCard(
 }
 
 /**
- * Fancy Server Card - Netflix/Disney+ style
+ * Fancy Server Card - Material-style elevated card
  */
 @Composable
 fun FancyServerCard(
@@ -201,14 +200,31 @@ fun FancyServerCard(
     )
 
     val scale by animateFloatAsState(
-        targetValue = if (isHovered) 1.05f else 1f,
+        targetValue = 1f,
         animationSpec = tween(300),
         label = "scale"
+    )
+
+    val outlineColor by animateColorAsState(
+        targetValue = if (isHovered || isFocused) {
+            NetflixRed.copy(alpha = 0.92f)
+        } else {
+            DividerGray.copy(alpha = 0.95f)
+        },
+        animationSpec = tween(220),
+        label = "serverOutlineColor"
+    )
+
+    val outlineWidth by animateDpAsState(
+        targetValue = if (isHovered || isFocused) 2.dp else 1.dp,
+        animationSpec = tween(220),
+        label = "serverOutlineWidth"
     )
 
     Card(
         modifier = modifier
             .fillMaxWidth()
+            .padding(horizontal = 1.dp)
             .scale(scale)
             .clickable(
                 interactionSource = interactionSource,
@@ -222,7 +238,7 @@ fun FancyServerCard(
             defaultElevation = elevation
         ),
         shape = RoundedCornerShape(12.dp),
-        border = if (isHovered || isFocused) BorderStroke(2.dp, NetflixRed) else null
+        border = BorderStroke(outlineWidth, outlineColor)
     ) {
         Row(
             modifier = Modifier
@@ -293,7 +309,7 @@ fun FancyServerCard(
 }
 
 /**
- * Fancy Movie Card - Netflix/Disney+ style (without thumbnail)
+ * Fancy Movie Card - Material-style media card (without thumbnail)
  */
 @Composable
 fun FancyMovieCard(
@@ -301,11 +317,16 @@ fun FancyMovieCard(
     isFavorite: Boolean,
     onClick: () -> Unit,
     onFavoriteToggle: () -> Unit,
+    onHoverFocusChanged: ((Boolean) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val isHovered by interactionSource.collectIsHoveredAsState()
     val isFocused by interactionSource.collectIsFocusedAsState()
+
+    LaunchedEffect(isHovered, isFocused, onHoverFocusChanged) {
+        onHoverFocusChanged?.invoke(isHovered || isFocused)
+    }
 
     val elevation by animateDpAsState(
         targetValue = if (isHovered) 12.dp else 4.dp,
@@ -314,7 +335,7 @@ fun FancyMovieCard(
     )
 
     val scale by animateFloatAsState(
-        targetValue = if (isHovered) 1.05f else 1f,
+        targetValue = 1f,
         animationSpec = tween(300),
         label = "scale"
     )
@@ -353,7 +374,7 @@ fun FancyMovieCard(
                         .clip(RoundedCornerShape(8.dp))
                         .background(
                             brush = Brush.linearGradient(
-                                colors = listOf(GradientStart, GradientEnd)
+                                colors = listOf(MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.colorScheme.surface)
                             )
                         ),
                     contentAlignment = Alignment.Center
@@ -384,15 +405,18 @@ fun FancyMovieCard(
 
                 Spacer(modifier = Modifier.width(16.dp))
 
+                val displayTitle = video.resolvedTitle?.takeIf { it.isNotBlank() }
+                    ?: video.fileName.removeSuffix(".mp4")
+                        .removeSuffix(".mkv")
+                        .removeSuffix(".avi")
+                        .removeSuffix(".mov")
+
                 // Movie Info
                 Column(
                     modifier = Modifier.weight(1f)
                 ) {
                     Text(
-                        text = video.fileName.removeSuffix(".mp4")
-                            .removeSuffix(".mkv")
-                            .removeSuffix(".avi")
-                            .removeSuffix(".mov"),
+                        text = displayTitle,
                         style = MaterialTheme.typography.titleMedium,
                         color = TextPrimary,
                         maxLines = 2,
@@ -475,6 +499,7 @@ fun FancyFileCard(
     val isHovered by interactionSource.collectIsHoveredAsState()
     val isFocused by interactionSource.collectIsFocusedAsState()
 
+
     val backgroundColor by animateColorAsState(
         targetValue = if (isHovered) CardBackgroundHover else CardBackground,
         animationSpec = tween(200),
@@ -493,7 +518,7 @@ fun FancyFileCard(
             containerColor = backgroundColor
         ),
         shape = RoundedCornerShape(8.dp),
-        border = if (isSelected || (isVideoFile && isHovered) || isFocused) BorderStroke(
+        border = if (isSelected || isHovered || isFocused) BorderStroke(
             2.dp,
             if (isSelected) AccentGold else NetflixRed
         ) else null
@@ -653,8 +678,4 @@ fun EmptyState(
         )
     }
 }
-
-
-
-
 

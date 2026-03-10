@@ -14,6 +14,9 @@ interface VideoDao {
     @Query("SELECT * FROM recent_videos ORDER BY lastPlayed DESC LIMIT :limit")
     fun getRecentVideos(limit: Int = 20): Flow<List<RecentVideo>>
 
+    @Query("SELECT * FROM recent_videos WHERE serverAddress = :serverAddress ORDER BY lastPlayed DESC LIMIT :limit")
+    fun getRecentVideosByServer(serverAddress: String, limit: Int = 20): Flow<List<RecentVideo>>
+
     @Query("SELECT * FROM recent_videos WHERE id = :videoId")
     suspend fun getVideoById(videoId: Long): RecentVideo?
 
