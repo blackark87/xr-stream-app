@@ -6,8 +6,8 @@ import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Transaction
 import blackark.app.vr.data.database.entity.JvrPerformer
-import blackark.app.vr.data.database.entity.VirtualGroupMetadataGenre
 import blackark.app.vr.data.database.entity.VirtualGroupMetadata
+import blackark.app.vr.data.database.entity.VirtualGroupMetadataGenre
 import blackark.app.vr.data.database.entity.VirtualGroupMetadataPerformerCrossRef
 import blackark.app.vr.data.database.entity.VirtualGroupMetadataRecord
 
@@ -89,7 +89,8 @@ interface VirtualGroupMetadataDao {
                 else -> incoming.englishName
             },
             japaneseName = incoming.japaneseName ?: existing.japaneseName,
-            remoteProfileImageUrl = incoming.remoteProfileImageUrl ?: existing.remoteProfileImageUrl,
+            remoteProfileImageUrl = incoming.remoteProfileImageUrl
+                ?: existing.remoteProfileImageUrl,
             localProfileImageUrl = incoming.localProfileImageUrl ?: existing.localProfileImageUrl,
             updatedAt = maxOf(existing.updatedAt, incoming.updatedAt),
         )

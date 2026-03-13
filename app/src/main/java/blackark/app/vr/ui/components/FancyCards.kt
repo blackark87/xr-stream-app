@@ -54,7 +54,6 @@ import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import coil3.compose.AsyncImage
 import blackark.app.vr.data.database.entity.RecentVideo
 import blackark.app.vr.data.database.entity.SavedServer
 import blackark.app.vr.ui.theme.AccentGold
@@ -70,6 +69,7 @@ import blackark.app.vr.ui.theme.TextSecondary
 import blackark.app.vr.ui.theme.TextTertiary
 import blackark.app.vr.utils.ThumbnailImageLoaderProvider
 import blackark.app.vr.utils.VideoThumbnailFetcher
+import coil3.compose.AsyncImage
 
 /**
  * Local Storage Card - Special card for device storage
@@ -400,7 +400,10 @@ fun FancyMovieCard(
                         .clip(RoundedCornerShape(8.dp))
                         .background(
                             brush = Brush.linearGradient(
-                                colors = listOf(MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.colorScheme.surface)
+                                colors = listOf(
+                                    MaterialTheme.colorScheme.surfaceVariant,
+                                    MaterialTheme.colorScheme.surface
+                                )
                             )
                         ),
                     contentAlignment = Alignment.Center
@@ -431,7 +434,8 @@ fun FancyMovieCard(
 
                 Spacer(modifier = Modifier.width(16.dp))
 
-                val displayTitle = displayTitleOverride ?: video.resolvedTitle?.takeIf { it.isNotBlank() }
+                val displayTitle =
+                    displayTitleOverride ?: video.resolvedTitle?.takeIf { it.isNotBlank() }
                     ?: video.fileName.removeSuffix(".mp4")
                         .removeSuffix(".mkv")
                         .removeSuffix(".avi")
@@ -580,7 +584,9 @@ fun FancyFileCard(
                             model = coil3.request.ImageRequest.Builder(androidx.compose.ui.platform.LocalContext.current)
                                 .data(thumbnailModel ?: VideoThumbnailFetcher.Model(videoPath))
                                 .diskCacheKey(
-                                    thumbnailDiskCacheKey ?: VideoThumbnailFetcher.diskCacheKey(videoPath)
+                                    thumbnailDiskCacheKey ?: VideoThumbnailFetcher.diskCacheKey(
+                                        videoPath
+                                    )
                                 )
                                 .diskCachePolicy(coil3.request.CachePolicy.ENABLED)
                                 .memoryCachePolicy(coil3.request.CachePolicy.ENABLED)

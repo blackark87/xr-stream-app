@@ -19,7 +19,6 @@ import okio.Buffer
 import okio.FileSystem
 import okio.Path.Companion.toOkioPath
 import java.net.URI
-import kotlin.math.abs
 
 /**
  * Custom Coil Fetcher for extracting video thumbnails from SMB and local files
@@ -38,9 +37,11 @@ class VideoThumbnailFetcher(
     private val tag = "VideoThumbnailFetcher"
     private val mb = 1024L * 1024L
     private val maxFullThumbnailDownloadBytes = 768L * mb
+    private var inferredDisplayProfile: InferredDisplayProfile? = null
 
 
     override suspend fun fetch(): FetchResult? {
+        inferredDisplayProfile = null
         return try {
             val uri = data.toUri()
 
@@ -64,6 +65,7 @@ class VideoThumbnailFetcher(
     }
 
     private fun extractLocalThumbnail(path: String): FetchResult? {
+        inferredDisplayProfile = null
         val retriever = MediaMetadataRetriever()
         return try {
             retriever.setDataSource(path)
@@ -94,6 +96,7 @@ class VideoThumbnailFetcher(
     }
 
     private suspend fun extractSMBThumbnail(smbUrl: String): FetchResult? {
+        inferredDisplayProfile = null
         Log.d(
             "VideoThumbnailFetcher",
             "Extracting SMB thumbnail for: $smbUrl (allowMetadataPoster=$allowMetadataPoster)"
@@ -240,7 +243,11 @@ class VideoThumbnailFetcher(
                 bitmap.compress(Bitmap.CompressFormat.JPEG, 85, out)
             }
             Log.d("VideoThumbnailFetcher", "Saved thumbnail to: ${localFile.absolutePath}")
-            updateVideoThumbnailPathInDb(smbUrl, localFile.absolutePath)
+            updateVideoThumbnailPathInDb(
+                videoPath = smbUrl,
+                thumbnailPath = localFile.absolutePath,
+                inferredDisplayProfile = inferredDisplayProfile,
+            )
 
             SourceFetchResult(
                 source = ImageSource(file = localFile.toOkioPath(), fileSystem = FileSystem.SYSTEM),
@@ -341,22 +348,83 @@ class VideoThumbnailFetcher(
         videoPath: String,
         thumbnailPath: String,
         resolvedTitle: String? = null,
+        inferredDisplayProfile: InferredDisplayProfile? = null,
     ) {
         try {
-            val db =
-                blackark.app.vr.data.database.AppDatabase.getDatabase(options.context)
-            val fileName = extractFileName(videoPath)
+            val db = blackark.app.vr.data.database.AppDatabase.getDatabase(options.context)
+            val parsedIdentity = parseVideoIdentity(videoPath)
+            val fileName = parsedIdentity?.fileName ?: extractFileName(videoPath)
             if (fileName.isBlank()) {
                 Log.d(tag, "No file name extracted for thumbnail update path=$videoPath")
                 return
             }
 
-            val video = db.videoDao().getLatestVideoByFileName(fileName)
-            if (video != null) {
-                db.videoDao().updateThumbnailAndTitle(video.id, thumbnailPath, resolvedTitle)
+            val videoByPath = parsedIdentity?.let { db.videoDao().getVideoByPath(it.filePath) }
+            if (videoByPath != null) {
+                val updatedVideo = videoByPath.copy(
+                    thumbnailPath = thumbnailPath,
+                    resolvedTitle = resolvedTitle ?: videoByPath.resolvedTitle,
+                    videoFormat =
+                        if (shouldApplyInferredDisplayProfile(
+                                videoByPath,
+                                inferredDisplayProfile
+                            )
+                        ) {
+                            inferredDisplayProfile!!.videoFormat
+                        } else {
+                            videoByPath.videoFormat
+                        },
+                    stereoMode =
+                        if (shouldApplyInferredDisplayProfile(
+                                videoByPath,
+                                inferredDisplayProfile
+                            )
+                        ) {
+                            inferredDisplayProfile!!.stereoMode
+                        } else {
+                            videoByPath.stereoMode
+                        },
+                )
+                db.videoDao().updateVideo(updatedVideo)
                 Log.d(
                     tag,
-                    "Updated DB thumbnail/title for video ${video.id} fileName=$fileName path=$thumbnailPath title=${resolvedTitle ?: "<unchanged>"}",
+                    "Updated DB thumbnail/title for video ${videoByPath.id} fileName=$fileName path=$thumbnailPath title=${resolvedTitle ?: "<unchanged>"}",
+                )
+                return
+            }
+
+            val videoByFileName = db.videoDao().getLatestVideoByFileName(fileName)
+            if (videoByFileName != null) {
+                db.videoDao()
+                    .updateThumbnailAndTitle(videoByFileName.id, thumbnailPath, resolvedTitle)
+                Log.d(
+                    tag,
+                    "Updated DB thumbnail/title fallback for video ${videoByFileName.id} fileName=$fileName path=$thumbnailPath title=${resolvedTitle ?: "<unchanged>"}",
+                )
+                return
+            }
+
+            if (parsedIdentity != null && inferredDisplayProfile != null) {
+                val insertedId =
+                    db.videoDao().insertVideo(
+                        blackark.app.vr.data.database.entity.RecentVideo(
+                            fileName = parsedIdentity.fileName,
+                            filePath = parsedIdentity.filePath,
+                            serverAddress = parsedIdentity.serverAddress,
+                            shareName = parsedIdentity.shareName,
+                            lastPlayed = 0L,
+                            lastPosition = 0L,
+                            duration = 0L,
+                            isFavorite = false,
+                            videoFormat = inferredDisplayProfile.videoFormat,
+                            stereoMode = inferredDisplayProfile.stereoMode,
+                            thumbnailPath = thumbnailPath,
+                            resolvedTitle = resolvedTitle,
+                        )
+                    )
+                Log.d(
+                    tag,
+                    "Inserted inferred display row id=$insertedId fileName=$fileName path=${parsedIdentity.filePath}",
                 )
             } else {
                 Log.d(tag, "No DB video row found for thumbnail update fileName=$fileName")
@@ -699,13 +767,12 @@ class VideoThumbnailFetcher(
     }
 
     private fun normalizeThumbnailFrame(bitmap: Bitmap): Bitmap {
-        val aspectRatio = bitmap.width.toFloat() / bitmap.height.toFloat()
-        val shouldCropStereoPanorama =
-            bitmap.width >= 4096 &&
-                    bitmap.height >= 2048 &&
-                    abs(aspectRatio - 2f) <= 0.05f
+        val inferredProfile = inferDisplayProfileFromFrame(bitmap.width, bitmap.height)
+        if (inferredProfile != null) {
+            inferredDisplayProfile = inferredProfile
+        }
 
-        if (!shouldCropStereoPanorama) {
+        if (inferredProfile == null) {
             return bitmap
         }
 
@@ -717,9 +784,21 @@ class VideoThumbnailFetcher(
             )
             preview
         } catch (e: Exception) {
-            Log.w(tag, "Failed to crop stereo panoramic frame to single-eye thumbnail: ${e.message}")
+            Log.w(
+                tag,
+                "Failed to crop stereo panoramic frame to single-eye thumbnail: ${e.message}"
+            )
             bitmap
         }
+    }
+
+    private fun shouldApplyInferredDisplayProfile(
+        video: blackark.app.vr.data.database.entity.RecentVideo,
+        inferredDisplayProfile: InferredDisplayProfile?,
+    ): Boolean {
+        return inferredDisplayProfile != null &&
+                video.videoFormat == "Format2D" &&
+                video.stereoMode == "Mono"
     }
 
     private fun computePreferredThumbnailTimeUs(durationMs: Long): Long {

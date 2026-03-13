@@ -54,6 +54,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.media3.common.util.UnstableApi
+import blackark.app.vr.ui.viewmodel.PlaybackMenu
 import blackark.app.vr.ui.viewmodel.StereoMode
 import blackark.app.vr.ui.viewmodel.VideoFormat
 import blackark.app.vr.ui.viewmodel.VideoPlayerState
@@ -67,10 +68,6 @@ fun XRPlaybackControls(
     playerState: VideoPlayerState,
     onNavigateBack: () -> Unit,
 ) {
-    var showSpeedMenu by remember { mutableStateOf(false) }
-    var showVolumeSlider by remember { mutableStateOf(false) }
-    var showFormatMenu by remember { mutableStateOf(false) }
-
     // Scrubbing state.
     var isScrubbing by remember { mutableStateOf(false) }
     var sliderPosition by remember { mutableFloatStateOf(0f) }
@@ -98,15 +95,6 @@ fun XRPlaybackControls(
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .background(
-                Brush.verticalGradient(
-                    colors = listOf(
-                        Color.Transparent,
-                        Color.Transparent,
-                        colors.scrim.copy(alpha = 0.56f),
-                    ),
-                ),
-            )
             .padding(horizontal = 22.dp, vertical = 20.dp),
     ) {
         Column(
@@ -159,7 +147,11 @@ fun XRPlaybackControls(
                     )
                     Text(
                         text =
-                            "${playerState.videoFormat.name.removePrefix("Format")} | ${prettySpeed(playerState.playbackSpeed)}x | ${(playerState.volume * 100).roundToInt()}%",
+                            "${playerState.videoFormat.name.removePrefix("Format")} | ${
+                                prettySpeed(
+                                    playerState.playbackSpeed
+                                )
+                            }x | ${(playerState.volume * 100).roundToInt()}%",
                         style = MaterialTheme.typography.labelLarge,
                         color = textMuted,
                         maxLines = 1,
@@ -303,15 +295,8 @@ fun XRPlaybackControls(
                 PlaybackInfoChip(
                     label = "Speed",
                     value = "${prettySpeed(playerState.playbackSpeed)}x",
-                    selected = showSpeedMenu,
-                    onClick = {
-                        val nextState = !showSpeedMenu
-                        showSpeedMenu = nextState
-                        if (nextState) {
-                            showVolumeSlider = false
-                            showFormatMenu = false
-                        }
-                    },
+                    selected = playerState.activePlaybackMenu == PlaybackMenu.Speed,
+                    onClick = { videoPlayerViewModel.togglePlaybackMenu(PlaybackMenu.Speed) },
                     modifier = Modifier.weight(1f),
                     activeContainerColor = chipActive,
                     inactiveContainerColor = chipIdle,
@@ -323,15 +308,8 @@ fun XRPlaybackControls(
                 PlaybackInfoChip(
                     label = "Format",
                     value = playerState.videoFormat.name.removePrefix("Format"),
-                    selected = showFormatMenu,
-                    onClick = {
-                        val nextState = !showFormatMenu
-                        showFormatMenu = nextState
-                        if (nextState) {
-                            showSpeedMenu = false
-                            showVolumeSlider = false
-                        }
-                    },
+                    selected = playerState.activePlaybackMenu == PlaybackMenu.Display,
+                    onClick = { videoPlayerViewModel.togglePlaybackMenu(PlaybackMenu.Display) },
                     modifier = Modifier.weight(1f),
                     activeContainerColor = chipActive,
                     inactiveContainerColor = chipIdle,
@@ -343,15 +321,8 @@ fun XRPlaybackControls(
                 PlaybackInfoChip(
                     label = "Volume",
                     value = "${(playerState.volume * 100).roundToInt()}%",
-                    selected = showVolumeSlider,
-                    onClick = {
-                        val nextState = !showVolumeSlider
-                        showVolumeSlider = nextState
-                        if (nextState) {
-                            showSpeedMenu = false
-                            showFormatMenu = false
-                        }
-                    },
+                    selected = playerState.activePlaybackMenu == PlaybackMenu.Volume,
+                    onClick = { videoPlayerViewModel.togglePlaybackMenu(PlaybackMenu.Volume) },
                     modifier = Modifier.weight(1f),
                     activeContainerColor = chipActive,
                     inactiveContainerColor = chipIdle,
@@ -361,7 +332,7 @@ fun XRPlaybackControls(
                 )
             }
 
-            if (showSpeedMenu) {
+            if (playerState.activePlaybackMenu == PlaybackMenu.Speed) {
                 PlaybackMenuCard(
                     title = "Playback Speed",
                     subtitle = "Adjust how fast the video moves",
@@ -378,7 +349,7 @@ fun XRPlaybackControls(
                                 selected = playerState.playbackSpeed == speed,
                                 onClick = {
                                     videoPlayerViewModel.setPlaybackSpeed(speed)
-                                    showSpeedMenu = false
+                                    videoPlayerViewModel.dismissPlaybackMenu()
                                 },
                                 modifier = Modifier.weight(1f),
                                 selectedContainerColor = accentStrong,
@@ -392,7 +363,7 @@ fun XRPlaybackControls(
                 }
             }
 
-            if (showFormatMenu) {
+            if (playerState.activePlaybackMenu == PlaybackMenu.Display) {
                 PlaybackMenuCard(
                     title = "Video Format",
                     subtitle = "Switch the projection and stereo mode",
@@ -448,7 +419,7 @@ fun XRPlaybackControls(
                 }
             }
 
-            if (showVolumeSlider) {
+            if (playerState.activePlaybackMenu == PlaybackMenu.Volume) {
                 PlaybackMenuCard(
                     title = "Volume",
                     subtitle = "Output level for current playback",

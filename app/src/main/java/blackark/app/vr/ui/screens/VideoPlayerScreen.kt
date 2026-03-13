@@ -1,6 +1,9 @@
 package blackark.app.vr.ui.screens
 
 import android.util.Log
+import android.view.KeyEvent
+import android.view.MotionEvent
+import android.view.View
 import androidx.activity.compose.BackHandler
 import androidx.annotation.OptIn
 import androidx.compose.foundation.background
@@ -28,6 +31,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -42,6 +46,7 @@ import androidx.xr.compose.subspace.SpatialExternalSurface
 import androidx.xr.compose.subspace.SpatialExternalSurface180Hemisphere
 import androidx.xr.compose.subspace.SpatialExternalSurface360Sphere
 import androidx.xr.compose.subspace.SpatialExternalSurfaceScope
+import androidx.xr.compose.subspace.SpatialMainPanel
 import androidx.xr.compose.subspace.SpatialPanel
 import androidx.xr.compose.subspace.StereoMode
 import androidx.xr.compose.subspace.layout.InteractionPolicy
@@ -64,9 +69,9 @@ import blackark.app.vr.ui.viewmodel.VideoFormat
 import blackark.app.vr.ui.viewmodel.VideoPlayerState
 import blackark.app.vr.ui.viewmodel.VideoPlayerViewModel
 import blackark.app.vr.ui.viewmodel.VideoPlayerViewModelFactory
-import kotlinx.coroutines.delay
 
 private const val TAG = "VideoPlayerScreen"
+private const val CONTROLLER_LOG_PREFIX = "[6DoF]"
 
 private data class HeadFollowPose(
     val rotation: Quaternion,
@@ -81,6 +86,7 @@ fun VideoPlayerScreen(
     onNavigateBack: () -> Unit,
 ) {
     val context = LocalContext.current
+    val rootView = LocalView.current
     val database = remember { AppDatabase.getDatabase(context) }
     val videoRepository = remember { VideoRepository(database.videoDao()) }
 
@@ -108,8 +114,10 @@ fun VideoPlayerScreen(
         videoPlayerViewModel.playerEvents.collect { event ->
             when (event) {
                 PlayerEvent.NavigateBack -> {
+                    // Hide interactive chrome immediately, then let the destination transition in.
+                    videoPlayerViewModel.setControlsVisibility(false)
+                    videoPlayerViewModel.pause()
                     videoPlayerViewModel.releasePlayerBeforeNavigateBack()
-                    delay(220)
                     onNavigateBack()
                 }
             }
@@ -117,6 +125,63 @@ fun VideoPlayerScreen(
     }
     DisposableEffect(Unit) {
         onDispose { videoPlayerViewModel.releasePlayerAsync() }
+    }
+
+    DisposableEffect(rootView) {
+        rootView.isFocusable = true
+        rootView.isFocusableInTouchMode = true
+        val focusGranted = rootView.requestFocus()
+        Log.i(
+            TAG,
+            "$CONTROLLER_LOG_PREFIX playback root focus requested " +
+                    "granted=$focusGranted hasFocus=${rootView.hasFocus()} view=${rootView::class.java.simpleName}",
+        )
+
+        val deferredFocusAttempt =
+            Runnable {
+                val deferredGranted = rootView.requestFocus()
+                Log.i(
+                    TAG,
+                    "$CONTROLLER_LOG_PREFIX playback root deferred focus request " +
+                            "granted=$deferredGranted hasFocus=${rootView.hasFocus()} " +
+                            "view=${rootView::class.java.simpleName}",
+                )
+            }
+        rootView.post(deferredFocusAttempt)
+        rootView.postDelayed(deferredFocusAttempt, 250L)
+
+        val genericMotionListener =
+            View.OnGenericMotionListener { _, event ->
+                Log.i(
+                    TAG,
+                    "$CONTROLLER_LOG_PREFIX playback root generic motion " +
+                            "deviceId=${event.deviceId} source=${event.source} " +
+                            "action=${MotionEvent.actionToString(event.action)} " +
+                            "x=${event.getAxisValue(MotionEvent.AXIS_X)} " +
+                            "y=${event.getAxisValue(MotionEvent.AXIS_Y)} " +
+                            "hatX=${event.getAxisValue(MotionEvent.AXIS_HAT_X)} " +
+                            "hatY=${event.getAxisValue(MotionEvent.AXIS_HAT_Y)}",
+                )
+                false
+            }
+        val keyListener =
+            View.OnKeyListener { _, keyCode, event ->
+                Log.i(
+                    TAG,
+                    "$CONTROLLER_LOG_PREFIX playback root key event " +
+                            "deviceId=${event.deviceId} source=${event.source} " +
+                            "action=${event.action} keyCode=${KeyEvent.keyCodeToString(keyCode)}",
+                )
+                false
+            }
+        rootView.setOnGenericMotionListener(genericMotionListener)
+        rootView.setOnKeyListener(keyListener)
+
+        onDispose {
+            rootView.removeCallbacks(deferredFocusAttempt)
+            rootView.setOnGenericMotionListener(null)
+            rootView.setOnKeyListener(null)
+        }
     }
 
     Subspace {
@@ -148,6 +213,16 @@ fun SpatialVideoPlayerContent(
     val supportsImmersiveDome = spatialCapabilities.isContent3dEnabled
     val shouldUseImmersiveDome = immersiveRequested && supportsImmersiveDome
     val isSurfaceReady = !playerState.isLoading && playerState.error == null
+
+    // Keep the Activity main panel alive while this screen is a pure Subspace composition.
+    // Without this anchor, Compose XR disables the underlying main window panel by default,
+    // which lines up with controller input disappearing during playback.
+    SpatialMainPanel(
+        modifier = SubspaceModifier
+            .width(2.dp)
+            .height(2.dp)
+            .offset(x = 4000.dp, y = 4000.dp),
+    )
 
     val enableHeadFollowIn2D = playerState.videoFormat == VideoFormat.Format2D
     // Disabled for 180 stereo because the custom lock-rotation path can blank hemisphere rendering.

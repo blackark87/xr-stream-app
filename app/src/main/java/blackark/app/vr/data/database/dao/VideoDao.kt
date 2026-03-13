@@ -11,10 +11,10 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface VideoDao {
-    @Query("SELECT * FROM recent_videos ORDER BY lastPlayed DESC LIMIT :limit")
+    @Query("SELECT * FROM recent_videos WHERE lastPlayed > 0 ORDER BY lastPlayed DESC LIMIT :limit")
     fun getRecentVideos(limit: Int = 20): Flow<List<RecentVideo>>
 
-    @Query("SELECT * FROM recent_videos WHERE serverAddress = :serverAddress ORDER BY lastPlayed DESC LIMIT :limit")
+    @Query("SELECT * FROM recent_videos WHERE serverAddress = :serverAddress AND lastPlayed > 0 ORDER BY lastPlayed DESC LIMIT :limit")
     fun getRecentVideosByServer(serverAddress: String, limit: Int = 20): Flow<List<RecentVideo>>
 
     @Query("SELECT * FROM recent_videos WHERE id = :videoId")

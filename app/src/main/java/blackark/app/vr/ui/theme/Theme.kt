@@ -67,6 +67,7 @@ private val StreamingLightColorScheme = lightColorScheme(
     errorContainer = Color(0xFFFFDAD6),
     onErrorContainer = Color(0xFF410002),
 )
+
 @Composable
 fun XRStreamTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),

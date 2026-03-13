@@ -10,8 +10,8 @@ import blackark.app.vr.data.database.dao.VirtualGroupMetadataDao
 import blackark.app.vr.data.database.entity.JvrPerformer
 import blackark.app.vr.data.database.entity.RecentVideo
 import blackark.app.vr.data.database.entity.SavedServer
-import blackark.app.vr.data.database.entity.VirtualGroupMetadataGenre
 import blackark.app.vr.data.database.entity.VirtualGroupMetadata
+import blackark.app.vr.data.database.entity.VirtualGroupMetadataGenre
 import blackark.app.vr.data.database.entity.VirtualGroupMetadataPerformerCrossRef
 
 @Database(

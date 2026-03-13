@@ -10,9 +10,9 @@ import blackark.app.vr.data.database.entity.VirtualGroupMetadataPerformerCrossRe
 import blackark.app.vr.data.database.entity.VirtualGroupMetadataRecord
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
@@ -726,6 +726,7 @@ object JvrLibraryMetadataProvider {
                 cast.profileImageUrl?.let(::isLocalImageUrl) == true -> cast.copy(
                     profileImageUrl = cast.remoteProfileImageUrl
                 )
+
                 else -> cast
             }
         }
@@ -1247,8 +1248,8 @@ object JvrLibraryMetadataProvider {
             val japaneseName = normalizeText(cast.japaneseName)
                 ?.takeUnless {
                     it.equals(englishName, ignoreCase = true) &&
-                        !englishName.isNullOrBlank() &&
-                        containsEnglishLetters(englishName)
+                            !englishName.isNullOrBlank() &&
+                            containsEnglishLetters(englishName)
                 }
             val performerId = buildCanonicalPerformerId(
                 englishName = englishName,

@@ -1,9 +1,9 @@
 package blackark.app.vr.utils
 
 import android.content.Context
+import blackark.app.vr.XRStreamApplication
 import coil3.ImageLoader
 import coil3.SingletonImageLoader
-import blackark.app.vr.XRStreamApplication
 
 /**
  * Provides a shared ImageLoader that includes SMB thumbnail fetchers.

@@ -17,6 +17,8 @@ import blackark.app.vr.network.SMBClient
 import blackark.app.vr.network.SMBConfig
 import blackark.app.vr.network.SMBFileItem
 import blackark.app.vr.player.SMBDataSource
+import blackark.app.vr.utils.InferredDisplayProfile
+import blackark.app.vr.utils.inferDisplayProfileFromFrame
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
@@ -47,11 +49,19 @@ data class VideoPlayerState(
     val videoFile: SMBFileItem? = null,
     val videoFormat: VideoFormat = VideoFormat.Format2D,
     val stereoMode: StereoMode = StereoMode.Mono,
+    val activePlaybackMenu: PlaybackMenu = PlaybackMenu.None,
     val zoomLevel: Float = 1.0f,
     val playlist: List<SMBFileItem> = emptyList(),
     val currentPlaylistIndex: Int = -1,
     val showControls: Boolean = true
 )
+
+enum class PlaybackMenu {
+    None,
+    Speed,
+    Display,
+    Volume,
+}
 
 enum class VideoFormat {
     Format2D,
@@ -69,6 +79,11 @@ enum class StereoMode {
 class VideoPlayerViewModel(
     private val videoRepository: VideoRepository
 ) : ViewModel() {
+    companion object {
+        private const val TAG = "VideoPlayerViewModel"
+        private const val CONTROLLER_LOG_PREFIX = "[6DoF]"
+    }
+
     private enum class ControllerAxisMode {
         None,
         Horizontal,
@@ -96,8 +111,9 @@ class VideoPlayerViewModel(
     private var controllerAxisMode = ControllerAxisMode.None
     private var seekDirection = 0
     private var volumeDirection = 0
-    private var nextSeekRepeatAtMs = 0L
-    private var nextVolumeRepeatAtMs = 0L
+    private var seekRepeatJob: Job? = null
+    private var volumeRepeatJob: Job? = null
+    private var autoDisplayInferencePending = false
 
     private val controllerAxisEngageThreshold = 0.45f
     private val controllerAxisReleaseThreshold = 0.25f
@@ -132,20 +148,29 @@ class VideoPlayerViewModel(
         _state.value = _state.value.copy(videoFormat = format)
         pendingVideoFormatToPersist = format
 
-        pendingSaveJob?.cancel()
-        pendingSaveJob = viewModelScope.launch {
-            persistPendingDisplaySettings()
-        }
+        autoDisplayInferencePending = false
+        scheduleDisplaySettingsPersistence()
     }
 
     fun setStereoMode(mode: StereoMode) {
         _state.value = _state.value.copy(stereoMode = mode)
         pendingStereoModeToPersist = mode
 
-        pendingSaveJob?.cancel()
-        pendingSaveJob = viewModelScope.launch {
-            persistPendingDisplaySettings()
+        autoDisplayInferencePending = false
+        scheduleDisplaySettingsPersistence()
+    }
+
+    fun togglePlaybackMenu(menu: PlaybackMenu) {
+        val currentState = _state.value
+        val nextMenu = if (currentState.activePlaybackMenu == menu) PlaybackMenu.None else menu
+        _state.value = currentState.copy(activePlaybackMenu = nextMenu)
+    }
+
+    fun dismissPlaybackMenu() {
+        if (_state.value.activePlaybackMenu == PlaybackMenu.None) {
+            return
         }
+        _state.value = _state.value.copy(activePlaybackMenu = PlaybackMenu.None)
     }
 
     private suspend fun persistPendingDisplaySettings() {
@@ -195,11 +220,20 @@ class VideoPlayerViewModel(
     }
 
     fun toggleControls() {
-        _state.value = _state.value.copy(showControls = !_state.value.showControls)
+        val currentState = _state.value
+        val nextVisible = !currentState.showControls
+        _state.value = currentState.copy(
+            showControls = nextVisible,
+            activePlaybackMenu = if (nextVisible) currentState.activePlaybackMenu else PlaybackMenu.None,
+        )
     }
 
     fun setControlsVisibility(visible: Boolean) {
-        _state.value = _state.value.copy(showControls = visible)
+        val currentState = _state.value
+        _state.value = currentState.copy(
+            showControls = visible,
+            activePlaybackMenu = if (visible) currentState.activePlaybackMenu else PlaybackMenu.None,
+        )
     }
 
     fun requestNavigateBack() {
@@ -209,39 +243,52 @@ class VideoPlayerViewModel(
     }
 
     private fun handleControllerAxisEvent(event: blackark.app.vr.ControllerAxisEvent) {
-        val player = exoPlayer ?: return
+        if (exoPlayer == null) {
+            Log.i(
+                TAG,
+                "$CONTROLLER_LOG_PREFIX axis event ignored because player is unavailable " +
+                        "x=${event.x} y=${event.y}",
+            )
+            return
+        }
 
-        val now = event.eventTimeMs
         val x = event.x.coerceIn(-1f, 1f)
         val y = event.y.coerceIn(-1f, 1f)
 
         val absX = abs(x)
         val absY = abs(y)
+        val previousMode = controllerAxisMode
 
         controllerAxisMode = when {
             absX >= controllerAxisEngageThreshold &&
-                absX >= absY + controllerAxisDominanceMargin -> ControllerAxisMode.Horizontal
+                    absX >= absY + controllerAxisDominanceMargin -> ControllerAxisMode.Horizontal
 
             absY >= controllerAxisEngageThreshold &&
-                absY >= absX + controllerAxisDominanceMargin -> ControllerAxisMode.Vertical
+                    absY >= absX + controllerAxisDominanceMargin -> ControllerAxisMode.Vertical
 
             absX <= controllerAxisReleaseThreshold &&
-                absY <= controllerAxisReleaseThreshold -> ControllerAxisMode.None
+                    absY <= controllerAxisReleaseThreshold -> ControllerAxisMode.None
 
             else -> controllerAxisMode
         }
 
+        Log.i(
+            TAG,
+            "$CONTROLLER_LOG_PREFIX axis event received x=$x y=$y " +
+                    "mode=$previousMode->$controllerAxisMode",
+        )
+
         when (controllerAxisMode) {
             ControllerAxisMode.Horizontal -> {
+                cancelVolumeRepeat()
                 volumeDirection = 0
-                nextVolumeRepeatAtMs = 0L
-                handleSeekFromAxis(x, now)
+                handleSeekFromAxis(x)
             }
 
             ControllerAxisMode.Vertical -> {
+                cancelSeekRepeat()
                 seekDirection = 0
-                nextSeekRepeatAtMs = 0L
-                handleVolumeFromAxis(player, y, now)
+                handleVolumeFromAxis(y)
             }
 
             ControllerAxisMode.None -> {
@@ -250,7 +297,7 @@ class VideoPlayerViewModel(
         }
     }
 
-    private fun handleSeekFromAxis(xAxis: Float, now: Long) {
+    private fun handleSeekFromAxis(xAxis: Float) {
         val desiredDirection = when {
             xAxis >= controllerAxisEngageThreshold -> 1
             xAxis <= -controllerAxisEngageThreshold -> -1
@@ -260,32 +307,66 @@ class VideoPlayerViewModel(
 
         if (desiredDirection == 0) {
             seekDirection = 0
-            nextSeekRepeatAtMs = 0L
+            cancelSeekRepeat()
+            Log.i(TAG, "$CONTROLLER_LOG_PREFIX seek axis released x=$xAxis")
             return
         }
 
         if (desiredDirection != seekDirection) {
             seekDirection = desiredDirection
+            Log.i(
+                TAG,
+                "$CONTROLLER_LOG_PREFIX seek direction engaged direction=$desiredDirection x=$xAxis",
+            )
             applySeekStep(desiredDirection)
-            nextSeekRepeatAtMs = now + controllerSeekInitialRepeatMs
+            startSeekRepeat(desiredDirection)
             return
         }
 
-        if (nextSeekRepeatAtMs == 0L || now >= nextSeekRepeatAtMs) {
-            applySeekStep(seekDirection)
-            nextSeekRepeatAtMs = now + controllerSeekRepeatMs
+        if (seekRepeatJob?.isActive != true) {
+            startSeekRepeat(seekDirection)
         }
     }
 
     private fun applySeekStep(direction: Int) {
+        val player = exoPlayer
+        val previousPosition = player?.currentPosition
         if (direction > 0) {
             skipForward(controllerSeekStepMs)
         } else {
             skipBackward(controllerSeekStepMs)
         }
+        Log.i(
+            TAG,
+            "$CONTROLLER_LOG_PREFIX seek step applied direction=$direction " +
+                    "from=${previousPosition ?: "null"}",
+        )
     }
 
-    private fun handleVolumeFromAxis(player: ExoPlayer, yAxis: Float, now: Long) {
+    private fun startSeekRepeat(direction: Int) {
+        cancelSeekRepeat()
+        Log.i(TAG, "$CONTROLLER_LOG_PREFIX seek repeat started direction=$direction")
+        seekRepeatJob = viewModelScope.launch {
+            delay(controllerSeekInitialRepeatMs)
+            while (isActive &&
+                controllerAxisMode == ControllerAxisMode.Horizontal &&
+                seekDirection == direction
+            ) {
+                applySeekStep(direction)
+                delay(controllerSeekRepeatMs)
+            }
+        }
+    }
+
+    private fun cancelSeekRepeat() {
+        if (seekRepeatJob != null) {
+            Log.i(TAG, "$CONTROLLER_LOG_PREFIX seek repeat cancelled")
+        }
+        seekRepeatJob?.cancel()
+        seekRepeatJob = null
+    }
+
+    private fun handleVolumeFromAxis(yAxis: Float) {
         val desiredDirection = when {
             yAxis <= -controllerAxisEngageThreshold -> 1
             yAxis >= controllerAxisEngageThreshold -> -1
@@ -295,27 +376,61 @@ class VideoPlayerViewModel(
 
         if (desiredDirection == 0) {
             volumeDirection = 0
-            nextVolumeRepeatAtMs = 0L
+            cancelVolumeRepeat()
+            Log.i(TAG, "$CONTROLLER_LOG_PREFIX volume axis released y=$yAxis")
             return
         }
 
         if (desiredDirection != volumeDirection) {
             volumeDirection = desiredDirection
-            applyVolumeStep(player, desiredDirection)
-            nextVolumeRepeatAtMs = now + controllerVolumeInitialRepeatMs
+            Log.i(
+                TAG,
+                "$CONTROLLER_LOG_PREFIX volume direction engaged direction=$desiredDirection y=$yAxis",
+            )
+            applyVolumeStep(desiredDirection)
+            startVolumeRepeat(desiredDirection)
             return
         }
 
-        if (nextVolumeRepeatAtMs == 0L || now >= nextVolumeRepeatAtMs) {
-            applyVolumeStep(player, volumeDirection)
-            nextVolumeRepeatAtMs = now + controllerVolumeRepeatMs
+        if (volumeRepeatJob?.isActive != true) {
+            startVolumeRepeat(volumeDirection)
         }
     }
 
-    private fun applyVolumeStep(player: ExoPlayer, direction: Int) {
+    private fun startVolumeRepeat(direction: Int) {
+        cancelVolumeRepeat()
+        Log.i(TAG, "$CONTROLLER_LOG_PREFIX volume repeat started direction=$direction")
+        volumeRepeatJob = viewModelScope.launch {
+            delay(controllerVolumeInitialRepeatMs)
+            while (isActive &&
+                controllerAxisMode == ControllerAxisMode.Vertical &&
+                volumeDirection == direction
+            ) {
+                applyVolumeStep(direction)
+                delay(controllerVolumeRepeatMs)
+            }
+        }
+    }
+
+    private fun cancelVolumeRepeat() {
+        if (volumeRepeatJob != null) {
+            Log.i(TAG, "$CONTROLLER_LOG_PREFIX volume repeat cancelled")
+        }
+        volumeRepeatJob?.cancel()
+        volumeRepeatJob = null
+    }
+
+    private fun applyVolumeStep(direction: Int) {
+        val player = exoPlayer ?: return
+        val previousVolume = player.volume
         val delta = if (direction > 0) controllerVolumeStep else -controllerVolumeStep
         val newVolume = (player.volume + delta).coerceIn(0f, 1f)
         setVolume(newVolume)
+        Log.i(
+            TAG,
+            "$CONTROLLER_LOG_PREFIX volume step applied direction=$direction " +
+                    "from=$previousVolume to=$newVolume",
+        )
     }
 
     private fun stepVolume(direction: Int, step: Float = 0.05f) {
@@ -326,11 +441,21 @@ class VideoPlayerViewModel(
     }
 
     private fun resetControllerAxisState() {
+        if (controllerAxisMode != ControllerAxisMode.None ||
+            seekDirection != 0 ||
+            volumeDirection != 0
+        ) {
+            Log.i(
+                TAG,
+                "$CONTROLLER_LOG_PREFIX controller axis state reset " +
+                        "mode=$controllerAxisMode seekDirection=$seekDirection volumeDirection=$volumeDirection",
+            )
+        }
         controllerAxisMode = ControllerAxisMode.None
         seekDirection = 0
         volumeDirection = 0
-        nextSeekRepeatAtMs = 0L
-        nextVolumeRepeatAtMs = 0L
+        cancelSeekRepeat()
+        cancelVolumeRepeat()
     }
 
     private fun revealControlsIfHidden(): Boolean {
@@ -433,6 +558,7 @@ class VideoPlayerViewModel(
                 currentVideoId = null
                 pendingVideoFormatToPersist = null
                 pendingStereoModeToPersist = null
+                autoDisplayInferencePending = false
 
                 // Check for saved video settings
                 Log.d("VideoPlayerViewModel", "Looking up video by path: ${videoFile.path}")
@@ -481,12 +607,20 @@ class VideoPlayerViewModel(
                     "Initializing player - Stereo: $initialStereoMode, Format: $initialVideoFormat"
                 )
 
+                autoDisplayInferencePending =
+                    savedVideo == null ||
+                            (
+                                    savedVideo.videoFormat == VideoFormat.Format2D.name &&
+                                            savedVideo.stereoMode == StereoMode.Mono.name
+                                    )
+
                 _state.value = _state.value.copy(
                     isLoading = true,
                     error = null,
                     videoFile = videoFile,
                     stereoMode = initialStereoMode,
                     videoFormat = initialVideoFormat,
+                    activePlaybackMenu = PlaybackMenu.None,
                     showControls = true
                 )
 
@@ -554,14 +688,12 @@ class VideoPlayerViewModel(
                             }
 
                             override fun onTracksChanged(tracks: androidx.media3.common.Tracks) {
-                                // Check video track for stereo mode metadata if currently Mono
-                                // We don't override if we already detected something from filename
-                                if (_state.value.stereoMode != StereoMode.Mono) {
+                                if (!autoDisplayInferencePending) {
                                     return
                                 }
 
-                                // Check video track for stereo mode metadata
                                 var detectedMode = StereoMode.Mono
+                                var inferredDisplayProfile: InferredDisplayProfile? = null
                                 for (trackGroup in tracks.groups) {
                                     if (trackGroup.type == androidx.media3.common.C.TRACK_TYPE_VIDEO) {
                                         for (i in 0 until trackGroup.length) {
@@ -576,18 +708,65 @@ class VideoPlayerViewModel(
                                                 stereoMode == androidx.media3.common.C.STEREO_MODE_STEREO_MESH
                                             ) {
                                                 detectedMode = StereoMode.SideBySide
-                                                break
                                             } else if (stereoMode == androidx.media3.common.C.STEREO_MODE_TOP_BOTTOM) {
                                                 detectedMode = StereoMode.TopBottom
+                                            }
+
+                                            if (inferredDisplayProfile == null) {
+                                                inferredDisplayProfile =
+                                                    inferDisplayProfileFromFrame(
+                                                        width = format.width,
+                                                        height = format.height,
+                                                    )
+                                            }
+
+                                            if (detectedMode != StereoMode.Mono &&
+                                                inferredDisplayProfile != null
+                                            ) {
                                                 break
                                             }
                                         }
                                     }
-                                    if (detectedMode != StereoMode.Mono) break
+                                    if (detectedMode != StereoMode.Mono &&
+                                        inferredDisplayProfile != null
+                                    ) {
+                                        break
+                                    }
                                 }
 
-                                if (detectedMode != StereoMode.Mono) {
-                                    _state.value = _state.value.copy(stereoMode = detectedMode)
+                                val currentState = _state.value
+                                var nextVideoFormat = currentState.videoFormat
+                                var nextStereoMode = currentState.stereoMode
+
+                                inferredDisplayProfile?.toVideoFormatOrNull()
+                                    ?.let { inferredFormat ->
+                                        if (nextVideoFormat == VideoFormat.Format2D &&
+                                            nextStereoMode == StereoMode.Mono
+                                        ) {
+                                            nextVideoFormat = inferredFormat
+                                        }
+                                    }
+
+                                inferredDisplayProfile?.toStereoModeOrNull()
+                                    ?.let { inferredStereoMode ->
+                                        if (nextVideoFormat == VideoFormat.Format180 &&
+                                            nextStereoMode == StereoMode.Mono
+                                        ) {
+                                            nextStereoMode = inferredStereoMode
+                                        }
+                                    }
+
+                                if (detectedMode != StereoMode.Mono && nextStereoMode == StereoMode.Mono) {
+                                    nextStereoMode = detectedMode
+                                }
+
+                                if (nextVideoFormat != currentState.videoFormat ||
+                                    nextStereoMode != currentState.stereoMode
+                                ) {
+                                    applyAutoDetectedDisplaySettings(
+                                        videoFormat = nextVideoFormat,
+                                        stereoMode = nextStereoMode,
+                                    )
                                 }
                             }
 
@@ -661,6 +840,39 @@ class VideoPlayerViewModel(
                     error = e.message ?: "Failed to initialize player"
                 )
             }
+        }
+    }
+
+    private fun applyAutoDetectedDisplaySettings(
+        videoFormat: VideoFormat,
+        stereoMode: StereoMode,
+    ) {
+        val currentState = _state.value
+        autoDisplayInferencePending = false
+
+        if (currentState.videoFormat == videoFormat && currentState.stereoMode == stereoMode) {
+            return
+        }
+
+        _state.value = currentState.copy(
+            videoFormat = videoFormat,
+            stereoMode = stereoMode,
+        )
+
+        if (currentState.videoFormat != videoFormat) {
+            pendingVideoFormatToPersist = videoFormat
+        }
+        if (currentState.stereoMode != stereoMode) {
+            pendingStereoModeToPersist = stereoMode
+        }
+
+        scheduleDisplaySettingsPersistence()
+    }
+
+    private fun scheduleDisplaySettingsPersistence() {
+        pendingSaveJob?.cancel()
+        pendingSaveJob = viewModelScope.launch {
+            persistPendingDisplaySettings()
         }
     }
 
@@ -1003,12 +1215,15 @@ class VideoPlayerViewModel(
         exoPlayer = null
         _playerFlow.value = null
         pendingSaveJob = null
+        cancelSeekRepeat()
+        cancelVolumeRepeat()
 
         if (resetUiState) {
             _state.value = VideoPlayerState()
             currentVideoId = null
             pendingVideoFormatToPersist = null
             pendingStereoModeToPersist = null
+            autoDisplayInferencePending = false
             resetControllerAxisState()
         }
     }
@@ -1034,12 +1249,15 @@ class VideoPlayerViewModel(
         super.onCleared()
         releasePlayer()
     }
+
+    private fun InferredDisplayProfile.toVideoFormatOrNull(): VideoFormat? {
+        return runCatching { VideoFormat.valueOf(videoFormat) }.getOrNull()
+    }
+
+    private fun InferredDisplayProfile.toStereoModeOrNull(): StereoMode? {
+        return runCatching { StereoMode.valueOf(stereoMode) }.getOrNull()
+    }
 }
-
-
-
-
-
 
 
 

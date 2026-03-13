@@ -13,15 +13,14 @@ import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.interaction.collectIsPressedAsState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
@@ -30,7 +29,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -39,7 +37,9 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ViewList
@@ -86,8 +86,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -103,11 +103,11 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntRect
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.LayoutDirection
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupPositionProvider
@@ -121,17 +121,10 @@ import androidx.xr.compose.spatial.Subspace
 import androidx.xr.compose.subspace.MovePolicy
 import androidx.xr.compose.subspace.ResizePolicy
 import androidx.xr.compose.subspace.SpatialMainPanel
-import androidx.xr.compose.subspace.SpatialPanel
 import androidx.xr.compose.subspace.layout.SubspaceModifier
 import androidx.xr.compose.subspace.layout.height
-import androidx.xr.compose.subspace.layout.offset
 import androidx.xr.compose.subspace.layout.width
 import androidx.xr.compose.unit.DpVolumeSize
-import coil3.compose.AsyncImage
-import coil3.compose.rememberAsyncImagePainter
-import coil3.request.CachePolicy
-import coil3.request.Disposable
-import coil3.request.ImageRequest
 import blackark.app.vr.BuildConfig
 import blackark.app.vr.R
 import blackark.app.vr.data.database.entity.RecentVideo
@@ -162,6 +155,11 @@ import blackark.app.vr.utils.JvrMovieMetadata
 import blackark.app.vr.utils.ServerCredentialAutofillStore
 import blackark.app.vr.utils.ThumbnailImageLoaderProvider
 import blackark.app.vr.utils.VideoThumbnailFetcher
+import coil3.compose.AsyncImage
+import coil3.compose.rememberAsyncImagePainter
+import coil3.request.CachePolicy
+import coil3.request.Disposable
+import coil3.request.ImageRequest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -195,6 +193,7 @@ private enum class ConnectedDashboardTab {
     Library,
     Settings,
 }
+
 private data class DashboardPaneVisibility(
     val showServers: Boolean,
     val showBrowser: Boolean,
@@ -477,6 +476,7 @@ private fun DashboardNavigationRail(
         }
     }
 }
+
 @Composable
 private fun ConnectedSectionRail(
     selectedTab: ConnectedDashboardTab,
@@ -852,9 +852,9 @@ private fun formatPreviewCastLabel(cast: JvrCastMetadata): String {
     val englishName = cast.englishName.takeIf { it.isNotBlank() }
     val hasDistinctEnglishName =
         englishName != null &&
-            japaneseName != null &&
-            englishName.any { it in 'A'..'Z' || it in 'a'..'z' } &&
-            !englishName.equals(japaneseName, ignoreCase = true)
+                japaneseName != null &&
+                englishName.any { it in 'A'..'Z' || it in 'a'..'z' } &&
+                !englishName.equals(japaneseName, ignoreCase = true)
 
     return when {
         japaneseName != null && hasDistinctEnglishName -> "$japaneseName ($englishName)"
@@ -866,9 +866,9 @@ private fun formatPreviewCastLabel(cast: JvrCastMetadata): String {
 
 private fun JvrMovieMetadata.hasStructuredPreviewRows(): Boolean {
     return casts.isNotEmpty() ||
-        !studio.isNullOrBlank() ||
-        releaseDate != null ||
-        genres.isNotEmpty()
+            !studio.isNullOrBlank() ||
+            releaseDate != null ||
+            genres.isNotEmpty()
 }
 
 private fun openPreviewSelectionIfFocused(
@@ -1075,17 +1075,22 @@ fun MainDashboardScreen(
     var showAddServerDialog by remember { mutableStateOf(false) }
     var serverToEdit by remember { mutableStateOf<SavedServer?>(null) }
     var compactConnectedTab by remember { mutableStateOf(ConnectedDashboardTab.Files) }
-    var dashboardPreviewItem by remember { mutableStateOf<DashboardPreviewItem?>(null) }
+    val previewResetKey = when (compactConnectedTab) {
+        ConnectedDashboardTab.Files -> "files:${uiState.selectedServer?.id}:${uiState.currentPath}"
+        ConnectedDashboardTab.Library -> "library:${uiState.selectedServer?.id}"
+        ConnectedDashboardTab.Settings -> "settings:${uiState.selectedServer?.id}"
+    }
+    var dashboardPreviewItem by remember(previewResetKey) {
+        mutableStateOf<DashboardPreviewItem?>(
+            null
+        )
+    }
     var connectedPreviewWidthOverrideDp by rememberSaveable { mutableStateOf<Float?>(null) }
     var isResettingThumbnails by remember { mutableStateOf(false) }
     var showThumbnailResetCompleteDialog by remember { mutableStateOf(false) }
     var thumbnailResetErrorMessage by remember { mutableStateOf<String?>(null) }
     val dashboardScope = rememberCoroutineScope()
     val appVersionLabel = remember(context) { resolveAppVersionLabel(context) }
-
-    LaunchedEffect(compactConnectedTab, uiState.selectedServer?.id) {
-        dashboardPreviewItem = null
-    }
 
     val quickSwitchServers = remember(servers) {
         servers
@@ -1180,10 +1185,12 @@ fun MainDashboardScreen(
                             selectedServer = uiState.selectedServer,
                             registeredServers = quickSwitchServers,
                             onBackToServerSelection = {
+                                dashboardPreviewItem = null
                                 compactConnectedTab = ConnectedDashboardTab.Files
                                 viewModel.disconnect()
                             },
                             onSelectServer = { server ->
+                                dashboardPreviewItem = null
                                 compactConnectedTab = ConnectedDashboardTab.Files
                                 viewModel.connectToServer(server)
                             },
@@ -1273,12 +1280,12 @@ fun MainDashboardScreen(
                                     }
 
                                     val previewWidth = (
-                                        connectedPreviewWidthOverrideDp
-                                            ?: defaultPreviewWidth.value
-                                        ).coerceIn(
-                                        minPreviewWidth.value,
-                                        maxPreviewWidth.value,
-                                    ).dp
+                                            connectedPreviewWidthOverrideDp
+                                                ?: defaultPreviewWidth.value
+                                            ).coerceIn(
+                                            minPreviewWidth.value,
+                                            maxPreviewWidth.value,
+                                        ).dp
 
                                     Row(modifier = Modifier.fillMaxSize()) {
                                         Column(
@@ -1297,24 +1304,34 @@ fun MainDashboardScreen(
                                                     viewMode = uiState.fileViewMode,
                                                     currentPreviewKey = dashboardPreviewItem?.key,
                                                     onFileClick = { file ->
+                                                        dashboardPreviewItem = null
                                                         viewModel.navigateToFile(file)
                                                     },
                                                     onBackClick = {
+                                                        dashboardPreviewItem = null
                                                         viewModel.navigateBack()
                                                     },
                                                     onToggleViewMode = {
+                                                        dashboardPreviewItem = null
                                                         viewModel.toggleFileViewMode()
                                                     },
                                                     onDeleteFiles = { selectedFiles ->
                                                         viewModel.deleteFiles(selectedFiles)
                                                     },
                                                     onPlayVideo = { filePath, fileName ->
+                                                        dashboardPreviewItem = null
                                                         navController.navigate(
-                                                            Screen.VideoPlayer.createRoute(filePath, fileName)
+                                                            Screen.VideoPlayer.createRoute(
+                                                                filePath,
+                                                                fileName
+                                                            )
                                                         )
                                                     },
                                                     onFavoriteToggle = { file, isFavorite ->
-                                                        viewModel.toggleFavoriteForFile(file, isFavorite)
+                                                        viewModel.toggleFavoriteForFile(
+                                                            file,
+                                                            isFavorite
+                                                        )
                                                     },
                                                     onPreviewFocused = { preview ->
                                                         dashboardPreviewItem = preview
@@ -1330,6 +1347,7 @@ fun MainDashboardScreen(
                                                     isConnected = uiState.isConnected,
                                                     currentPreviewKey = dashboardPreviewItem?.key,
                                                     onFavoriteClick = { video ->
+                                                        dashboardPreviewItem = null
                                                         navController.navigate(
                                                             Screen.VideoPlayer.createRoute(
                                                                 video.filePath,
@@ -1338,6 +1356,7 @@ fun MainDashboardScreen(
                                                         )
                                                     },
                                                     onRecentClick = { video ->
+                                                        dashboardPreviewItem = null
                                                         navController.navigate(
                                                             Screen.VideoPlayer.createRoute(
                                                                 video.filePath,
@@ -1346,7 +1365,10 @@ fun MainDashboardScreen(
                                                         )
                                                     },
                                                     onFavoriteToggle = { video ->
-                                                        viewModel.toggleFavorite(video.id, !video.isFavorite)
+                                                        viewModel.toggleFavorite(
+                                                            video.id,
+                                                            !video.isFavorite
+                                                        )
                                                     },
                                                     onPreviewFocused = { preview ->
                                                         dashboardPreviewItem = preview
@@ -1360,16 +1382,17 @@ fun MainDashboardScreen(
 
                                         ConnectedPaneResizeHandle(
                                             onDragDeltaPx = { deltaPx ->
-                                                val deltaDp = with(previewDensity) { deltaPx.toDp().value }
+                                                val deltaDp =
+                                                    with(previewDensity) { deltaPx.toDp().value }
                                                 val currentWidth =
                                                     connectedPreviewWidthOverrideDp
                                                         ?: defaultPreviewWidth.value
                                                 connectedPreviewWidthOverrideDp = (
-                                                    currentWidth - deltaDp
-                                                ).coerceIn(
-                                                    minPreviewWidth.value,
-                                                    maxPreviewWidth.value,
-                                                )
+                                                        currentWidth - deltaDp
+                                                        ).coerceIn(
+                                                        minPreviewWidth.value,
+                                                        maxPreviewWidth.value,
+                                                    )
                                             },
                                             modifier = Modifier.fillMaxHeight(),
                                         )
@@ -1498,6 +1521,7 @@ fun MainDashboardScreen(
         )
     }
 }
+
 @Composable
 private fun DashboardOrbitArea(
     isConnected: Boolean,
@@ -1617,7 +1641,7 @@ private fun DashboardOrbitArea(
                 contentDescription = "Register server",
                 onClick = onAddServerClick
             )
-}
+        }
     }
 }
 
@@ -2131,6 +2155,7 @@ private fun FileBrowserPanel(
     }
 
     fun openVirtualGroup(groupKey: String) {
+        onPreviewFocused(null)
         activeVirtualGroupKey = groupKey
         selectedPaths = emptySet()
         isDeleteMode = false
@@ -2138,11 +2163,13 @@ private fun FileBrowserPanel(
 
     fun handleBackAction() {
         if (activeVirtualGroupKey != null) {
+            onPreviewFocused(null)
             activeVirtualGroupKey = null
             selectedPaths = emptySet()
             isDeleteMode = false
             return
         }
+        onPreviewFocused(null)
         onBackClick()
     }
     Card(
@@ -2628,6 +2655,7 @@ private class FileAnchoredPopupPositionProvider(
         )
     }
 }
+
 @Composable
 private fun GroupHoverPreviewPopup(
     show: Boolean,
@@ -3289,7 +3317,8 @@ private fun FileListEntryCard(
     modifier: Modifier = Modifier,
 ) {
     val metadata = if (allowJvrMetadata) rememberVideoFileMetadata(file, isVideoFile) else null
-    val displayTitle = if (allowJvrMetadata && isVideoFile) metadata?.title ?: file.name else file.name
+    val displayTitle =
+        if (allowJvrMetadata && isVideoFile) metadata?.title ?: file.name else file.name
     val subtitleText = if (allowJvrMetadata) metadata?.code ?: file.name else file.name
     val posterUrl = metadata?.posterUrl
     val posterCacheKey = posterUrl?.let { buildFilePosterCacheKey(file.name, it) }
@@ -3459,7 +3488,8 @@ private fun FileThumbnailCard(
 ) {
     val context = LocalContext.current
     val metadata = if (allowJvrMetadata) rememberVideoFileMetadata(file, isVideoFile) else null
-    val displayTitle = if (allowJvrMetadata && isVideoFile) metadata?.title ?: file.name else file.name
+    val displayTitle =
+        if (allowJvrMetadata && isVideoFile) metadata?.title ?: file.name else file.name
     val subtitleText = if (allowJvrMetadata) metadata?.code ?: file.name else file.name
     val posterUrl = metadata?.posterUrl
     val posterCacheKey = posterUrl?.let { buildFilePosterCacheKey(file.name, it) }
@@ -3803,12 +3833,22 @@ private fun FavoritesPanel(
                 LibraryTabChip(
                     text = "Favorites",
                     selected = selectedTab == LibraryTab.Favorites,
-                    onClick = { selectedTab = LibraryTab.Favorites },
+                    onClick = {
+                        if (selectedTab != LibraryTab.Favorites) {
+                            onPreviewFocused(null)
+                        }
+                        selectedTab = LibraryTab.Favorites
+                    },
                 )
                 LibraryTabChip(
                     text = "Recent",
                     selected = selectedTab == LibraryTab.Recent,
-                    onClick = { selectedTab = LibraryTab.Recent },
+                    onClick = {
+                        if (selectedTab != LibraryTab.Recent) {
+                            onPreviewFocused(null)
+                        }
+                        selectedTab = LibraryTab.Recent
+                    },
                 )
             }
 
@@ -3852,7 +3892,8 @@ private fun FavoritesPanel(
                                 allowMetadataPoster,
                             ) {
                                 if (allowMetadataPoster) {
-                                    video.resolvedTitle?.takeIf { it.isNotBlank() } ?: video.fileName
+                                    video.resolvedTitle?.takeIf { it.isNotBlank() }
+                                        ?: video.fileName
                                 } else {
                                     video.fileName
                                 }
@@ -3912,7 +3953,8 @@ private fun FavoritesPanel(
                                 allowMetadataPoster,
                             ) {
                                 if (allowMetadataPoster) {
-                                    video.resolvedTitle?.takeIf { it.isNotBlank() } ?: video.fileName
+                                    video.resolvedTitle?.takeIf { it.isNotBlank() }
+                                        ?: video.fileName
                                 } else {
                                     video.fileName
                                 }
