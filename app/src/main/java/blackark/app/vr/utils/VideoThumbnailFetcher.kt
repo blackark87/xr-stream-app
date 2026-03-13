@@ -19,16 +19,21 @@ import okio.Buffer
 import okio.FileSystem
 import okio.Path.Companion.toOkioPath
 import java.net.URI
+import kotlin.math.abs
 
 /**
  * Custom Coil Fetcher for extracting video thumbnails from SMB and local files
  */
 class VideoThumbnailFetcher(
     private val data: String,
+    private val allowMetadataPoster: Boolean,
     private val options: Options
 ) : Fetcher {
 
-    data class Model(val path: String)
+    data class Model(
+        val path: String,
+        val allowMetadataPoster: Boolean = true,
+    )
 
     private val tag = "VideoThumbnailFetcher"
     private val mb = 1024L * 1024L
@@ -89,7 +94,10 @@ class VideoThumbnailFetcher(
     }
 
     private suspend fun extractSMBThumbnail(smbUrl: String): FetchResult? {
-        Log.d("VideoThumbnailFetcher", "Extracting SMB thumbnail for: $smbUrl")
+        Log.d(
+            "VideoThumbnailFetcher",
+            "Extracting SMB thumbnail for: $smbUrl (allowMetadataPoster=$allowMetadataPoster)"
+        )
 
         // 1. Check for existing local thumbnail based on filename identity.
         val context = options.context
@@ -112,11 +120,15 @@ class VideoThumbnailFetcher(
                 dataSource = DataSource.DISK
             )
         }
-        resolveMetadataPosterThumbnail(
-            videoPath = smbUrl,
-            targetThumbnailFile = localFile,
-        )?.let {
-            return it
+        if (allowMetadataPoster) {
+            resolveMetadataPosterThumbnail(
+                videoPath = smbUrl,
+                targetThumbnailFile = localFile,
+            )?.let {
+                return it
+            }
+        } else {
+            Log.d(tag, "Skipping metadata poster lookup for extracted thumbnail path=$smbUrl")
         }
         var tempFile: java.io.File? = null
         val retriever = MediaMetadataRetriever()
@@ -403,13 +415,16 @@ class VideoThumbnailFetcher(
     }
 
     private fun buildThumbnailIdentityKey(path: String): String {
+        val modeKey = if (allowMetadataPoster) "poster" else "frame"
         val fileName = extractFileName(path)
         if (fileName.isBlank()) {
-            return path.substringBefore('?').substringBefore('#').trim().lowercase()
+            val normalizedPath = path.substringBefore('?').substringBefore('#').trim().lowercase()
+            return "$THUMBNAIL_CACHE_VERSION:$modeKey:$normalizedPath"
         }
 
         val stem = fileName.substringBeforeLast('.', fileName)
-        return stem.trim().lowercase().ifBlank { fileName.lowercase() }
+        val identity = stem.trim().lowercase().ifBlank { fileName.lowercase() }
+        return "$THUMBNAIL_CACHE_VERSION:$modeKey:$identity"
     }
 
     private fun isMetadataLookupEligible(folderPath: String): Boolean {
@@ -684,19 +699,25 @@ class VideoThumbnailFetcher(
     }
 
     private fun normalizeThumbnailFrame(bitmap: Bitmap): Bitmap {
-        val shouldCropHalfWidth =
-            (bitmap.width == 4096 && bitmap.height == 2048) ||
-                    (bitmap.width == 8192 && bitmap.height == 4096)
+        val aspectRatio = bitmap.width.toFloat() / bitmap.height.toFloat()
+        val shouldCropStereoPanorama =
+            bitmap.width >= 4096 &&
+                    bitmap.height >= 2048 &&
+                    abs(aspectRatio - 2f) <= 0.05f
 
-        if (!shouldCropHalfWidth) {
+        if (!shouldCropStereoPanorama) {
             return bitmap
         }
 
-        val croppedWidth = bitmap.width / 2
         return try {
-            Bitmap.createBitmap(bitmap, 0, 0, croppedWidth, bitmap.height)
+            val preview = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width / 2, bitmap.height)
+            Log.d(
+                tag,
+                "Cropped stereo panoramic frame ${bitmap.width}x${bitmap.height} to single-eye thumbnail ${preview.width}x${preview.height}",
+            )
+            preview
         } catch (e: Exception) {
-            Log.w("VideoThumbnailFetcher", "Failed to crop SBS thumbnail frame: ${e.message}")
+            Log.w(tag, "Failed to crop stereo panoramic frame to single-eye thumbnail: ${e.message}")
             bitmap
         }
     }
@@ -726,13 +747,23 @@ class VideoThumbnailFetcher(
 
     class ModelFactory : Fetcher.Factory<Model> {
         override fun create(data: Model, options: Options, imageLoader: ImageLoader): Fetcher? {
-            return createFetcherForPath(data.path, options, imageLoader)
+            return createFetcherForPath(
+                path = data.path,
+                allowMetadataPoster = data.allowMetadataPoster,
+                options = options,
+                imageLoader = imageLoader,
+            )
         }
     }
 
     class StringFactory : Fetcher.Factory<String> {
         override fun create(data: String, options: Options, imageLoader: ImageLoader): Fetcher? {
-            return createFetcherForPath(data, options, imageLoader)
+            return createFetcherForPath(
+                path = data,
+                allowMetadataPoster = true,
+                options = options,
+                imageLoader = imageLoader,
+            )
         }
     }
 
@@ -742,23 +773,41 @@ class VideoThumbnailFetcher(
             options: Options,
             imageLoader: ImageLoader
         ): Fetcher? {
-            return createFetcherForPath(data.toString(), options, imageLoader)
+            return createFetcherForPath(
+                path = data.toString(),
+                allowMetadataPoster = true,
+                options = options,
+                imageLoader = imageLoader,
+            )
         }
     }
 
     class CoilUriFactory : Fetcher.Factory<coil3.Uri> {
         override fun create(data: coil3.Uri, options: Options, imageLoader: ImageLoader): Fetcher? {
-            return createFetcherForPath(data.toString(), options, imageLoader)
+            return createFetcherForPath(
+                path = data.toString(),
+                allowMetadataPoster = true,
+                options = options,
+                imageLoader = imageLoader,
+            )
         }
     }
 
     companion object {
+        private const val THUMBNAIL_CACHE_VERSION = "thumb-v3"
         private val movieCodePattern = Regex("(?i)([a-z]{2,10})[-_](\\d{2,5})(?!\\d)")
         private val makerYearPathPattern =
             Regex("(^|/)maker/(?:19|20)\\d{2}(/|$)", RegexOption.IGNORE_CASE)
         private val avVrPathPattern = Regex("(^|/)av/vr(/|$)", RegexOption.IGNORE_CASE)
+
+        fun diskCacheKey(path: String, allowMetadataPoster: Boolean = true): String {
+            val modeKey = if (allowMetadataPoster) "poster" else "frame"
+            return "$THUMBNAIL_CACHE_VERSION:$modeKey:$path"
+        }
+
         private fun createFetcherForPath(
             path: String,
+            allowMetadataPoster: Boolean,
             options: Options,
             imageLoader: ImageLoader
         ): Fetcher? {
@@ -767,7 +816,8 @@ class VideoThumbnailFetcher(
             val isVideo = isVideoFile(path)
 
             // Check if item exists in disk cache.
-            val snapshot = imageLoader.diskCache?.openSnapshot(path)
+            val snapshot =
+                imageLoader.diskCache?.openSnapshot(diskCacheKey(path, allowMetadataPoster))
             val isCached = snapshot != null
             snapshot?.close()
 
@@ -786,7 +836,7 @@ class VideoThumbnailFetcher(
                 "Creating fetcher with options: Disk=${options.diskCachePolicy}, Mem=${options.memoryCachePolicy}, Net=${options.networkCachePolicy}"
             )
 
-            return VideoThumbnailFetcher(path, options)
+            return VideoThumbnailFetcher(path, allowMetadataPoster, options)
         }
 
         private fun isVideoFile(path: String): Boolean {
@@ -804,11 +854,3 @@ class VideoThumbnailFetcher(
         }
     }
 }
-
-
-
-
-
-
-
-

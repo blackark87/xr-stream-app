@@ -315,6 +315,8 @@ fun FancyServerCard(
 fun FancyMovieCard(
     video: RecentVideo,
     isFavorite: Boolean,
+    displayTitleOverride: String? = null,
+    allowMetadataPoster: Boolean = true,
     onClick: () -> Unit,
     onFavoriteToggle: () -> Unit,
     onHoverFocusChanged: ((Boolean) -> Unit)? = null,
@@ -339,6 +341,18 @@ fun FancyMovieCard(
         animationSpec = tween(300),
         label = "scale"
     )
+    val generatedThumbnailModel = remember(video.filePath, allowMetadataPoster) {
+        VideoThumbnailFetcher.Model(
+            path = video.filePath,
+            allowMetadataPoster = allowMetadataPoster,
+        )
+    }
+    val generatedThumbnailDiskCacheKey = remember(video.filePath, allowMetadataPoster) {
+        VideoThumbnailFetcher.diskCacheKey(
+            path = video.filePath,
+            allowMetadataPoster = allowMetadataPoster,
+        )
+    }
 
     Card(
         modifier = modifier
@@ -382,8 +396,8 @@ fun FancyMovieCard(
                     if (video.filePath.isNotEmpty()) {
                         AsyncImage(
                             model = coil3.request.ImageRequest.Builder(androidx.compose.ui.platform.LocalContext.current)
-                                .data(VideoThumbnailFetcher.Model(video.filePath))
-                                .diskCacheKey(video.filePath)
+                                .data(generatedThumbnailModel)
+                                .diskCacheKey(generatedThumbnailDiskCacheKey)
                                 .diskCachePolicy(coil3.request.CachePolicy.ENABLED)
                                 .memoryCachePolicy(coil3.request.CachePolicy.ENABLED)
                                 .build(),
@@ -405,7 +419,7 @@ fun FancyMovieCard(
 
                 Spacer(modifier = Modifier.width(16.dp))
 
-                val displayTitle = video.resolvedTitle?.takeIf { it.isNotBlank() }
+                val displayTitle = displayTitleOverride ?: video.resolvedTitle?.takeIf { it.isNotBlank() }
                     ?: video.fileName.removeSuffix(".mp4")
                         .removeSuffix(".mkv")
                         .removeSuffix(".avi")
@@ -548,7 +562,9 @@ fun FancyFileCard(
                         AsyncImage(
                             model = coil3.request.ImageRequest.Builder(androidx.compose.ui.platform.LocalContext.current)
                                 .data(thumbnailModel ?: VideoThumbnailFetcher.Model(videoPath))
-                                .diskCacheKey(thumbnailDiskCacheKey ?: videoPath)
+                                .diskCacheKey(
+                                    thumbnailDiskCacheKey ?: VideoThumbnailFetcher.diskCacheKey(videoPath)
+                                )
                                 .diskCachePolicy(coil3.request.CachePolicy.ENABLED)
                                 .memoryCachePolicy(coil3.request.CachePolicy.ENABLED)
                                 .build(),
@@ -678,4 +694,3 @@ fun EmptyState(
         )
     }
 }
-
