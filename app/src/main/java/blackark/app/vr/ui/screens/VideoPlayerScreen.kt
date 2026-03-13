@@ -485,4 +485,3 @@ private fun SpatialExternalSurfaceScope.bindExoPlayerSurface(exoPlayer: ExoPlaye
         exoPlayer.clearVideoSurface(surface)
     }
 }
-
