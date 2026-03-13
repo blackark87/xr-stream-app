@@ -317,8 +317,10 @@ fun FancyMovieCard(
     isFavorite: Boolean,
     displayTitleOverride: String? = null,
     allowMetadataPoster: Boolean = true,
+    isPreviewFocused: Boolean = false,
     onClick: () -> Unit,
     onFavoriteToggle: () -> Unit,
+    onRequestPreview: (() -> Unit)? = null,
     onHoverFocusChanged: ((Boolean) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
@@ -361,7 +363,13 @@ fun FancyMovieCard(
             .clickable(
                 interactionSource = interactionSource,
                 indication = null,
-                onClick = onClick
+                onClick = {
+                    if (!isPreviewFocused && onRequestPreview != null) {
+                        onRequestPreview()
+                    } else {
+                        onClick()
+                    }
+                }
             ),
         colors = CardDefaults.cardColors(
             containerColor = CardBackground
@@ -370,7 +378,11 @@ fun FancyMovieCard(
             defaultElevation = elevation
         ),
         shape = RoundedCornerShape(12.dp),
-        border = if (isHovered || isFocused) BorderStroke(2.dp, NetflixRed) else null
+        border = if (isPreviewFocused || isHovered || isFocused) {
+            BorderStroke(2.dp, NetflixRed)
+        } else {
+            null
+        }
     ) {
         Column(
             modifier = Modifier
@@ -505,6 +517,7 @@ fun FancyFileCard(
     onThumbnailLoadSuccess: (() -> Unit)? = null,
     onThumbnailLoadError: ((Throwable?) -> Unit)? = null,
     onFavoriteToggle: (() -> Unit)? = null,
+    isHighlighted: Boolean = false,
     isSelected: Boolean = false,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
@@ -515,7 +528,7 @@ fun FancyFileCard(
 
 
     val backgroundColor by animateColorAsState(
-        targetValue = if (isHovered) CardBackgroundHover else CardBackground,
+        targetValue = if (isHighlighted || isHovered) CardBackgroundHover else CardBackground,
         animationSpec = tween(200),
         label = "background"
     )
@@ -532,10 +545,14 @@ fun FancyFileCard(
             containerColor = backgroundColor
         ),
         shape = RoundedCornerShape(8.dp),
-        border = if (isSelected || isHovered || isFocused) BorderStroke(
-            2.dp,
-            if (isSelected) AccentGold else NetflixRed
-        ) else null
+        border = if (isSelected || isHighlighted || isHovered || isFocused) {
+            BorderStroke(
+                2.dp,
+                if (isSelected) AccentGold else NetflixRed
+            )
+        } else {
+            null
+        }
     ) {
         Row(
             modifier = Modifier
