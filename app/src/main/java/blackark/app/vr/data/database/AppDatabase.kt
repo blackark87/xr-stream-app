@@ -32,7 +32,9 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "xr_video_player_database"
                 )
-                    .fallbackToDestructiveMigration() // For development - recreates DB on schema changes
+                    .fallbackToDestructiveMigration(
+                        dropAllTables = true
+                    ) // For development - recreates DB on schema changes
                     .build()
                 INSTANCE = instance
                 instance
