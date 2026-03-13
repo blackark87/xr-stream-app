@@ -7,13 +7,23 @@ import androidx.room.RoomDatabase
 import blackark.app.vr.data.database.dao.ServerDao
 import blackark.app.vr.data.database.dao.VideoDao
 import blackark.app.vr.data.database.dao.VirtualGroupMetadataDao
+import blackark.app.vr.data.database.entity.JvrPerformer
 import blackark.app.vr.data.database.entity.RecentVideo
 import blackark.app.vr.data.database.entity.SavedServer
+import blackark.app.vr.data.database.entity.VirtualGroupMetadataGenre
 import blackark.app.vr.data.database.entity.VirtualGroupMetadata
+import blackark.app.vr.data.database.entity.VirtualGroupMetadataPerformerCrossRef
 
 @Database(
-    entities = [SavedServer::class, RecentVideo::class, VirtualGroupMetadata::class],
-    version = 7,
+    entities = [
+        SavedServer::class,
+        RecentVideo::class,
+        VirtualGroupMetadata::class,
+        VirtualGroupMetadataGenre::class,
+        JvrPerformer::class,
+        VirtualGroupMetadataPerformerCrossRef::class,
+    ],
+    version = 9,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {

@@ -1,23 +1,46 @@
 package blackark.app.vr.utils
 
 import android.content.Context
-import android.text.Html
 import android.util.Log
 import blackark.app.vr.data.database.AppDatabase
+import blackark.app.vr.data.database.entity.JvrPerformer
 import blackark.app.vr.data.database.entity.VirtualGroupMetadata
+import blackark.app.vr.data.database.entity.VirtualGroupMetadataGenre
+import blackark.app.vr.data.database.entity.VirtualGroupMetadataPerformerCrossRef
+import blackark.app.vr.data.database.entity.VirtualGroupMetadataRecord
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import org.jsoup.Jsoup
+import org.jsoup.nodes.Document
+import org.jsoup.nodes.Element
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URI
 import java.net.URL
 import java.net.URLEncoder
+import java.time.LocalDate
+import java.time.format.DateTimeParseException
 import java.util.concurrent.ConcurrentHashMap
+
+data class JvrCastMetadata(
+    val performerId: String,
+    val englishName: String,
+    val japaneseName: String? = null,
+    val profileImageUrl: String? = null,
+    val remoteProfileImageUrl: String? = null,
+)
 
 data class JvrMovieMetadata(
     val code: String,
     val title: String,
     val posterUrl: String?,
+    val releaseDate: LocalDate? = null,
+    val studio: String? = null,
+    val genres: List<String> = emptyList(),
+    val casts: List<JvrCastMetadata> = emptyList(),
 )
 
 object JvrLibraryMetadataProvider {
@@ -30,8 +53,15 @@ object JvrLibraryMetadataProvider {
     private const val SOURCE_JVR = "jvr"
     private const val SOURCE_AV_WIKI = "avwiki"
     private const val SOURCE_NONE = "none"
+    private const val THROTTLED_REQUEST_INTERVAL_MS = 750L
+    private val THROTTLED_HOSTS = setOf(
+        "jvrlibrary.com",
+        "av-wiki.net",
+    )
     private val metadataCache = ConcurrentHashMap<String, JvrMovieMetadata>()
     private val missCache = ConcurrentHashMap.newKeySet<String>()
+    private val requestThrottleMutex = Mutex()
+    private val lastRequestAtByHost = mutableMapOf<String, Long>()
 
     private val placeholderTitlePatterns = listOf(
         Regex("^\\s*not\\s+found\\s*$", RegexOption.IGNORE_CASE),
@@ -45,11 +75,16 @@ object JvrLibraryMetadataProvider {
     private const val VR_BRACKET_TAG_PATTERN =
         "(?:\\[(?:$VR_TOKEN_PATTERN)(?:\\s*(?:$VR_TOKEN_PATTERN))*]|【(?:$VR_TOKEN_PATTERN)(?:\\s*(?:$VR_TOKEN_PATTERN))*】)"
 
-
     fun peekCached(rawCode: String): JvrMovieMetadata? {
         val code = rawCode.trim().uppercase()
         if (code.isBlank()) return null
         return metadataCache[buildCacheKey(code, SOURCE_JVR)]
+    }
+
+    fun clearMemoryCaches() {
+        metadataCache.clear()
+        missCache.clear()
+        Log.d(TAG, "Cleared in-memory metadata caches")
     }
 
     @Suppress("UNUSED_PARAMETER")
@@ -60,10 +95,7 @@ object JvrLibraryMetadataProvider {
         val source = metadataSourceForPath(folderPath)
         val cacheKey = buildCacheKey(code, source)
         return metadataCache[cacheKey]?.let { cached ->
-            val validated = validateLocalPosterPath(cached)
-            val normalized = validated.copy(
-                title = selectPreferredTitle(validated.code, validated.title)
-            )
+            val normalized = normalizeCachedMetadata(cached)
             metadataCache[cacheKey] = normalized
             normalized
         }
@@ -87,13 +119,10 @@ object JvrLibraryMetadataProvider {
             "Lookup request code=$code path='$folderPath' source=$source allowJvr=$allowJvrLookup"
         )
 
-        metadataCache[cacheKey]?.let {
-            val validated = validateLocalPosterPath(it)
-            val normalized = validated.copy(
-                title = selectPreferredTitle(validated.code, validated.title)
-            )
+        metadataCache[cacheKey]?.let { cached ->
+            val normalized = normalizeCachedMetadata(cached)
             metadataCache[cacheKey] = normalized
-            if (normalized.title != it.title || normalized.posterUrl != it.posterUrl) {
+            if (normalized != cached) {
                 savePersistedMetadata(appContext, cacheKey, source, normalized)
             }
             Log.d(
@@ -104,31 +133,22 @@ object JvrLibraryMetadataProvider {
         }
 
         loadPersistedMetadata(appContext, cacheKey)?.let { persisted ->
-            if (persisted.isMiss) {
+            if (persisted.metadata.isMiss) {
                 missCache += cacheKey
                 Log.d(TAG, "DB miss-cache hit for $cacheKey; skipping remote lookup")
                 return null
             }
 
-            val persistedCode = persisted.code.ifBlank { code }
-            val normalizedTitle = selectPreferredTitle(
-                persistedCode,
-                persisted.title,
+            val persistedMetadata = toMovieMetadata(
+                record = persisted,
+                fallbackCode = code,
             )
-
-            val cachedMetadata = validateLocalPosterPath(
-                JvrMovieMetadata(
-                    code = persistedCode,
-                    title = normalizedTitle,
-                    posterUrl = persisted.posterUrl,
-                )
-            )
+            val cachedMetadata = normalizeCachedMetadata(persistedMetadata)
 
             metadataCache[cacheKey] = cachedMetadata
             missCache.remove(cacheKey)
 
-            // Persist normalized path if local file was removed or title normalized.
-            if (cachedMetadata.posterUrl != persisted.posterUrl || cachedMetadata.title != persisted.title) {
+            if (cachedMetadata != persistedMetadata) {
                 savePersistedMetadata(appContext, cacheKey, source, cachedMetadata)
             }
 
@@ -139,41 +159,34 @@ object JvrLibraryMetadataProvider {
             return cachedMetadata
         }
 
-
         loadPersistedMetadataByCode(appContext, code)?.let { persistedByCode ->
-            val persistedCode = persistedByCode.code.ifBlank { code }
-            val normalizedTitle = selectPreferredTitle(
-                persistedCode,
-                persistedByCode.title,
+            val persistedMetadata = toMovieMetadata(
+                record = persistedByCode,
+                fallbackCode = code,
             )
-
-            val cachedMetadata = validateLocalPosterPath(
-                JvrMovieMetadata(
-                    code = persistedCode,
-                    title = normalizedTitle,
-                    posterUrl = persistedByCode.posterUrl,
-                )
-            )
+            val cachedMetadata = normalizeCachedMetadata(persistedMetadata)
 
             metadataCache[cacheKey] = cachedMetadata
-            metadataCache[buildCacheKey(persistedCode, persistedByCode.source)] = cachedMetadata
+            metadataCache[buildCacheKey(cachedMetadata.code, persistedByCode.metadata.source)] =
+                cachedMetadata
             missCache.remove(cacheKey)
 
-            if (cachedMetadata.posterUrl != persistedByCode.posterUrl || cachedMetadata.title != persistedByCode.title) {
+            if (cachedMetadata != persistedMetadata) {
                 savePersistedMetadata(
                     appContext,
-                    buildCacheKey(persistedCode, persistedByCode.source),
-                    persistedByCode.source,
-                    cachedMetadata
+                    buildCacheKey(cachedMetadata.code, persistedByCode.metadata.source),
+                    persistedByCode.metadata.source,
+                    cachedMetadata,
                 )
             }
 
             Log.d(
                 TAG,
-                "DB code-level cache hit for code=$code source=${persistedByCode.source} (poster=${cachedMetadata.posterUrl ?: "<none>"})"
+                "DB code-level cache hit for code=$code source=${persistedByCode.metadata.source} (poster=${cachedMetadata.posterUrl ?: "<none>"})"
             )
             return cachedMetadata
         }
+
         if (cacheKey in missCache) {
             Log.d(TAG, "Memory miss-cache hit for $cacheKey; skipping remote lookup")
             return null
@@ -187,9 +200,11 @@ object JvrLibraryMetadataProvider {
         val remoteMetadata = withContext(Dispatchers.IO) {
             when (source) {
                 SOURCE_AV_WIKI -> {
-                    fetchByCodeFromAvWiki(code) ?: if (allowJvrLookup) fetchByCodeFromJvrLibrary(
-                        code
-                    ) else null
+                    fetchByCodeFromAvWiki(code) ?: if (allowJvrLookup) {
+                        fetchByCodeFromJvrLibrary(code)
+                    } else {
+                        null
+                    }
                 }
 
                 SOURCE_JVR -> if (allowJvrLookup) fetchByCodeFromJvrLibrary(code) else null
@@ -212,7 +227,7 @@ object JvrLibraryMetadataProvider {
         }
 
         val localizedMetadata = withContext(Dispatchers.IO) {
-            localizePoster(appContext, cacheKey, remoteMetadata)
+            localizeMediaAssets(appContext, cacheKey, remoteMetadata)
         }
 
         metadataCache[cacheKey] = localizedMetadata
@@ -225,6 +240,93 @@ object JvrLibraryMetadataProvider {
         )
 
         return localizedMetadata
+    }
+
+    internal fun toPersistedRecord(
+        cacheKey: String,
+        source: String,
+        metadata: JvrMovieMetadata,
+        isMiss: Boolean = false,
+        updatedAt: Long = System.currentTimeMillis(),
+    ): VirtualGroupMetadataRecord {
+        val genres = normalizeGenres(metadata.genres)
+        val casts = normalizeCasts(metadata.casts)
+        val performers = casts.map { cast ->
+            JvrPerformer(
+                performerId = cast.performerId,
+                englishName = cast.englishName,
+                japaneseName = cast.japaneseName,
+                remoteProfileImageUrl = cast.remoteProfileImageUrl
+                    ?: cast.profileImageUrl?.takeUnless(::isLocalImageUrl),
+                localProfileImageUrl = cast.profileImageUrl?.let(::validateLocalImageUrl),
+                updatedAt = updatedAt,
+            )
+        }.distinctBy { it.performerId }
+
+        return VirtualGroupMetadataRecord(
+            metadata = VirtualGroupMetadata(
+                cacheKey = cacheKey,
+                code = metadata.code,
+                source = source,
+                title = metadata.title,
+                posterUrl = metadata.posterUrl,
+                releaseDateEpochDay = metadata.releaseDate?.toEpochDay(),
+                studio = metadata.studio?.trim()?.takeIf { it.isNotBlank() },
+                isMiss = isMiss,
+                updatedAt = updatedAt,
+            ),
+            genres = genres.mapIndexed { index, genre ->
+                VirtualGroupMetadataGenre(
+                    cacheKey = cacheKey,
+                    position = index,
+                    genre = genre,
+                )
+            },
+            performerRefs = casts.mapIndexed { index, cast ->
+                VirtualGroupMetadataPerformerCrossRef(
+                    cacheKey = cacheKey,
+                    performerId = cast.performerId,
+                    position = index,
+                )
+            },
+            performers = performers,
+        )
+    }
+
+    internal fun toMovieMetadata(
+        record: VirtualGroupMetadataRecord,
+        fallbackCode: String? = null,
+    ): JvrMovieMetadata {
+        val code = record.metadata.code
+            .ifBlank { fallbackCode.orEmpty() }
+            .ifBlank { record.metadata.cacheKey.substringAfter(':', SOURCE_JVR) }
+            .ifBlank { SOURCE_JVR }
+        val performersById = record.performers.associateBy { it.performerId }
+        return JvrMovieMetadata(
+            code = code,
+            title = record.metadata.title?.takeIf { it.isNotBlank() } ?: code,
+            posterUrl = record.metadata.posterUrl,
+            releaseDate = record.metadata.releaseDateEpochDay?.let(LocalDate::ofEpochDay),
+            studio = record.metadata.studio?.trim()?.takeIf { it.isNotBlank() },
+            genres = record.genres
+                .sortedBy { it.position }
+                .map { it.genre }
+                .let(::normalizeGenres),
+            casts = record.performerRefs
+                .sortedBy { it.position }
+                .mapNotNull { ref ->
+                    performersById[ref.performerId]?.let { performer ->
+                        JvrCastMetadata(
+                            performerId = performer.performerId,
+                            englishName = performer.englishName,
+                            japaneseName = performer.japaneseName,
+                            profileImageUrl = resolveStoredPerformerImageUrl(performer),
+                            remoteProfileImageUrl = performer.remoteProfileImageUrl,
+                        )
+                    }
+                }
+                .let(::normalizeCasts),
+        )
     }
 
     private fun metadataSourceForPath(folderPath: String): String {
@@ -257,10 +359,9 @@ object JvrLibraryMetadataProvider {
         for (index in 0 until segments.size - 1) {
             val makerSegment = segments[index]
             val yearSegment = segments[index + 1]
-            if (makerSegment.equals(
-                    "maker",
-                    ignoreCase = true
-                ) && yearSegment.matches(Regex("(?:19|20)\\d{2}"))
+            if (
+                makerSegment.equals("maker", ignoreCase = true) &&
+                yearSegment.matches(Regex("(?:19|20)\\d{2}"))
             ) {
                 return true
             }
@@ -282,104 +383,90 @@ object JvrLibraryMetadataProvider {
         return "$source:$code"
     }
 
-    private fun fetchByCodeFromAvWiki(code: String): JvrMovieMetadata? {
+    private suspend fun fetchByCodeFromAvWiki(code: String): JvrMovieMetadata? {
         val avWikiUrl = "https://av-wiki.net/${code.lowercase()}/"
         Log.d(TAG, "Starting AV-Wiki metadata lookup for $code url=$avWikiUrl")
         val html = fetchPageHtml(avWikiUrl) ?: return null
-
-        val thumbnailDivRegex = Regex(
-            "<div\\b[^>]*class\\s*=\\s*['\"][^'\"]*\\barticle-thumbnail\\b[^'\"]*['\"][^>]*>(.*?)</div>",
-            setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL)
-        )
-
-        val thumbnailHtml = thumbnailDivRegex.find(html)?.groupValues?.getOrNull(1) ?: return null
-        val imgAttributes = extractFirstImageAttributes(thumbnailHtml) ?: return null
-
-        val rawSrc = imgAttributes["src"]?.trim().orEmpty()
-        if (rawSrc.isBlank()) {
-            return null
-        }
-
-        val rawAlt = imgAttributes["alt"]?.trim().orEmpty()
-        val title = selectPreferredTitle(code, rawAlt)
-        val posterUrl = toAbsoluteUrl(rawSrc)
-
-        Log.d(TAG, "AV-Wiki parsed for $code -> title='$title', poster=$posterUrl")
-
-        return JvrMovieMetadata(
-            code = code,
-            title = title,
-            posterUrl = posterUrl,
-        )
+        return parseAvWikiMetadataHtml(code = code, html = html, baseUrl = avWikiUrl)
     }
 
-    private fun fetchByCodeFromJvrLibrary(code: String): JvrMovieMetadata? {
+    private suspend fun fetchByCodeFromJvrLibrary(code: String): JvrMovieMetadata? {
         val encodedCode = URLEncoder.encode(code, Charsets.UTF_8.name())
         val zhUrl = "$BASE_URL/zh/jvr?id=$encodedCode"
         val enUrl = "$BASE_URL/jvr?id=$encodedCode"
 
         Log.d(TAG, "Starting JVR metadata lookup for $code")
+
         val zhMetadata = fetchPageHtml(zhUrl)?.let { parseJvrMetadataHtml(code, it) }
         Log.d(
             TAG,
             "JVR ZH parse for $code -> title='${zhMetadata?.title ?: "<none>"}', poster=${zhMetadata?.posterUrl ?: "<none>"}"
         )
 
-        val shouldTryEnglishPage =
-            zhMetadata == null ||
-                    zhMetadata.title.equals(code, ignoreCase = true) ||
-                    isLikelyChinese(zhMetadata.title)
-
-        val enMetadata = if (shouldTryEnglishPage) {
-            Log.d(TAG, "Trying JVR EN fallback page for $code")
-            fetchPageHtml(enUrl)?.let { parseJvrMetadataHtml(code, it) }
-        } else {
-            null
-        }
-
-        if (shouldTryEnglishPage) {
-            Log.d(
-                TAG,
-                "JVR EN parse for $code -> title='${enMetadata?.title ?: "<none>"}', poster=${enMetadata?.posterUrl ?: "<none>"}"
-            )
-        }
+        val enMetadata = fetchPageHtml(enUrl)?.let { parseJvrMetadataHtml(code, it) }
+        Log.d(
+            TAG,
+            "JVR EN parse for $code -> title='${enMetadata?.title ?: "<none>"}', poster=${enMetadata?.posterUrl ?: "<none>"}"
+        )
 
         if (zhMetadata == null && enMetadata == null) {
             Log.d(TAG, "JVR lookup finished for $code with no metadata")
             return null
         }
 
-        val selectedTitle = selectPreferredTitle(
-            code,
-            zhMetadata?.title,
-            enMetadata?.title,
+        return mergeJvrMetadata(
+            code = code,
+            preferredTitleMetadata = zhMetadata,
+            englishMetadata = enMetadata,
         )
+    }
 
-        val posterUrl = zhMetadata?.posterUrl ?: enMetadata?.posterUrl
-
+    private fun mergeJvrMetadata(
+        code: String,
+        preferredTitleMetadata: JvrMovieMetadata?,
+        englishMetadata: JvrMovieMetadata?,
+    ): JvrMovieMetadata {
         return JvrMovieMetadata(
             code = code,
-            title = selectedTitle,
-            posterUrl = posterUrl,
+            title = selectPreferredTitle(
+                code,
+                preferredTitleMetadata?.title,
+                englishMetadata?.title,
+            ),
+            posterUrl = preferredTitleMetadata?.posterUrl ?: englishMetadata?.posterUrl,
+            releaseDate = englishMetadata?.releaseDate ?: preferredTitleMetadata?.releaseDate,
+            studio = englishMetadata?.studio ?: preferredTitleMetadata?.studio,
+            genres = if (!englishMetadata?.genres.isNullOrEmpty()) {
+                englishMetadata.genres
+            } else {
+                preferredTitleMetadata?.genres.orEmpty()
+            },
+            casts = if (!englishMetadata?.casts.isNullOrEmpty()) {
+                englishMetadata.casts
+            } else {
+                preferredTitleMetadata?.casts.orEmpty()
+            },
         )
     }
 
-    private fun extractFirstImageAttributes(html: String): Map<String, String>? {
-        val imgTagRegex = Regex("<img\\b[^>]*>", RegexOption.IGNORE_CASE)
-        val attributeRegex =
-            Regex("([a-zA-Z_:][-a-zA-Z0-9_:.]*)\\s*=\\s*['\"]([^'\"]*)['\"]")
-
-        val imgTag = imgTagRegex.find(html)?.value ?: return null
-        val attrs = mutableMapOf<String, String>()
-
-        for (attribute in attributeRegex.findAll(imgTag)) {
-            attrs[attribute.groupValues[1].lowercase()] = attribute.groupValues[2]
-        }
-
-        return attrs
+    private suspend fun localizeMediaAssets(
+        context: Context,
+        cacheKey: String,
+        metadata: JvrMovieMetadata,
+    ): JvrMovieMetadata {
+        val localizedPoster = localizePoster(
+            context = context,
+            cacheKey = cacheKey,
+            metadata = metadata,
+        )
+        val localizedCasts = localizeCastImages(
+            context = context,
+            casts = localizedPoster.casts,
+        )
+        return localizedPoster.copy(casts = localizedCasts)
     }
 
-    private fun localizePoster(
+    private suspend fun localizePoster(
         context: Context,
         cacheKey: String,
         metadata: JvrMovieMetadata
@@ -390,39 +477,79 @@ object JvrLibraryMetadataProvider {
         }
 
         val absolutePoster = toAbsoluteUrl(remotePoster)
-        val localPoster = downloadPosterToLocal(context, cacheKey, metadata.code, absolutePoster)
+        val localPoster = downloadImageToLocal(
+            context = context,
+            directoryName = "group_posters",
+            fileKey = cacheKey.lowercase().replace(':', '_').replace('/', '_'),
+            imageUrl = absolutePoster,
+        )
 
         if (localPoster != null) {
             Log.d(TAG, "Poster localized for $cacheKey: $localPoster")
             return metadata.copy(posterUrl = localPoster)
         }
 
-        // Prevent repeated remote image requests in UI; fall back to generated thumbnail instead.
         Log.w(TAG, "Poster localization failed for $cacheKey. Falling back to generated thumbnail.")
         return metadata.copy(posterUrl = null)
     }
 
-    private fun downloadPosterToLocal(
+    private suspend fun localizeCastImages(
         context: Context,
-        cacheKey: String,
-        code: String,
-        posterUrl: String,
-    ): String? {
-        return try {
-            val postersDir = File(context.filesDir, "group_posters")
-            if (!postersDir.exists()) {
-                postersDir.mkdirs()
+        casts: List<JvrCastMetadata>,
+    ): List<JvrCastMetadata> {
+        return casts.map { cast ->
+            val remoteImageUrl = cast.remoteProfileImageUrl
+                ?.trim()
+                ?.takeIf { it.isNotBlank() }
+                ?: cast.profileImageUrl?.takeUnless(::isLocalImageUrl)
+
+            if (remoteImageUrl.isNullOrBlank()) {
+                return@map cast
             }
 
-            val extension = extractImageExtension(posterUrl)
-            val safeName = cacheKey.lowercase().replace(':', '_').replace('/', '_')
-            val targetFile = File(postersDir, "$safeName.$extension")
+            val absoluteRemoteUrl = toAbsoluteUrl(remoteImageUrl)
+            val localImageUrl = downloadImageToLocal(
+                context = context,
+                directoryName = "performer_profiles",
+                fileKey = cast.performerId.lowercase().replace(':', '_').replace('/', '_'),
+                imageUrl = absoluteRemoteUrl,
+            )
+
+            if (localImageUrl != null) {
+                cast.copy(
+                    profileImageUrl = localImageUrl,
+                    remoteProfileImageUrl = absoluteRemoteUrl,
+                )
+            } else {
+                cast.copy(
+                    profileImageUrl = cast.profileImageUrl ?: absoluteRemoteUrl,
+                    remoteProfileImageUrl = absoluteRemoteUrl,
+                )
+            }
+        }
+    }
+
+    private suspend fun downloadImageToLocal(
+        context: Context,
+        directoryName: String,
+        fileKey: String,
+        imageUrl: String,
+    ): String? {
+        return try {
+            val imageDir = File(context.filesDir, directoryName)
+            if (!imageDir.exists()) {
+                imageDir.mkdirs()
+            }
+
+            val extension = extractImageExtension(imageUrl)
+            val targetFile = File(imageDir, "$fileKey.$extension")
 
             if (targetFile.exists() && targetFile.length() > 0L) {
                 return targetFile.toURI().toString()
             }
 
-            val connection = (URL(posterUrl).openConnection() as? HttpURLConnection) ?: return null
+            awaitRequestSlot(imageUrl)
+            val connection = (URL(imageUrl).openConnection() as? HttpURLConnection) ?: return null
             connection.connectTimeout = 7000
             connection.readTimeout = 9000
             connection.instanceFollowRedirects = true
@@ -434,7 +561,7 @@ object JvrLibraryMetadataProvider {
                 if (statusCode !in 200..299) {
                     Log.w(
                         TAG,
-                        "Poster download failed for $cacheKey ($code) with HTTP $statusCode: $posterUrl"
+                        "Image download failed for key=$fileKey with HTTP $statusCode: $imageUrl"
                     )
                     return null
                 }
@@ -455,7 +582,7 @@ object JvrLibraryMetadataProvider {
 
             targetFile.toURI().toString()
         } catch (e: Exception) {
-            Log.w(TAG, "Poster download exception for $cacheKey ($code): ${e.message}")
+            Log.w(TAG, "Image download exception for key=$fileKey: ${e.message}")
             null
         }
     }
@@ -470,11 +597,10 @@ object JvrLibraryMetadataProvider {
         }
     }
 
-
     private suspend fun loadPersistedMetadataByCode(
         context: Context,
         code: String
-    ): VirtualGroupMetadata? {
+    ): VirtualGroupMetadataRecord? {
         return withContext(Dispatchers.IO) {
             try {
                 AppDatabase.getDatabase(context)
@@ -493,7 +619,7 @@ object JvrLibraryMetadataProvider {
     private suspend fun loadPersistedMetadata(
         context: Context,
         cacheKey: String
-    ): VirtualGroupMetadata? {
+    ): VirtualGroupMetadataRecord? {
         return withContext(Dispatchers.IO) {
             try {
                 AppDatabase.getDatabase(context)
@@ -519,15 +645,11 @@ object JvrLibraryMetadataProvider {
             try {
                 AppDatabase.getDatabase(context)
                     .virtualGroupMetadataDao()
-                    .upsert(
-                        VirtualGroupMetadata(
+                    .replace(
+                        toPersistedRecord(
                             cacheKey = cacheKey,
-                            code = metadata.code,
                             source = source,
-                            title = metadata.title,
-                            posterUrl = metadata.posterUrl,
-                            isMiss = false,
-                            updatedAt = System.currentTimeMillis(),
+                            metadata = metadata,
                         )
                     )
             } catch (e: Exception) {
@@ -549,15 +671,16 @@ object JvrLibraryMetadataProvider {
             try {
                 AppDatabase.getDatabase(context)
                     .virtualGroupMetadataDao()
-                    .upsert(
-                        VirtualGroupMetadata(
+                    .replace(
+                        toPersistedRecord(
                             cacheKey = cacheKey,
-                            code = code,
                             source = source,
-                            title = null,
-                            posterUrl = null,
+                            metadata = JvrMovieMetadata(
+                                code = code,
+                                title = code,
+                                posterUrl = null,
+                            ),
                             isMiss = true,
-                            updatedAt = System.currentTimeMillis(),
                         )
                     )
             } catch (e: Exception) {
@@ -569,28 +692,68 @@ object JvrLibraryMetadataProvider {
         }
     }
 
+    private fun normalizeCachedMetadata(metadata: JvrMovieMetadata): JvrMovieMetadata {
+        val validated = validateLocalPosterPath(metadata)
+        return validated.copy(
+            title = selectPreferredTitle(validated.code, validated.title),
+            studio = validated.studio?.trim()?.takeIf { it.isNotBlank() },
+            genres = normalizeGenres(validated.genres),
+            casts = normalizeCasts(validateLocalCastImagePaths(validated.casts)),
+        )
+    }
+
     private fun validateLocalPosterPath(metadata: JvrMovieMetadata): JvrMovieMetadata {
         val poster = metadata.posterUrl?.trim().orEmpty()
         if (poster.isBlank()) return metadata.copy(posterUrl = null)
 
-        val localFile = when {
-            poster.startsWith("file:", ignoreCase = true) -> {
-                runCatching { File(URI(poster)) }.getOrNull()
-            }
-
-            poster.startsWith("/") -> File(poster)
-            else -> null
+        val resolvedLocalPoster = validateLocalImageUrl(poster)
+        if (resolvedLocalPoster != null) {
+            return metadata.copy(posterUrl = resolvedLocalPoster)
         }
 
-        if (localFile != null && (!localFile.exists() || localFile.length() <= 0L)) {
+        if (isLocalImageUrl(poster)) {
             return metadata.copy(posterUrl = null)
         }
 
         return metadata
     }
 
-    private fun fetchPageHtml(urlString: String): String? {
+    private fun validateLocalCastImagePaths(casts: List<JvrCastMetadata>): List<JvrCastMetadata> {
+        return casts.map { cast ->
+            val localImageUrl = cast.profileImageUrl?.let(::validateLocalImageUrl)
+            when {
+                localImageUrl != null -> cast.copy(profileImageUrl = localImageUrl)
+                cast.profileImageUrl?.let(::isLocalImageUrl) == true -> cast.copy(
+                    profileImageUrl = cast.remoteProfileImageUrl
+                )
+                else -> cast
+            }
+        }
+    }
+
+    private fun validateLocalImageUrl(url: String): String? {
+        val normalized = url.trim()
+        if (!isLocalImageUrl(normalized)) return null
+
+        val localFile = when {
+            normalized.startsWith("file:", ignoreCase = true) -> {
+                runCatching { File(URI(normalized)) }.getOrNull()
+            }
+
+            normalized.startsWith("/") -> File(normalized)
+            else -> null
+        } ?: return null
+
+        return normalized.takeIf { localFile.exists() && localFile.length() > 0L }
+    }
+
+    private fun isLocalImageUrl(url: String): Boolean {
+        return url.startsWith("file:", ignoreCase = true) || url.startsWith("/")
+    }
+
+    private suspend fun fetchPageHtml(urlString: String): String? {
         val url = runCatching { URL(urlString) }.getOrNull() ?: return null
+        awaitRequestSlot(urlString)
         val connection = (url.openConnection() as? HttpURLConnection) ?: return null
 
         connection.connectTimeout = 7000
@@ -617,21 +780,69 @@ object JvrLibraryMetadataProvider {
         }
     }
 
-    private fun parseJvrMetadataHtml(code: String, html: String): JvrMovieMetadata? {
-        val ogImage = extractMetaContent(html, "og:image")
-        val ogDescription = extractMetaContent(html, "og:description")
-        val htmlTitle = extractTitle(html)
+    private suspend fun awaitRequestSlot(urlString: String) {
+        val host = runCatching { URL(urlString).host.lowercase() }
+            .getOrNull()
+            ?.removePrefix("www.")
+            ?: return
+        if (host !in THROTTLED_HOSTS) {
+            return
+        }
+
+        while (true) {
+            val waitMs = requestThrottleMutex.withLock {
+                val now = System.currentTimeMillis()
+                val lastRequestAt = lastRequestAtByHost[host]
+                if (lastRequestAt == null) {
+                    lastRequestAtByHost[host] = now
+                    0L
+                } else {
+                    val elapsed = now - lastRequestAt
+                    val remaining = THROTTLED_REQUEST_INTERVAL_MS - elapsed
+                    if (remaining <= 0L) {
+                        lastRequestAtByHost[host] = now
+                        0L
+                    } else {
+                        remaining
+                    }
+                }
+            }
+
+            if (waitMs <= 0L) {
+                return
+            }
+
+            Log.d(TAG, "Throttling $host request for ${waitMs}ms")
+            delay(waitMs)
+        }
+    }
+
+    internal fun parseJvrMetadataHtml(code: String, html: String): JvrMovieMetadata? {
+        val document = Jsoup.parse(html, BASE_URL)
+        val ogImage = extractMetaContent(document, "og:image")
+        val ogDescription = extractMetaContent(document, "og:description")
+        val htmlTitle = document.title().takeIf { it.isNotBlank() }
 
         val titleFromHtml = sanitizeTitleCandidate(cleanHtmlTitle(htmlTitle, code), code)
         val titleFromDescription =
             sanitizeTitleCandidate(cleanDescriptionTitle(ogDescription), code)
-        val titleFromDiv = sanitizeTitleCandidate(extractTitleFromTitleDiv(html, code), code)
+        val titleFromDiv = sanitizeTitleCandidate(extractTitleFromTitleDiv(document, code), code)
+
+        val detailValues = extractDetailsValueElements(document)
+        val releaseDate = parseReleaseDate(detailValues["Release Date"]?.text())
+        val studio = normalizeText(detailValues["Studio"]?.text())
+        val genres = extractGenres(detailValues["Genre"])
+        val casts = extractCasts(detailValues["Casts"])
+
+        val hasStructuredMetadata =
+            releaseDate != null || !studio.isNullOrBlank() || genres.isNotEmpty() || casts.isNotEmpty()
 
         if (
             ogImage.isNullOrBlank() &&
             ogDescription.isNullOrBlank() &&
             htmlTitle.isNullOrBlank() &&
-            titleFromDiv.isNullOrBlank()
+            titleFromDiv.isNullOrBlank() &&
+            !hasStructuredMetadata
         ) {
             Log.d(TAG, "JVR HTML parse had no useful metadata for code=$code")
             return null
@@ -644,50 +855,95 @@ object JvrLibraryMetadataProvider {
             titleFromDiv,
         )
 
-        val normalizedImageUrl = resolvePosterImageUrl(code, ogImage, html)
+        val normalizedImageUrl = resolvePosterImageUrl(code, ogImage, document)
         val absolutePosterUrl = normalizedImageUrl?.let(::toAbsoluteUrl)
 
         Log.d(
             TAG,
-            "JVR parsed HTML for $code -> title='$parsedTitle', poster=${absolutePosterUrl ?: "<none>"}"
+            "JVR parsed HTML for $code -> title='$parsedTitle', poster=${absolutePosterUrl ?: "<none>"}, releaseDate=${releaseDate ?: "<none>"}, studio=${studio ?: "<none>"}, casts=${casts.size}, genres=${genres.size}"
         )
 
         return JvrMovieMetadata(
             code = code,
             title = parsedTitle,
             posterUrl = absolutePosterUrl,
+            releaseDate = releaseDate,
+            studio = studio,
+            genres = genres,
+            casts = casts,
         )
     }
 
-    private fun extractMetaContent(html: String, propertyName: String): String? {
-        val metaTagRegex = Regex("<meta\\b[^>]*>", RegexOption.IGNORE_CASE)
-        val attributeRegex =
-            Regex("([a-zA-Z_:][-a-zA-Z0-9_:.]*)\\s*=\\s*['\"]([^'\"]*)['\"]")
+    internal fun parseAvWikiMetadataHtml(
+        code: String,
+        html: String,
+        baseUrl: String = "https://av-wiki.net/${code.lowercase()}/",
+    ): JvrMovieMetadata? {
+        val document = Jsoup.parse(html, baseUrl)
+        val thumbnailImage = document.selectFirst("div.article-thumbnail img[src]")
+        val rawSrc = thumbnailImage?.attr("src")?.trim().orEmpty()
+        val rawAlt = normalizeText(thumbnailImage?.attr("alt"))
+        val articleTitle = normalizeText(
+            document.selectFirst("h1.entry-title, h1.article-title, article h1")?.text()
+        )
+        val detailValues = extractAvWikiDetailValues(document)
+        val studio = normalizeText(detailValues["メーカー"]?.text())
+        val releaseDate = parseReleaseDate(detailValues["配信開始日"]?.text())
+        val casts = extractAvWikiCasts(detailValues["AV女優名"])
 
-        for (metaMatch in metaTagRegex.findAll(html)) {
-            val attrs = mutableMapOf<String, String>()
-            for (attribute in attributeRegex.findAll(metaMatch.value)) {
-                attrs[attribute.groupValues[1].lowercase()] = attribute.groupValues[2]
-            }
-
-            val property = attrs["property"] ?: continue
-            if (!property.equals(propertyName, ignoreCase = true)) continue
-
-            return attrs["content"]?.trim()?.takeIf { it.isNotEmpty() }?.let(::decodeHtml)
+        if (
+            rawSrc.isBlank() &&
+            rawAlt.isNullOrBlank() &&
+            articleTitle.isNullOrBlank() &&
+            studio.isNullOrBlank() &&
+            releaseDate == null &&
+            casts.isEmpty()
+        ) {
+            Log.d(TAG, "AV-Wiki HTML parse had no useful metadata for code=$code")
+            return null
         }
 
-        return null
+        val title = selectPreferredTitle(
+            code,
+            articleTitle,
+            rawAlt,
+            normalizeText(document.title()),
+        )
+        val posterUrl = rawSrc.takeIf { it.isNotBlank() }?.let(::toAbsoluteUrl)
+
+        Log.d(
+            TAG,
+            "AV-Wiki parsed HTML for $code -> title='$title', poster=${posterUrl ?: "<none>"}, releaseDate=${releaseDate ?: "<none>"}, studio=${studio ?: "<none>"}, casts=${casts.size}"
+        )
+
+        return JvrMovieMetadata(
+            code = code,
+            title = title,
+            posterUrl = posterUrl,
+            releaseDate = releaseDate,
+            studio = studio,
+            casts = casts,
+        )
     }
 
-    private fun resolvePosterImageUrl(code: String, ogImage: String?, html: String): String? {
+    private fun extractMetaContent(document: Document, propertyName: String): String? {
+        return document.select("meta")
+            .firstOrNull { it.attr("property").equals(propertyName, ignoreCase = true) }
+            ?.attr("content")
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+            ?.let(::decodeHtml)
+    }
+
+    private fun resolvePosterImageUrl(code: String, ogImage: String?, document: Document): String? {
         if (ogImage.isNullOrBlank()) {
-            val fallback = extractCoverImageFromImgTag(code, html)
+            val fallback = extractCoverImageFromImgTag(code, document)
             Log.d(TAG, "og:image missing for $code. <img> fallback=${fallback ?: "<none>"}")
             return fallback
         }
 
         if (ogImage.startsWith("https://awsimgsrc.dmm.co.jp", ignoreCase = true)) {
-            val staticPoster = extractCoverImageFromImgTag(code, html)
+            val staticPoster = extractCoverImageFromImgTag(code, document)
             if (!staticPoster.isNullOrBlank()) {
                 Log.d(TAG, "og:image is awsimgsrc for $code. Using static fallback=$staticPoster")
                 return staticPoster
@@ -699,22 +955,13 @@ object JvrLibraryMetadataProvider {
         return ogImage
     }
 
-    private fun extractCoverImageFromImgTag(code: String, html: String): String? {
-        val imgTagRegex = Regex("<img\\b[^>]*>", RegexOption.IGNORE_CASE)
-        val attributeRegex =
-            Regex("([a-zA-Z_:][-a-zA-Z0-9_:.]*)\\s*=\\s*['\"]([^'\"]*)['\"]")
-
+    private fun extractCoverImageFromImgTag(code: String, document: Document): String? {
         val preferredAltText = "${code.uppercase()} full cover image"
         var fallbackSrc: String? = null
 
-        for (imgMatch in imgTagRegex.findAll(html)) {
-            val attrs = mutableMapOf<String, String>()
-            for (attribute in attributeRegex.findAll(imgMatch.value)) {
-                attrs[attribute.groupValues[1].lowercase()] = attribute.groupValues[2]
-            }
-
-            val alt = attrs["alt"]?.trim() ?: continue
-            val src = attrs["src"]?.trim().orEmpty()
+        for (image in document.select("img[src][alt]")) {
+            val alt = normalizeText(image.attr("alt")) ?: continue
+            val src = image.attr("src").trim()
             if (src.isBlank()) continue
 
             if (alt.equals(preferredAltText, ignoreCase = true)) {
@@ -729,35 +976,13 @@ object JvrLibraryMetadataProvider {
         return fallbackSrc
     }
 
-    private fun extractTitleFromTitleDiv(html: String, code: String): String? {
-        val divRegex = Regex(
-            "<div\\b[^>]*class\\s*=\\s*['\"][^'\"]*\\btitle\\b[^'\"]*['\"][^>]*>(.*?)</div>",
-            setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL)
-        )
-        val rawInnerHtml = divRegex.find(html)?.groupValues?.getOrNull(1) ?: return null
+    private fun extractTitleFromTitleDiv(document: Document, code: String): String? {
+        val titleElement = document.selectFirst("div.title") ?: return null
+        val sanitizedElement = titleElement.clone().apply {
+            select("span.hidden, span.code").remove()
+        }
 
-        val withoutHiddenSpans = rawInnerHtml
-            .replace(
-                Regex(
-                    "<span\\b[^>]*class\\s*=\\s*['\"][^'\"]*\\bhidden\\b[^'\"]*['\"][^>]*>.*?</span>",
-                    setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL)
-                ),
-                " "
-            )
-            .replace(
-                Regex(
-                    "<span\\b[^>]*class\\s*=\\s*['\"][^'\"]*\\bcode\\b[^'\"]*['\"][^>]*>.*?</span>",
-                    setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL)
-                ),
-                " "
-            )
-            .replace(Regex("<[^>]+>"), " ")
-
-        var normalized = decodeHtml(withoutHiddenSpans)
-            .replace(Regex("\\s+"), " ")
-            .trim()
-
-        if (normalized.isBlank()) return null
+        var normalized = normalizeText(sanitizedElement.text()) ?: return null
 
         normalized = normalized.replace(
             Regex("^\\s*${Regex.escape(code)}\\s*[:\\-–—]?\\s*", RegexOption.IGNORE_CASE),
@@ -769,13 +994,157 @@ object JvrLibraryMetadataProvider {
         return normalized.takeIf { it.isNotBlank() }
     }
 
-    private fun extractTitle(html: String): String? {
-        val titleRegex = Regex(
-            "<title\\b[^>]*>(.*?)</title>",
-            setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL)
+    private fun extractDetailsValueElements(document: Document): Map<String, Element> {
+        val detailsContent = document.select("div.content")
+            .firstOrNull { content ->
+                content.children()
+                    .firstOrNull { it.hasClass("label") }
+                    ?.text()
+                    ?.trim()
+                    ?.equals("Details", ignoreCase = true) == true
+            } ?: return emptyMap()
+
+        val detailsSection = detailsContent.children()
+            .firstOrNull { it.hasClass("section") } ?: return emptyMap()
+
+        val values = linkedMapOf<String, Element>()
+        for (line in detailsSection.children().filter { it.hasClass("line") }) {
+            val label = normalizeDetailsLabel(
+                line.children().firstOrNull { it.hasClass("label") }?.text()
+            ) ?: continue
+            val valueElement = line.children().firstOrNull { it.hasClass("value") } ?: continue
+            values[label] = valueElement
+        }
+        return values
+    }
+
+    private fun extractAvWikiDetailValues(document: Document): Map<String, Element> {
+        val definitionList = document.selectFirst("dl.dltable") ?: return emptyMap()
+        val items = definitionList.children()
+        val values = linkedMapOf<String, Element>()
+        var currentLabel: String? = null
+
+        for (item in items) {
+            when (item.tagName().lowercase()) {
+                "dt" -> currentLabel = normalizeText(item.text())
+                "dd" -> {
+                    val label = currentLabel ?: continue
+                    values[label] = item
+                    currentLabel = null
+                }
+            }
+        }
+
+        return values
+    }
+
+    private fun normalizeDetailsLabel(raw: String?): String? {
+        return normalizeText(raw)
+            ?.substringBefore(':')
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+    }
+
+    private fun parseReleaseDate(raw: String?): LocalDate? {
+        val normalized = normalizeText(raw) ?: return null
+        return try {
+            LocalDate.parse(normalized)
+        } catch (_: DateTimeParseException) {
+            null
+        }
+    }
+
+    private fun extractGenres(valueElement: Element?): List<String> {
+        if (valueElement == null) return emptyList()
+
+        val linkedGenres = linkedSetOf<String>()
+        val elements = valueElement.select("a")
+        if (elements.isNotEmpty()) {
+            elements.mapNotNullTo(linkedGenres) { normalizeText(it.text()) }
+        } else {
+            normalizeText(valueElement.text())?.let(linkedGenres::add)
+        }
+        return linkedGenres.toList()
+    }
+
+    private fun extractAvWikiCasts(valueElement: Element?): List<JvrCastMetadata> {
+        if (valueElement == null) return emptyList()
+
+        val linkedNames = linkedSetOf<String>()
+        val anchors = valueElement.select("a")
+        if (anchors.isNotEmpty()) {
+            anchors.mapNotNullTo(linkedNames) { normalizeText(it.text()) }
+        } else {
+            normalizeText(valueElement.text())
+                ?.split(Regex("\\s*[、,/]\\s*"))
+                ?.mapNotNull(::normalizeText)
+                ?.forEach(linkedNames::add)
+        }
+
+        return normalizeCasts(
+            linkedNames.map { name ->
+                JvrCastMetadata(
+                    performerId = buildCanonicalPerformerId(
+                        englishName = name,
+                        japaneseName = name,
+                    ),
+                    englishName = name,
+                    japaneseName = name,
+                )
+            }
         )
-        val raw = titleRegex.find(html)?.groupValues?.getOrNull(1) ?: return null
-        return decodeHtml(raw).replace(Regex("\\s+"), " ").trim().takeIf { it.isNotEmpty() }
+    }
+
+    private fun extractCasts(valueElement: Element?): List<JvrCastMetadata> {
+        if (valueElement == null) return emptyList()
+
+        val castElements = valueElement.children()
+            .filter { child -> child.tagName().equals("a", ignoreCase = true) }
+            .ifEmpty { valueElement.select("a") }
+
+        return normalizeCasts(castElements.mapNotNull(::parseCastMetadata))
+    }
+
+    private fun parseCastMetadata(castElement: Element): JvrCastMetadata? {
+        val imageUrl = castElement.selectFirst("img[src]")
+            ?.attr("src")
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+            ?.let(::toAbsoluteUrl)
+
+        val textContainer = castElement.children()
+            .firstOrNull { it.tagName().equals("div", ignoreCase = true) }
+
+        val nameCandidates = if (textContainer != null && textContainer.children().isNotEmpty()) {
+            textContainer.children().mapNotNull { normalizeText(it.text()) }
+        } else {
+            listOfNotNull(
+                normalizeText(castElement.ownText()),
+                normalizeText(castElement.text()),
+            ).distinct()
+        }
+
+        val englishName = nameCandidates.firstOrNull(::containsEnglishLetters)
+            ?: nameCandidates.firstOrNull()
+        val japaneseName = nameCandidates.firstOrNull(::containsJapaneseScript)
+            ?.takeUnless { it.equals(englishName, ignoreCase = true) }
+
+        if (englishName.isNullOrBlank() && japaneseName.isNullOrBlank()) {
+            return null
+        }
+
+        val performerId = buildCanonicalPerformerId(
+            englishName = englishName,
+            japaneseName = japaneseName,
+        )
+
+        return JvrCastMetadata(
+            performerId = performerId,
+            englishName = englishName ?: japaneseName.orEmpty(),
+            japaneseName = japaneseName,
+            profileImageUrl = imageUrl,
+            remoteProfileImageUrl = imageUrl,
+        )
     }
 
     private fun cleanDescriptionTitle(description: String?): String? {
@@ -866,6 +1235,86 @@ object JvrLibraryMetadataProvider {
         return code
     }
 
+    private fun normalizeGenres(genres: List<String>): List<String> {
+        return genres
+            .mapNotNull(::normalizeText)
+            .distinct()
+    }
+
+    private fun normalizeCasts(casts: List<JvrCastMetadata>): List<JvrCastMetadata> {
+        return casts.mapNotNull { cast ->
+            val englishName = normalizeText(cast.englishName)
+            val japaneseName = normalizeText(cast.japaneseName)
+                ?.takeUnless {
+                    it.equals(englishName, ignoreCase = true) &&
+                        !englishName.isNullOrBlank() &&
+                        containsEnglishLetters(englishName)
+                }
+            val performerId = buildCanonicalPerformerId(
+                englishName = englishName,
+                japaneseName = japaneseName,
+                fallbackId = cast.performerId,
+            )
+            val remoteProfileImageUrl = cast.remoteProfileImageUrl
+                ?.trim()
+                ?.takeIf { it.isNotBlank() }
+                ?.takeUnless(::isLocalImageUrl)
+                ?.let(::toAbsoluteUrl)
+                ?: cast.profileImageUrl
+                    ?.trim()
+                    ?.takeIf { it.isNotBlank() }
+                    ?.takeUnless(::isLocalImageUrl)
+                    ?.let(::toAbsoluteUrl)
+            val localProfileImageUrl = cast.profileImageUrl
+                ?.trim()
+                ?.takeIf { it.isNotBlank() }
+                ?.let(::validateLocalImageUrl)
+
+            val resolvedEnglishName = englishName ?: japaneseName
+            if (resolvedEnglishName.isNullOrBlank()) {
+                null
+            } else {
+                JvrCastMetadata(
+                    performerId = performerId,
+                    englishName = resolvedEnglishName,
+                    japaneseName = japaneseName,
+                    profileImageUrl = localProfileImageUrl ?: remoteProfileImageUrl,
+                    remoteProfileImageUrl = remoteProfileImageUrl,
+                )
+            }
+        }.distinctBy { it.performerId }
+    }
+
+    private fun buildCanonicalPerformerId(
+        englishName: String?,
+        japaneseName: String?,
+        fallbackId: String? = null,
+    ): String {
+        val canonicalName = normalizeText(japaneseName)
+            ?: normalizeText(englishName)
+            ?: fallbackId?.trim()?.takeIf { it.isNotBlank() }
+            ?: "unknown-performer"
+        val slug = canonicalName.lowercase()
+            .replace(Regex("[^a-z0-9\\u3040-\\u30ff\\u31f0-\\u31ff\\u4e00-\\u9fff]+"), "_")
+            .trim('_')
+            .ifBlank { canonicalName.hashCode().toUInt().toString(16) }
+        return "performer:$slug"
+    }
+
+    private fun resolveStoredPerformerImageUrl(performer: JvrPerformer): String? {
+        return performer.localProfileImageUrl
+            ?.let(::validateLocalImageUrl)
+            ?: performer.remoteProfileImageUrl
+    }
+
+    private fun normalizeText(raw: String?): String? {
+        if (raw.isNullOrBlank()) return null
+        return decodeHtml(raw)
+            .replace(Regex("\\s+"), " ")
+            .trim()
+            .takeIf { it.isNotEmpty() }
+    }
+
     private fun containsJapaneseScript(text: String?): Boolean {
         if (text.isNullOrBlank()) return false
         return Regex("[\\u3040-\\u30FF\\u31F0-\\u31FF\\uFF66-\\uFF9D]").containsMatchIn(text)
@@ -898,26 +1347,7 @@ object JvrLibraryMetadataProvider {
         }
     }
 
-    @Suppress("DEPRECATION")
     private fun decodeHtml(raw: String): String {
-        return Html.fromHtml(raw, Html.FROM_HTML_MODE_LEGACY).toString()
+        return Jsoup.parse(raw).text()
     }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
