@@ -4,12 +4,16 @@ import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import blackark.app.vr.data.database.dao.FavoriteVideoDao
 import blackark.app.vr.data.database.dao.ServerDao
+import blackark.app.vr.data.database.dao.VideoDisplaySettingsDao
 import blackark.app.vr.data.database.dao.VideoDao
 import blackark.app.vr.data.database.dao.VirtualGroupMetadataDao
+import blackark.app.vr.data.database.entity.FavoriteVideo
 import blackark.app.vr.data.database.entity.JvrPerformer
 import blackark.app.vr.data.database.entity.RecentVideo
 import blackark.app.vr.data.database.entity.SavedServer
+import blackark.app.vr.data.database.entity.VideoDisplaySettings
 import blackark.app.vr.data.database.entity.VirtualGroupMetadata
 import blackark.app.vr.data.database.entity.VirtualGroupMetadataGenre
 import blackark.app.vr.data.database.entity.VirtualGroupMetadataPerformerCrossRef
@@ -18,17 +22,21 @@ import blackark.app.vr.data.database.entity.VirtualGroupMetadataPerformerCrossRe
     entities = [
         SavedServer::class,
         RecentVideo::class,
+        FavoriteVideo::class,
+        VideoDisplaySettings::class,
         VirtualGroupMetadata::class,
         VirtualGroupMetadataGenre::class,
         JvrPerformer::class,
         VirtualGroupMetadataPerformerCrossRef::class,
     ],
-    version = 9,
+    version = 11,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun serverDao(): ServerDao
     abstract fun videoDao(): VideoDao
+    abstract fun favoriteVideoDao(): FavoriteVideoDao
+    abstract fun videoDisplaySettingsDao(): VideoDisplaySettingsDao
     abstract fun virtualGroupMetadataDao(): VirtualGroupMetadataDao
 
     companion object {

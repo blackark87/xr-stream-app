@@ -1,9 +1,13 @@
 package blackark.app.vr
 
+import androidx.xr.runtime.math.Pose
 import blackark.app.vr.network.SMBClient
 import blackark.app.vr.network.SMBConfig
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 
 data class ControllerAxisEvent(
     val x: Float,
@@ -30,9 +34,18 @@ object AppState {
         onBufferOverflow = BufferOverflow.DROP_OLDEST,
     )
 
+    private val _dashboardPanelPose = MutableStateFlow<Pose?>(null)
+    val dashboardPanelPose: StateFlow<Pose?> = _dashboardPanelPose.asStateFlow()
+
     fun setSMBClient(client: SMBClient, config: SMBConfig) {
         smbClient = client
         smbConfig = config
+    }
+
+    fun updateDashboardPanelPose(pose: Pose) {
+        if (_dashboardPanelPose.value != pose) {
+            _dashboardPanelPose.value = Pose(pose)
+        }
     }
 
     fun clear() {
@@ -41,4 +54,3 @@ object AppState {
         smbConfig = null
     }
 }
-

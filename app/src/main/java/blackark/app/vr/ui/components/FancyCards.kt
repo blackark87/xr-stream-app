@@ -52,10 +52,12 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import blackark.app.vr.data.database.entity.RecentVideo
+import blackark.app.vr.R
 import blackark.app.vr.data.database.entity.SavedServer
+import blackark.app.vr.data.model.LibraryVideoItem
 import blackark.app.vr.ui.theme.AccentGold
 import blackark.app.vr.ui.theme.CardBackground
 import blackark.app.vr.ui.theme.CardBackgroundHover
@@ -136,7 +138,7 @@ fun LocalStorageCard(
             ) {
                 Icon(
                     imageVector = Icons.Filled.Home, // Changed from Phone to Home
-                    contentDescription = "Local Storage",
+                    contentDescription = stringResource(R.string.local_storage),
                     tint = StreamingBlack,
                     modifier = Modifier.size(32.dp)
                 )
@@ -149,7 +151,7 @@ fun LocalStorageCard(
                 modifier = Modifier.weight(1f)
             ) {
                 Text(
-                    text = "Local Storage",
+                    text = stringResource(R.string.local_storage),
                     style = MaterialTheme.typography.titleMedium,
                     color = TextPrimary,
                     maxLines = 1,
@@ -157,7 +159,7 @@ fun LocalStorageCard(
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = "Device internal storage",
+                    text = stringResource(R.string.device_internal_storage),
                     style = MaterialTheme.typography.bodySmall,
                     color = TextSecondary,
                     maxLines = 1,
@@ -169,7 +171,7 @@ fun LocalStorageCard(
             if (isSelected) {
                 Icon(
                     imageVector = Icons.Filled.CheckCircle,
-                    contentDescription = "Selected",
+                    contentDescription = stringResource(R.string.selected),
                     tint = SuccessGreen,
                     modifier = Modifier.size(24.dp)
                 )
@@ -260,7 +262,7 @@ fun FancyServerCard(
             ) {
                 Icon(
                     imageVector = Icons.Filled.Storage,
-                    contentDescription = "Server",
+                    contentDescription = stringResource(R.string.server),
                     tint = TextPrimary,
                     modifier = Modifier.size(28.dp) // Reduced size from 32.dp
                 )
@@ -288,7 +290,7 @@ fun FancyServerCard(
             ) {
                 Icon(
                     imageVector = Icons.Filled.Edit,
-                    contentDescription = "Edit Server",
+                    contentDescription = stringResource(R.string.edit_server),
                     tint = TextSecondary
                 )
             }
@@ -300,7 +302,7 @@ fun FancyServerCard(
             ) {
                 Icon(
                     imageVector = Icons.Filled.Delete,
-                    contentDescription = "Delete Server",
+                    contentDescription = stringResource(R.string.delete_server),
                     tint = TextSecondary
                 )
             }
@@ -313,13 +315,16 @@ fun FancyServerCard(
  */
 @Composable
 fun FancyMovieCard(
-    video: RecentVideo,
+    video: LibraryVideoItem,
     isFavorite: Boolean,
     displayTitleOverride: String? = null,
     allowMetadataPoster: Boolean = true,
     isPreviewFocused: Boolean = false,
     onClick: () -> Unit,
     onFavoriteToggle: () -> Unit,
+    secondaryActionIcon: androidx.compose.ui.graphics.vector.ImageVector? = null,
+    secondaryActionContentDescription: String? = null,
+    onSecondaryActionClick: (() -> Unit)? = null,
     onRequestPreview: (() -> Unit)? = null,
     onHoverFocusChanged: ((Boolean) -> Unit)? = null,
     modifier: Modifier = Modifier
@@ -417,7 +422,7 @@ fun FancyMovieCard(
                                 .memoryCachePolicy(coil3.request.CachePolicy.ENABLED)
                                 .build(),
                             imageLoader = ThumbnailImageLoaderProvider.get(androidx.compose.ui.platform.LocalContext.current),
-                            contentDescription = "Video thumbnail",
+                            contentDescription = stringResource(R.string.video_thumbnail),
                             modifier = Modifier.fillMaxSize(),
                             contentScale = ContentScale.Crop,
                             error = rememberVectorPainter(Icons.Filled.Movie)
@@ -425,7 +430,7 @@ fun FancyMovieCard(
                     } else {
                         Icon(
                             imageVector = Icons.Filled.Movie,
-                            contentDescription = "Movie",
+                            contentDescription = stringResource(R.string.movie),
                             tint = TextSecondary,
                             modifier = Modifier.size(32.dp)
                         )
@@ -481,7 +486,10 @@ fun FancyMovieCard(
                             )
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
-                                text = "${(progress * 100).toInt()}% watched",
+                                text = stringResource(
+                                    R.string.watched_progress_percent,
+                                    (progress * 100).toInt(),
+                                ),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = TextTertiary
                             )
@@ -496,9 +504,26 @@ fun FancyMovieCard(
                 ) {
                     Icon(
                         imageVector = if (isFavorite) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
-                        contentDescription = if (isFavorite) "Remove from favorites" else "Add to favorites",
+                        contentDescription = if (isFavorite) {
+                            stringResource(R.string.remove_from_favorites)
+                        } else {
+                            stringResource(R.string.add_to_favorites)
+                        },
                         tint = if (isFavorite) NetflixRed else TextSecondary
                     )
+                }
+
+                if (secondaryActionIcon != null && onSecondaryActionClick != null) {
+                    IconButton(
+                        onClick = onSecondaryActionClick,
+                        modifier = Modifier.size(40.dp)
+                    ) {
+                        Icon(
+                            imageVector = secondaryActionIcon,
+                            contentDescription = secondaryActionContentDescription,
+                            tint = TextSecondary
+                        )
+                    }
                 }
             }
         }
@@ -592,7 +617,7 @@ fun FancyFileCard(
                                 .memoryCachePolicy(coil3.request.CachePolicy.ENABLED)
                                 .build(),
                             imageLoader = ThumbnailImageLoaderProvider.get(androidx.compose.ui.platform.LocalContext.current),
-                            contentDescription = "Video thumbnail",
+                            contentDescription = stringResource(R.string.video_thumbnail),
                             modifier = Modifier.fillMaxSize(),
                             contentScale = ContentScale.Crop,
                             onState = { state ->
@@ -659,7 +684,11 @@ fun FancyFileCard(
                 ) {
                     Icon(
                         imageVector = if (isFavorite) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
-                        contentDescription = if (isFavorite) "Remove from favorites" else "Add to favorites",
+                        contentDescription = if (isFavorite) {
+                            stringResource(R.string.remove_from_favorites)
+                        } else {
+                            stringResource(R.string.add_to_favorites)
+                        },
                         tint = if (isFavorite) NetflixRed else TextSecondary
                     )
                 }
@@ -668,7 +697,7 @@ fun FancyFileCard(
             if (isSelected) {
                 Icon(
                     imageVector = Icons.Filled.CheckCircle,
-                    contentDescription = "Selected for deletion",
+                    contentDescription = stringResource(R.string.selected_for_deletion),
                     tint = AccentGold,
                     modifier = Modifier
                         .size(20.dp)

@@ -117,7 +117,9 @@ fun XRPlaybackControls(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 IconButton(
-                    onClick = onNavigateBack,
+                    onClick = {
+                        onNavigateBack()
+                    },
                     modifier = Modifier
                         .size(46.dp)
                         .clip(CircleShape)
@@ -225,7 +227,9 @@ fun XRPlaybackControls(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 PlaybackIconControlButton(
-                    onClick = { videoPlayerViewModel.playPreviousVideo() },
+                    onClick = {
+                        videoPlayerViewModel.playPreviousVideo()
+                    },
                     imageVector = Icons.Filled.SkipPrevious,
                     contentDescription = "Previous Video",
                     containerColor = sectionSurface,
@@ -236,7 +240,9 @@ fun XRPlaybackControls(
                 Spacer(modifier = Modifier.width(12.dp))
 
                 PlaybackIconControlButton(
-                    onClick = { videoPlayerViewModel.skipBackward() },
+                    onClick = {
+                        videoPlayerViewModel.skipBackward()
+                    },
                     imageVector = Icons.Filled.FastRewind,
                     contentDescription = "Rewind",
                     containerColor = sectionSurface,
@@ -266,7 +272,9 @@ fun XRPlaybackControls(
                 Spacer(modifier = Modifier.width(18.dp))
 
                 PlaybackIconControlButton(
-                    onClick = { videoPlayerViewModel.skipForward() },
+                    onClick = {
+                        videoPlayerViewModel.skipForward()
+                    },
                     imageVector = Icons.Filled.FastForward,
                     contentDescription = "Fast Forward",
                     containerColor = sectionSurface,
@@ -277,7 +285,9 @@ fun XRPlaybackControls(
                 Spacer(modifier = Modifier.width(12.dp))
 
                 PlaybackIconControlButton(
-                    onClick = { videoPlayerViewModel.playNextVideo() },
+                    onClick = {
+                        videoPlayerViewModel.playNextVideo()
+                    },
                     imageVector = Icons.Filled.SkipNext,
                     contentDescription = "Next Video",
                     containerColor = sectionSurface,
@@ -296,7 +306,9 @@ fun XRPlaybackControls(
                     label = "Speed",
                     value = "${prettySpeed(playerState.playbackSpeed)}x",
                     selected = playerState.activePlaybackMenu == PlaybackMenu.Speed,
-                    onClick = { videoPlayerViewModel.togglePlaybackMenu(PlaybackMenu.Speed) },
+                    onClick = {
+                        videoPlayerViewModel.togglePlaybackMenu(PlaybackMenu.Speed)
+                    },
                     modifier = Modifier.weight(1f),
                     activeContainerColor = chipActive,
                     inactiveContainerColor = chipIdle,
@@ -309,7 +321,9 @@ fun XRPlaybackControls(
                     label = "Format",
                     value = playerState.videoFormat.name.removePrefix("Format"),
                     selected = playerState.activePlaybackMenu == PlaybackMenu.Display,
-                    onClick = { videoPlayerViewModel.togglePlaybackMenu(PlaybackMenu.Display) },
+                    onClick = {
+                        videoPlayerViewModel.togglePlaybackMenu(PlaybackMenu.Display)
+                    },
                     modifier = Modifier.weight(1f),
                     activeContainerColor = chipActive,
                     inactiveContainerColor = chipIdle,
@@ -322,7 +336,9 @@ fun XRPlaybackControls(
                     label = "Volume",
                     value = "${(playerState.volume * 100).roundToInt()}%",
                     selected = playerState.activePlaybackMenu == PlaybackMenu.Volume,
-                    onClick = { videoPlayerViewModel.togglePlaybackMenu(PlaybackMenu.Volume) },
+                    onClick = {
+                        videoPlayerViewModel.togglePlaybackMenu(PlaybackMenu.Volume)
+                    },
                     modifier = Modifier.weight(1f),
                     activeContainerColor = chipActive,
                     inactiveContainerColor = chipIdle,
@@ -378,7 +394,9 @@ fun XRPlaybackControls(
                             PlaybackOptionButton(
                                 text = format.name.removePrefix("Format"),
                                 selected = playerState.videoFormat == format,
-                                onClick = { videoPlayerViewModel.setVideoFormat(format) },
+                                onClick = {
+                                    videoPlayerViewModel.setVideoFormat(format)
+                                },
                                 modifier = Modifier.weight(1f),
                                 selectedContainerColor = accentStrong,
                                 selectedContentColor = onAccent,
@@ -406,7 +424,9 @@ fun XRPlaybackControls(
                             PlaybackOptionButton(
                                 text = prettyStereoMode(mode),
                                 selected = playerState.stereoMode == mode,
-                                onClick = { videoPlayerViewModel.setStereoMode(mode) },
+                                onClick = {
+                                    videoPlayerViewModel.setStereoMode(mode)
+                                },
                                 modifier = Modifier.weight(1f),
                                 selectedContainerColor = accentStrong,
                                 selectedContentColor = onAccent,
@@ -448,7 +468,9 @@ fun XRPlaybackControls(
 
                     Slider(
                         value = playerState.volume,
-                        onValueChange = { videoPlayerViewModel.setVolume(it) },
+                        onValueChange = {
+                            videoPlayerViewModel.setVolume(it)
+                        },
                         colors = SliderDefaults.colors(
                             thumbColor = accentStrong,
                             activeTrackColor = accentStrong,

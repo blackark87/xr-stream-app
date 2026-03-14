@@ -1,38 +1,53 @@
 package blackark.app.vr.ui.screens
 
 import android.util.Log
-import android.view.KeyEvent
-import android.view.MotionEvent
-import android.view.View
 import androidx.activity.compose.BackHandler
 import androidx.annotation.OptIn
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusable
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.rememberScrollableState
+import androidx.compose.foundation.gestures.scrollable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.media3.common.util.UnstableApi
@@ -42,6 +57,7 @@ import androidx.xr.compose.platform.LocalSession
 import androidx.xr.compose.platform.LocalSpatialCapabilities
 import androidx.xr.compose.spatial.Subspace
 import androidx.xr.compose.subspace.MovePolicy
+import androidx.xr.compose.subspace.ResizePolicy
 import androidx.xr.compose.subspace.SpatialExternalSurface
 import androidx.xr.compose.subspace.SpatialExternalSurface180Hemisphere
 import androidx.xr.compose.subspace.SpatialExternalSurface360Sphere
@@ -55,13 +71,16 @@ import androidx.xr.compose.subspace.layout.fillMaxSize
 import androidx.xr.compose.subspace.layout.height
 import androidx.xr.compose.subspace.layout.offset
 import androidx.xr.compose.subspace.layout.rotate
-import androidx.xr.compose.subspace.layout.rotateToLookAtUser
 import androidx.xr.compose.subspace.layout.width
+import androidx.xr.compose.unit.DpVolumeSize
 import androidx.xr.runtime.DeviceTrackingMode
 import androidx.xr.runtime.SessionConfigureSuccess
+import androidx.xr.runtime.math.Pose
 import androidx.xr.runtime.math.Quaternion
 import androidx.xr.runtime.math.Vector3
+import androidx.xr.scenecore.InputEvent
 import blackark.app.vr.data.database.AppDatabase
+import blackark.app.vr.data.repository.VideoDisplaySettingsRepository
 import blackark.app.vr.data.repository.VideoRepository
 import blackark.app.vr.ui.components.XRPlaybackControls
 import blackark.app.vr.ui.viewmodel.PlayerEvent
@@ -71,7 +90,102 @@ import blackark.app.vr.ui.viewmodel.VideoPlayerViewModel
 import blackark.app.vr.ui.viewmodel.VideoPlayerViewModelFactory
 
 private const val TAG = "VideoPlayerScreen"
-private const val CONTROLLER_LOG_PREFIX = "[6DoF]"
+
+private fun clickInteractionPolicy(
+    isEnabled: Boolean = true,
+    onClick: (() -> Unit)? = null,
+): InteractionPolicy =
+    InteractionPolicy(isEnabled = isEnabled) { event ->
+        if (onClick != null && event.action == InputEvent.Action.UP && event.hitPosition != null) {
+            onClick()
+        }
+    }
+
+@Composable
+private fun rememberPlaybackScrollState(
+    onDelta: (Float) -> Unit = {},
+) : androidx.compose.foundation.gestures.ScrollableState {
+    val currentOnDelta = rememberUpdatedState(onDelta)
+    return rememberScrollableState { delta ->
+        currentOnDelta.value(delta)
+        delta
+    }
+}
+
+@Composable
+private fun PlaybackScrollInputOverlay(
+    showControls: Boolean,
+    onToggleControls: () -> Unit,
+    onKeyUp: ((android.view.KeyEvent) -> Boolean)? = null,
+    onHorizontalScrollDelta: (Float) -> Unit = {},
+    onVerticalScrollDelta: (Float) -> Unit = {},
+    controlsAlignment: Alignment = Alignment.Center,
+    controlsPadding: PaddingValues = PaddingValues(0.dp),
+    controlsModifier: Modifier = Modifier,
+    controlsContent: @Composable (() -> Unit)? = null,
+) {
+    val verticalScrollState = rememberPlaybackScrollState(onDelta = onVerticalScrollDelta)
+    val horizontalScrollState = rememberPlaybackScrollState(onDelta = onHorizontalScrollDelta)
+    val focusRequester = remember { FocusRequester() }
+
+    LaunchedEffect(showControls) {
+        focusRequester.requestFocus()
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Transparent)
+            .focusRequester(focusRequester)
+            .onPreviewKeyEvent { keyEvent ->
+                if (keyEvent.type != KeyEventType.KeyUp) {
+                    return@onPreviewKeyEvent false
+                }
+                onKeyUp?.invoke(keyEvent.nativeKeyEvent) ?: false
+            }
+            .focusable()
+            .scrollable(
+                state = verticalScrollState,
+                orientation = Orientation.Vertical,
+            )
+            .scrollable(
+                state = horizontalScrollState,
+                orientation = Orientation.Horizontal,
+            )
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+            ) {
+                onToggleControls()
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        if (showControls && controlsContent != null) {
+            Box(
+                modifier = controlsModifier
+                    .align(controlsAlignment)
+                    .padding(controlsPadding),
+            ) {
+                controlsContent()
+            }
+        }
+    }
+}
+
+private val DEFAULT_FLAT_PANEL_WIDTH = 1280.dp
+private val DEFAULT_FLAT_PANEL_HEIGHT = 720.dp
+private val MIN_FLAT_PANEL_SIZE =
+    DpVolumeSize(
+        width = 960.dp,
+        height = 540.dp,
+        depth = 0.dp,
+    )
+private val MAX_FLAT_PANEL_SIZE =
+    DpVolumeSize(
+        width = 2560.dp,
+        height = 1440.dp,
+        depth = 0.dp,
+    )
 
 private data class HeadFollowPose(
     val rotation: Quaternion,
@@ -86,15 +200,26 @@ fun VideoPlayerScreen(
     onNavigateBack: () -> Unit,
 ) {
     val context = LocalContext.current
-    val rootView = LocalView.current
     val database = remember { AppDatabase.getDatabase(context) }
-    val videoRepository = remember { VideoRepository(database.videoDao()) }
+    val videoRepository = remember {
+        VideoRepository(
+            database.videoDao(),
+            database.favoriteVideoDao(),
+        )
+    }
+    val videoDisplaySettingsRepository =
+        remember { VideoDisplaySettingsRepository(database.videoDisplaySettingsDao()) }
 
     val videoPlayerViewModel: VideoPlayerViewModel = viewModel(
-        factory = VideoPlayerViewModelFactory(videoRepository),
+        factory = VideoPlayerViewModelFactory(
+            videoRepository,
+            videoDisplaySettingsRepository,
+        ),
     )
 
     val playerState by videoPlayerViewModel.state.collectAsState()
+    val dashboardPanelPose by blackark.app.vr.AppState.dashboardPanelPose.collectAsState()
+    var isNavigatingBack by remember { mutableStateOf(false) }
 
     LaunchedEffect(videoFilePath, videoFileName) {
         val smbConfig = blackark.app.vr.AppState.smbConfig
@@ -114,82 +239,24 @@ fun VideoPlayerScreen(
         videoPlayerViewModel.playerEvents.collect { event ->
             when (event) {
                 PlayerEvent.NavigateBack -> {
-                    // Hide interactive chrome immediately, then let the destination transition in.
+                    // Hide player chrome, pause immediately, and let NavHost tear the screen down.
+                    isNavigatingBack = true
                     videoPlayerViewModel.setControlsVisibility(false)
                     videoPlayerViewModel.pause()
-                    videoPlayerViewModel.releasePlayerBeforeNavigateBack()
                     onNavigateBack()
                 }
             }
         }
     }
-    DisposableEffect(Unit) {
-        onDispose { videoPlayerViewModel.releasePlayerAsync() }
-    }
-
-    DisposableEffect(rootView) {
-        rootView.isFocusable = true
-        rootView.isFocusableInTouchMode = true
-        val focusGranted = rootView.requestFocus()
-        Log.i(
-            TAG,
-            "$CONTROLLER_LOG_PREFIX playback root focus requested " +
-                    "granted=$focusGranted hasFocus=${rootView.hasFocus()} view=${rootView::class.java.simpleName}",
-        )
-
-        val deferredFocusAttempt =
-            Runnable {
-                val deferredGranted = rootView.requestFocus()
-                Log.i(
-                    TAG,
-                    "$CONTROLLER_LOG_PREFIX playback root deferred focus request " +
-                            "granted=$deferredGranted hasFocus=${rootView.hasFocus()} " +
-                            "view=${rootView::class.java.simpleName}",
-                )
-            }
-        rootView.post(deferredFocusAttempt)
-        rootView.postDelayed(deferredFocusAttempt, 250L)
-
-        val genericMotionListener =
-            View.OnGenericMotionListener { _, event ->
-                Log.i(
-                    TAG,
-                    "$CONTROLLER_LOG_PREFIX playback root generic motion " +
-                            "deviceId=${event.deviceId} source=${event.source} " +
-                            "action=${MotionEvent.actionToString(event.action)} " +
-                            "x=${event.getAxisValue(MotionEvent.AXIS_X)} " +
-                            "y=${event.getAxisValue(MotionEvent.AXIS_Y)} " +
-                            "hatX=${event.getAxisValue(MotionEvent.AXIS_HAT_X)} " +
-                            "hatY=${event.getAxisValue(MotionEvent.AXIS_HAT_Y)}",
-                )
-                false
-            }
-        val keyListener =
-            View.OnKeyListener { _, keyCode, event ->
-                Log.i(
-                    TAG,
-                    "$CONTROLLER_LOG_PREFIX playback root key event " +
-                            "deviceId=${event.deviceId} source=${event.source} " +
-                            "action=${event.action} keyCode=${KeyEvent.keyCodeToString(keyCode)}",
-                )
-                false
-            }
-        rootView.setOnGenericMotionListener(genericMotionListener)
-        rootView.setOnKeyListener(keyListener)
-
-        onDispose {
-            rootView.removeCallbacks(deferredFocusAttempt)
-            rootView.setOnGenericMotionListener(null)
-            rootView.setOnKeyListener(null)
-        }
-    }
-
     Subspace {
-        SpatialVideoPlayerContent(
-            videoPlayerViewModel = videoPlayerViewModel,
-            playerState = playerState,
-            onNavigateBack = { videoPlayerViewModel.requestNavigateBack() },
-        )
+        if (!isNavigatingBack) {
+            SpatialVideoPlayerContent(
+                videoPlayerViewModel = videoPlayerViewModel,
+                playerState = playerState,
+                dashboardPanelPose = dashboardPanelPose,
+                onNavigateBack = { videoPlayerViewModel.requestNavigateBack() },
+            )
+        }
     }
 }
 
@@ -198,11 +265,28 @@ fun VideoPlayerScreen(
 fun SpatialVideoPlayerContent(
     videoPlayerViewModel: VideoPlayerViewModel,
     playerState: VideoPlayerState,
+    dashboardPanelPose: Pose?,
     onNavigateBack: () -> Unit,
 ) {
     val exoPlayer by videoPlayerViewModel.playerFlow.collectAsState()
     val showControls = playerState.showControls
     val session = LocalSession.current
+    val density = LocalDensity.current
+    var flatPanelWidth by remember { mutableStateOf(DEFAULT_FLAT_PANEL_WIDTH) }
+    var flatPanelHeight by remember { mutableStateOf(DEFAULT_FLAT_PANEL_HEIGHT) }
+    val flatPanelResizePolicy =
+        ResizePolicy(
+            minimumSize = MIN_FLAT_PANEL_SIZE,
+            maximumSize = MAX_FLAT_PANEL_SIZE,
+            shouldMaintainAspectRatio = true,
+            onSizeChange = { newSize ->
+                if (newSize.width > 0 && newSize.height > 0) {
+                    flatPanelWidth = with(density) { newSize.width.toDp() }
+                    flatPanelHeight = with(density) { newSize.height.toDp() }
+                }
+                true
+            },
+        )
 
     BackHandler {
         onNavigateBack()
@@ -227,15 +311,14 @@ fun SpatialVideoPlayerContent(
     val enableHeadFollowIn2D = playerState.videoFormat == VideoFormat.Format2D
     // Disabled for 180 stereo because the custom lock-rotation path can blank hemisphere rendering.
     val enableHeadFollowIn180Stereo = false
-    val shouldEnableHeadFollow = enableHeadFollowIn2D
 
     val headFollowPose by produceState<HeadFollowPose?>(
         initialValue = null,
         session,
-        shouldEnableHeadFollow,
+        enableHeadFollowIn2D,
     ) {
         value = null
-        if (!shouldEnableHeadFollow) return@produceState
+        if (!enableHeadFollowIn2D) return@produceState
 
         val activeSession = session ?: return@produceState
         val arDevice = runCatching { ArDevice.getInstance(activeSession) }.getOrNull()
@@ -274,9 +357,9 @@ fun SpatialVideoPlayerContent(
     }
 
     // Device tracking must be enabled for head-follow behavior.
-    LaunchedEffect(session, shouldEnableHeadFollow) {
+    LaunchedEffect(session, enableHeadFollowIn2D) {
         val activeSession = session ?: return@LaunchedEffect
-        if (!shouldEnableHeadFollow) return@LaunchedEffect
+        if (!enableHeadFollowIn2D) return@LaunchedEffect
 
         val currentConfig = activeSession.config
         if (currentConfig.deviceTracking != DeviceTrackingMode.DISABLED) {
@@ -286,19 +369,8 @@ fun SpatialVideoPlayerContent(
         val updatedConfig =
             currentConfig.copy(deviceTracking = DeviceTrackingMode.LAST_KNOWN)
         val result = activeSession.configure(updatedConfig)
-        if (result is SessionConfigureSuccess) {
-            Log.d(TAG, "Enabled XR device tracking for requested head-follow modes")
-        } else {
+        if (result !is SessionConfigureSuccess) {
             Log.w(TAG, "Failed to enable XR device tracking: ${result::class.java.simpleName}")
-        }
-    }
-
-    LaunchedEffect(immersiveRequested, spatialCapabilities.isContent3dEnabled) {
-        if (immersiveRequested && !supportsImmersiveDome) {
-            Log.w(
-                TAG,
-                "Falling back to flat surface: content3D=${spatialCapabilities.isContent3dEnabled}",
-            )
         }
     }
 
@@ -310,7 +382,7 @@ fun SpatialVideoPlayerContent(
 
     val toggleInteractionPolicy =
         if (isSurfaceReady && !showControls) {
-            InteractionPolicy.clickable {
+            clickInteractionPolicy {
                 videoPlayerViewModel.toggleControls()
             }
         } else {
@@ -322,7 +394,13 @@ fun SpatialVideoPlayerContent(
         if (playerState.videoFile == null || playerState.videoFormat != VideoFormat.Format2D) {
             return
         }
-        PlayerLoadingPanel(errorMessage = playerState.error)
+        PlayerLoadingPanel(
+            errorMessage = playerState.error,
+            dashboardPanelPose = dashboardPanelPose,
+            panelWidth = flatPanelWidth,
+            panelHeight = flatPanelHeight,
+            resizePolicy = flatPanelResizePolicy,
+        )
         return
     }
 
@@ -332,35 +410,48 @@ fun SpatialVideoPlayerContent(
             videoFormat = playerState.videoFormat,
             stereoMode = xrStereoMode,
             interactionPolicy = toggleInteractionPolicy,
-            headLockedRotation180 = if (enableHeadFollowIn180Stereo) headFollowPose?.rotation else null,
+            headLockedRotation180 =
+                when {
+                    enableHeadFollowIn180Stereo -> headFollowPose?.rotation
+                    else -> dashboardPanelPose?.rotation
+                },
         )
 
-        if (showControls && isSurfaceReady) {
-            val immersiveControlsModifier =
+        if (isSurfaceReady) {
+            val immersiveControlsSizeModifier =
                 if (playerState.stereoMode == blackark.app.vr.ui.viewmodel.StereoMode.Mono) {
-                    SubspaceModifier
-                        .width(1280.dp)
-                        .height(720.dp)
+                    Modifier
+                        .fillMaxWidth(0.82f)
+                        .widthIn(max = 1180.dp)
                 } else {
-                    // Larger panel in stereo to reduce readability strain.
-                    SubspaceModifier
-                        .width(1520.dp)
-                        .height(900.dp)
-                        .offset(y = 60.dp)
+                    Modifier
+                        .fillMaxWidth(0.9f)
+                        .widthIn(max = 1380.dp)
                 }
-
-            SpatialPanel(modifier = immersiveControlsModifier) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(Color.Transparent)
-                        .clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null,
-                        ) {
-                            videoPlayerViewModel.toggleControls()
+            SpatialPanel(
+                modifier = SubspaceModifier.fillMaxSize(),
+                interactionPolicy = clickInteractionPolicy(),
+            ) {
+                PlaybackScrollInputOverlay(
+                    showControls = showControls,
+                    onKeyUp = { event ->
+                        videoPlayerViewModel.dispatchPlaybackKeyEvent(event)
+                    },
+                    controlsAlignment = Alignment.BottomCenter,
+                    controlsPadding =
+                        if (playerState.stereoMode == blackark.app.vr.ui.viewmodel.StereoMode.Mono) {
+                            PaddingValues(start = 24.dp, end = 24.dp, bottom = 36.dp)
+                        } else {
+                            PaddingValues(start = 24.dp, end = 24.dp, bottom = 64.dp)
                         },
-                    contentAlignment = Alignment.Center,
+                    controlsModifier = immersiveControlsSizeModifier,
+                    onToggleControls = { videoPlayerViewModel.toggleControls() },
+                    onHorizontalScrollDelta = { delta ->
+                        videoPlayerViewModel.handlePlaybackHorizontalScroll(delta)
+                    },
+                    onVerticalScrollDelta = { delta ->
+                        videoPlayerViewModel.handlePlaybackVerticalScroll(delta)
+                    },
                 ) {
                     XRPlaybackControls(
                         videoPlayerViewModel = videoPlayerViewModel,
@@ -380,20 +471,35 @@ fun SpatialVideoPlayerContent(
             videoPlayerViewModel = videoPlayerViewModel,
             playerState = playerState,
             onNavigateBack = { videoPlayerViewModel.requestNavigateBack() },
-            headFollowPose = if (enableHeadFollowIn2D) headFollowPose else null,
+            dashboardPanelPose = dashboardPanelPose,
+            headFollowPose = if (enableHeadFollowIn2D && dashboardPanelPose == null) headFollowPose else null,
+            panelWidth = flatPanelWidth,
+            panelHeight = flatPanelHeight,
+            resizePolicy = flatPanelResizePolicy,
         )
     }
 }
 
 @Composable
-private fun PlayerLoadingPanel(errorMessage: String?) {
+private fun PlayerLoadingPanel(
+    errorMessage: String?,
+    dashboardPanelPose: Pose?,
+    panelWidth: Dp,
+    panelHeight: Dp,
+    resizePolicy: ResizePolicy,
+) {
     val colors = MaterialTheme.colorScheme
+    val density = LocalDensity.current
 
     SpatialPanel(
-        modifier = SubspaceModifier
-            .width(1280.dp)
-            .height(720.dp),
+        modifier = buildPanelModifierFromSavedPose(
+            dashboardPanelPose = dashboardPanelPose,
+            density = density,
+            panelWidth = panelWidth,
+            panelHeight = panelHeight,
+        ),
         dragPolicy = MovePolicy(),
+        resizePolicy = resizePolicy,
     ) {
         Box(
             modifier = Modifier
@@ -447,32 +553,54 @@ private fun Standard2DPlayer(
     videoPlayerViewModel: VideoPlayerViewModel,
     playerState: VideoPlayerState,
     onNavigateBack: () -> Unit,
+    dashboardPanelPose: Pose?,
     headFollowPose: HeadFollowPose? = null,
+    panelWidth: Dp,
+    panelHeight: Dp,
+    resizePolicy: ResizePolicy,
 ) {
+    val density = LocalDensity.current
+
     if (exoPlayer != null) {
         // Recreate the XR surface when stereo layout changes to avoid renderer desync/black frames.
         key(stereoMode) {
             SpatialExternalSurface(
-                modifier = buildFlatSurfaceModifier(headFollowPose),
+                modifier = buildFlatSurfaceModifier(
+                    dashboardPanelPose = dashboardPanelPose,
+                    headFollowPose = headFollowPose,
+                    density = density,
+                    panelWidth = panelWidth,
+                    panelHeight = panelHeight,
+                ),
                 stereoMode = stereoMode,
                 dragPolicy = MovePolicy(),
+                resizePolicy = resizePolicy,
                 interactionPolicy = interactionPolicy,
             ) {
                 bindExoPlayerSurface(exoPlayer)
 
-                if (showControls && isSurfaceReady) {
-                    SpatialPanel(modifier = SubspaceModifier.fillMaxSize()) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .background(Color.Transparent)
-                                .clickable(
-                                    interactionSource = remember { MutableInteractionSource() },
-                                    indication = null,
-                                ) {
-                                    videoPlayerViewModel.toggleControls()
-                                },
-                            contentAlignment = Alignment.Center,
+                if (isSurfaceReady) {
+                    SpatialPanel(
+                        modifier = SubspaceModifier.fillMaxSize(),
+                        interactionPolicy = clickInteractionPolicy(),
+                    ) {
+                        PlaybackScrollInputOverlay(
+                            showControls = showControls,
+                            onKeyUp = { event ->
+                                videoPlayerViewModel.dispatchPlaybackKeyEvent(event)
+                            },
+                            controlsAlignment = Alignment.BottomCenter,
+                            controlsPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 28.dp),
+                            controlsModifier = Modifier
+                                .fillMaxWidth(0.92f)
+                                .widthIn(max = 1080.dp),
+                            onToggleControls = { videoPlayerViewModel.toggleControls() },
+                            onHorizontalScrollDelta = { delta ->
+                                videoPlayerViewModel.handlePlaybackHorizontalScroll(delta)
+                            },
+                            onVerticalScrollDelta = { delta ->
+                                videoPlayerViewModel.handlePlaybackVerticalScroll(delta)
+                            },
                         ) {
                             XRPlaybackControls(
                                 videoPlayerViewModel = videoPlayerViewModel,
@@ -488,11 +616,23 @@ private fun Standard2DPlayer(
 }
 
 
-private fun buildFlatSurfaceModifier(headFollowPose: HeadFollowPose?): SubspaceModifier {
-    val baseModifier =
-        SubspaceModifier
-            .width(1280.dp)
-            .height(720.dp)
+private fun buildFlatSurfaceModifier(
+    dashboardPanelPose: Pose?,
+    headFollowPose: HeadFollowPose?,
+    density: Density,
+    panelWidth: Dp,
+    panelHeight: Dp,
+): SubspaceModifier {
+    val baseModifier = buildPanelModifierFromSavedPose(
+        dashboardPanelPose = dashboardPanelPose,
+        density = density,
+        panelWidth = panelWidth,
+        panelHeight = panelHeight,
+    )
+
+    if (dashboardPanelPose != null) {
+        return baseModifier
+    }
 
     if (headFollowPose == null) {
         return baseModifier
@@ -507,6 +647,30 @@ private fun buildFlatSurfaceModifier(headFollowPose: HeadFollowPose?): SubspaceM
             z = (headFollowPose.forward.z * followDistanceDp).dp,
         )
         .rotate(headFollowPose.rotation)
+}
+
+private fun buildPanelModifierFromSavedPose(
+    dashboardPanelPose: Pose?,
+    density: Density,
+    panelWidth: Dp,
+    panelHeight: Dp,
+): SubspaceModifier {
+    val baseModifier =
+        SubspaceModifier
+            .width(panelWidth)
+            .height(panelHeight)
+
+    if (dashboardPanelPose == null) {
+        return baseModifier
+    }
+
+    return baseModifier
+        .offset(
+            x = with(density) { dashboardPanelPose.translation.x.toDp() },
+            y = with(density) { dashboardPanelPose.translation.y.toDp() },
+            z = with(density) { dashboardPanelPose.translation.z.toDp() },
+        )
+        .rotate(dashboardPanelPose.rotation)
 }
 
 @Composable
@@ -524,7 +688,7 @@ fun ImmersivePlayer(
             val hemisphereModifier =
                 headLockedRotation180?.let { rotation ->
                     SubspaceModifier.rotate(rotation)
-                } ?: SubspaceModifier.rotateToLookAtUser()
+                } ?: SubspaceModifier
             key(stereoMode) {
                 SpatialExternalSurface180Hemisphere(
                     modifier = hemisphereModifier,

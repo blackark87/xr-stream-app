@@ -14,8 +14,19 @@ interface VideoDao {
     @Query("SELECT * FROM recent_videos WHERE lastPlayed > 0 ORDER BY lastPlayed DESC LIMIT :limit")
     fun getRecentVideos(limit: Int = 20): Flow<List<RecentVideo>>
 
-    @Query("SELECT * FROM recent_videos WHERE serverAddress = :serverAddress AND lastPlayed > 0 ORDER BY lastPlayed DESC LIMIT :limit")
-    fun getRecentVideosByServer(serverAddress: String, limit: Int = 20): Flow<List<RecentVideo>>
+    @Query(
+        """
+        SELECT * FROM recent_videos
+        WHERE serverAddress = :serverAddress AND shareName = :shareName AND lastPlayed > 0
+        ORDER BY lastPlayed DESC
+        LIMIT :limit
+        """
+    )
+    fun getRecentVideosBySource(
+        serverAddress: String,
+        shareName: String,
+        limit: Int = 20,
+    ): Flow<List<RecentVideo>>
 
     @Query("SELECT * FROM recent_videos WHERE id = :videoId")
     suspend fun getVideoById(videoId: Long): RecentVideo?
@@ -47,24 +58,16 @@ interface VideoDao {
     @Query("DELETE FROM recent_videos")
     suspend fun clearAllVideos()
 
-    // Favorites support
-    @Query("SELECT * FROM recent_videos WHERE isFavorite = 1 ORDER BY fileName ASC")
-    fun getFavoriteVideos(): Flow<List<RecentVideo>>
+    @Query("DELETE FROM recent_videos WHERE lastPlayed > 0")
+    suspend fun clearRecentHistory()
 
-    @Query("SELECT * FROM recent_videos WHERE isFavorite = 1 AND serverAddress = :serverAddress ORDER BY fileName ASC")
-    fun getFavoriteVideosByServer(serverAddress: String): Flow<List<RecentVideo>>
-
-    @Query("UPDATE recent_videos SET isFavorite = :isFavorite WHERE id = :videoId")
-    suspend fun updateFavoriteStatus(videoId: Long, isFavorite: Boolean)
-
-    @Query("UPDATE recent_videos SET isFavorite = :isFavorite WHERE filePath = :filePath")
-    suspend fun updateFavoriteStatusByPath(filePath: String, isFavorite: Boolean)
-
-    @Query("UPDATE recent_videos SET videoFormat = :format WHERE id = :videoId")
-    suspend fun updateVideoFormat(videoId: Long, format: String)
-
-    @Query("UPDATE recent_videos SET stereoMode = :mode WHERE id = :videoId")
-    suspend fun updateStereoMode(videoId: Long, mode: String)
+    @Query(
+        """
+        DELETE FROM recent_videos
+        WHERE serverAddress = :serverAddress AND shareName = :shareName AND lastPlayed > 0
+        """
+    )
+    suspend fun clearRecentHistoryBySource(serverAddress: String, shareName: String)
 
     @Query("UPDATE recent_videos SET thumbnailPath = :path WHERE id = :videoId")
     suspend fun updateThumbnailPath(videoId: Long, path: String)

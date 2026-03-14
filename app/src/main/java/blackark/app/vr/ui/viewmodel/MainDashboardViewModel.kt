@@ -5,6 +5,7 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import blackark.app.vr.AppState
+import blackark.app.vr.data.database.entity.FavoriteVideo
 import blackark.app.vr.data.database.entity.RecentVideo
 import blackark.app.vr.data.database.entity.SavedServer
 import blackark.app.vr.data.repository.ServerRepository
@@ -60,12 +61,15 @@ class MainDashboardViewModel(
     private val _files = MutableStateFlow<List<SMBFileItem>>(emptyList())
     val files: StateFlow<List<SMBFileItem>> = _files.asStateFlow()
 
-    // Favorites from database - filtered by currently connected server
+    // Favorites from database - filtered by currently connected source
     @OptIn(ExperimentalCoroutinesApi::class)
-    val favorites: StateFlow<List<RecentVideo>> = _uiState
+    val favorites: StateFlow<List<FavoriteVideo>> = _uiState
         .flatMapLatest { state ->
             if (state.isConnected && state.selectedServer != null) {
-                videoRepository.getFavoriteVideosByServer(state.selectedServer.serverAddress)
+                videoRepository.getFavoriteVideosBySource(
+                    serverAddress = state.selectedServer.serverAddress,
+                    shareName = state.selectedServer.shareName,
+                )
             } else {
                 flowOf(emptyList())
             }
@@ -76,13 +80,14 @@ class MainDashboardViewModel(
             initialValue = emptyList()
         )
 
-    // Recent videos from database - filtered by currently connected server
+    // Recent videos from database - filtered by currently connected source
     @OptIn(ExperimentalCoroutinesApi::class)
     val recentVideos: StateFlow<List<RecentVideo>> = _uiState
         .flatMapLatest { state ->
             if (state.isConnected && state.selectedServer != null) {
-                videoRepository.getRecentVideosByServer(
+                videoRepository.getRecentVideosBySource(
                     serverAddress = state.selectedServer.serverAddress,
+                    shareName = state.selectedServer.shareName,
                     limit = 1000,
                 )
             } else {
@@ -351,54 +356,48 @@ class MainDashboardViewModel(
         loadFiles(previousPath)
     }
 
-    /**
-     * Toggle favorite status for a video
-     */
-    fun toggleFavorite(videoId: Long, isFavorite: Boolean) {
-        viewModelScope.launch {
-            videoRepository.toggleFavorite(videoId, isFavorite)
-        }
-    }
-
     fun toggleFavoriteForFile(file: SMBFileItem, currentIsFavorite: Boolean) {
-        val nextIsFavorite = !currentIsFavorite
+        val selectedServer = _uiState.value.selectedServer ?: return
 
         viewModelScope.launch {
-            val existingVideo = videoRepository.getVideoByPath(file.path)
-            if (existingVideo != null) {
-                videoRepository.toggleFavorite(existingVideo.id, nextIsFavorite)
-                return@launch
-            }
-
-            // If the row does not exist yet, create it when user favorites a file.
-            if (!nextIsFavorite) {
-                return@launch
-            }
-
-            val selectedServer = _uiState.value.selectedServer ?: return@launch
-            val newVideo = RecentVideo(
-                fileName = file.name,
+            setFavorite(
                 filePath = file.path,
+                fileName = file.name,
                 serverAddress = selectedServer.serverAddress,
                 shareName = selectedServer.shareName,
-                lastPlayed = System.currentTimeMillis(),
-                lastPosition = 0,
-                duration = 0,
-                isFavorite = true,
-                videoFormat = "Format2D",
-                stereoMode = "Mono"
+                isFavorite = !currentIsFavorite,
             )
-            videoRepository.insertVideo(newVideo)
         }
     }
 
-    /**
-     * Toggle favorite status by file path
-     */
-    fun toggleFavoriteByPath(filePath: String, isFavorite: Boolean) {
+    fun toggleFavoriteEntry(
+        filePath: String,
+        fileName: String,
+        serverAddress: String,
+        shareName: String,
+        currentIsFavorite: Boolean,
+    ) {
         viewModelScope.launch {
-            videoRepository.toggleFavoriteByPath(filePath, isFavorite)
+            setFavorite(
+                filePath = filePath,
+                fileName = fileName,
+                serverAddress = serverAddress,
+                shareName = shareName,
+                isFavorite = !currentIsFavorite,
+            )
         }
+    }
+
+    suspend fun removeFromRecent(video: RecentVideo) {
+        videoRepository.removeFromRecent(video)
+    }
+
+    suspend fun clearRecentHistory() {
+        videoRepository.clearRecentHistory()
+    }
+
+    suspend fun clearAllFavorites() {
+        videoRepository.clearAllFavorites()
     }
 
     fun toggleFileViewMode() {
@@ -446,10 +445,11 @@ class MainDashboardViewModel(
                     if (existingVideo != null) {
                         videoRepository.deleteVideoById(existingVideo.id)
                     }
+                    videoRepository.removeFavoriteByPath(file.path)
                 } catch (dbError: Exception) {
                     Log.w(
                         "MainDashboardViewModel",
-                        "Failed to remove recent/favorite entry for ${file.path}: ${dbError.message}"
+                        "Failed to remove library entries for ${file.path}: ${dbError.message}"
                     )
                 }
             } else {
@@ -494,7 +494,25 @@ class MainDashboardViewModel(
         super.onCleared()
         disconnect()
     }
+
+    private suspend fun setFavorite(
+        filePath: String,
+        fileName: String,
+        serverAddress: String,
+        shareName: String,
+        isFavorite: Boolean,
+    ) {
+        if (isFavorite) {
+            videoRepository.addFavorite(
+                FavoriteVideo(
+                    filePath = filePath,
+                    fileName = fileName,
+                    serverAddress = serverAddress,
+                    shareName = shareName,
+                )
+            )
+        } else {
+            videoRepository.removeFavoriteByPath(filePath)
+        }
+    }
 }
-
-
-

@@ -12,6 +12,7 @@ import coil3.fetch.FetchResult
 import coil3.fetch.Fetcher
 import coil3.fetch.SourceFetchResult
 import coil3.request.Options
+import blackark.app.vr.data.database.entity.VideoDisplaySettings
 import jcifs.smb.SmbFile
 import jcifs.smb.SmbRandomAccessFile
 import kotlinx.coroutines.CancellationException
@@ -39,6 +40,9 @@ class VideoThumbnailFetcher(
     private val maxFullThumbnailDownloadBytes = 768L * mb
     private var inferredDisplayProfile: InferredDisplayProfile? = null
 
+    private fun logMetadataTrace(message: String) {
+        Log.v(tag, message)
+    }
 
     override suspend fun fetch(): FetchResult? {
         inferredDisplayProfile = null
@@ -131,7 +135,7 @@ class VideoThumbnailFetcher(
                 return it
             }
         } else {
-            Log.d(tag, "Skipping metadata poster lookup for extracted thumbnail path=$smbUrl")
+            logMetadataTrace("Skipping metadata poster lookup for extracted thumbnail path=$smbUrl")
         }
         var tempFile: java.io.File? = null
         val retriever = MediaMetadataRetriever()
@@ -286,24 +290,23 @@ class VideoThumbnailFetcher(
 
         val code = extractMovieCode(videoPath)
         if (code.isNullOrBlank()) {
-            Log.d(tag, "Metadata lookup skipped: no movie code extracted from path=$videoPath")
+            logMetadataTrace("Metadata lookup skipped: no movie code extracted from path=$videoPath")
             return null
         }
 
-        Log.d(tag, "Trying metadata poster lookup for code=$code folder='$folderPath'")
+        logMetadataTrace("Trying metadata poster lookup for code=$code folder='$folderPath'")
         val metadata = JvrLibraryMetadataProvider.getByCode(
             context = options.context.applicationContext,
             rawCode = code,
             folderPath = folderPath,
         ) ?: run {
-            Log.d(tag, "Metadata poster unavailable for code=$code (path=$videoPath)")
+            logMetadataTrace("Metadata poster unavailable for code=$code (path=$videoPath)")
             return null
         }
 
         val localPosterFile = metadata.posterUrl?.let(::resolveLocalPosterFile)
         if (localPosterFile == null) {
-            Log.d(
-                tag,
+            logMetadataTrace(
                 "Metadata resolved for code=$code but poster is not a valid local file: ${metadata.posterUrl ?: "<none>"}"
             )
             return null
@@ -328,8 +331,7 @@ class VideoThumbnailFetcher(
             return null
         }
 
-        Log.d(
-            tag,
+        logMetadataTrace(
             "Using metadata poster thumbnail for code=$code saved=${targetThumbnailFile.absolutePath}"
         )
         updateVideoThumbnailPathInDb(videoPath, targetThumbnailFile.absolutePath, metadata.title)
@@ -361,73 +363,48 @@ class VideoThumbnailFetcher(
 
             val videoByPath = parsedIdentity?.let { db.videoDao().getVideoByPath(it.filePath) }
             if (videoByPath != null) {
-                val updatedVideo = videoByPath.copy(
-                    thumbnailPath = thumbnailPath,
-                    resolvedTitle = resolvedTitle ?: videoByPath.resolvedTitle,
-                    videoFormat =
-                        if (shouldApplyInferredDisplayProfile(
-                                videoByPath,
-                                inferredDisplayProfile
-                            )
-                        ) {
-                            inferredDisplayProfile!!.videoFormat
-                        } else {
-                            videoByPath.videoFormat
-                        },
-                    stereoMode =
-                        if (shouldApplyInferredDisplayProfile(
-                                videoByPath,
-                                inferredDisplayProfile
-                            )
-                        ) {
-                            inferredDisplayProfile!!.stereoMode
-                        } else {
-                            videoByPath.stereoMode
-                        },
-                )
-                db.videoDao().updateVideo(updatedVideo)
+                db.videoDao().updateThumbnailAndTitle(videoByPath.id, thumbnailPath, resolvedTitle)
                 Log.d(
                     tag,
                     "Updated DB thumbnail/title for video ${videoByPath.id} fileName=$fileName path=$thumbnailPath title=${resolvedTitle ?: "<unchanged>"}",
                 )
-                return
+            } else {
+                val videoByFileName = db.videoDao().getLatestVideoByFileName(fileName)
+                if (videoByFileName != null) {
+                    db.videoDao()
+                        .updateThumbnailAndTitle(videoByFileName.id, thumbnailPath, resolvedTitle)
+                    Log.d(
+                        tag,
+                        "Updated DB thumbnail/title fallback for video ${videoByFileName.id} fileName=$fileName path=$thumbnailPath title=${resolvedTitle ?: "<unchanged>"}",
+                    )
+                } else {
+                    Log.d(tag, "No history row found for thumbnail update fileName=$fileName")
+                }
             }
 
-            val videoByFileName = db.videoDao().getLatestVideoByFileName(fileName)
-            if (videoByFileName != null) {
-                db.videoDao()
-                    .updateThumbnailAndTitle(videoByFileName.id, thumbnailPath, resolvedTitle)
-                Log.d(
-                    tag,
-                    "Updated DB thumbnail/title fallback for video ${videoByFileName.id} fileName=$fileName path=$thumbnailPath title=${resolvedTitle ?: "<unchanged>"}",
-                )
-                return
-            }
+            val favoritePath = parsedIdentity?.filePath ?: videoPath
+            db.favoriteVideoDao().updateThumbnailAndTitleByPath(
+                filePath = favoritePath,
+                path = thumbnailPath,
+                title = resolvedTitle,
+            )
 
-            if (parsedIdentity != null && inferredDisplayProfile != null) {
-                val insertedId =
-                    db.videoDao().insertVideo(
-                        blackark.app.vr.data.database.entity.RecentVideo(
-                            fileName = parsedIdentity.fileName,
+            if (parsedIdentity != null) {
+                val existingDisplaySettings =
+                    db.videoDisplaySettingsDao().getByPath(parsedIdentity.filePath)
+                if (shouldApplyInferredDisplayProfile(existingDisplaySettings, inferredDisplayProfile)) {
+                    db.videoDisplaySettingsDao().upsert(
+                        VideoDisplaySettings(
                             filePath = parsedIdentity.filePath,
-                            serverAddress = parsedIdentity.serverAddress,
-                            shareName = parsedIdentity.shareName,
-                            lastPlayed = 0L,
-                            lastPosition = 0L,
-                            duration = 0L,
-                            isFavorite = false,
-                            videoFormat = inferredDisplayProfile.videoFormat,
+                            videoFormat = inferredDisplayProfile!!.videoFormat,
                             stereoMode = inferredDisplayProfile.stereoMode,
-                            thumbnailPath = thumbnailPath,
-                            resolvedTitle = resolvedTitle,
                         )
                     )
-                Log.d(
-                    tag,
-                    "Inserted inferred display row id=$insertedId fileName=$fileName path=${parsedIdentity.filePath}",
-                )
-            } else {
-                Log.d(tag, "No DB video row found for thumbnail update fileName=$fileName")
+                    Log.d(
+                        tag,
+                        "Saved inferred display settings for fileName=$fileName path=${parsedIdentity.filePath}",
+                    )
+                }
             }
         } catch (e: CancellationException) {
             Log.d(tag, "Skipped DB thumbnail update because job was cancelled")
@@ -793,12 +770,17 @@ class VideoThumbnailFetcher(
     }
 
     private fun shouldApplyInferredDisplayProfile(
-        video: blackark.app.vr.data.database.entity.RecentVideo,
+        settings: VideoDisplaySettings?,
         inferredDisplayProfile: InferredDisplayProfile?,
     ): Boolean {
         return inferredDisplayProfile != null &&
-                video.videoFormat == "Format2D" &&
-                video.stereoMode == "Mono"
+                (
+                        settings == null ||
+                                (
+                                        settings.videoFormat == "Format2D" &&
+                                                settings.stereoMode == "Mono"
+                                        )
+                        )
     }
 
     private fun computePreferredThumbnailTimeUs(durationMs: Long): Long {

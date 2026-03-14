@@ -40,7 +40,12 @@ fun AppNavigation(navController: NavHostController, context: Context) {
     val appContext = remember(context) { context.applicationContext }
     val database = remember(appContext) { AppDatabase.getDatabase(appContext) }
     val serverRepository = remember(database) { ServerRepository(database.serverDao()) }
-    val videoRepository = remember(database) { VideoRepository(database.videoDao()) }
+    val videoRepository = remember(database) {
+        VideoRepository(
+            database.videoDao(),
+            database.favoriteVideoDao(),
+        )
+    }
 
     NavHost(
         navController = navController,
@@ -120,5 +125,4 @@ fun AppNavigation(navController: NavHostController, context: Context) {
         }
     }
 }
-
 

@@ -32,8 +32,10 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
@@ -52,6 +54,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Minimize
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.Settings
@@ -91,6 +94,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -101,6 +105,7 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -123,12 +128,16 @@ import androidx.xr.compose.subspace.ResizePolicy
 import androidx.xr.compose.subspace.SpatialMainPanel
 import androidx.xr.compose.subspace.layout.SubspaceModifier
 import androidx.xr.compose.subspace.layout.height
+import androidx.xr.compose.subspace.layout.onGloballyPositioned as onSubspaceGloballyPositioned
 import androidx.xr.compose.subspace.layout.width
 import androidx.xr.compose.unit.DpVolumeSize
+import blackark.app.vr.AppState
 import blackark.app.vr.BuildConfig
 import blackark.app.vr.R
+import blackark.app.vr.data.database.entity.FavoriteVideo
 import blackark.app.vr.data.database.entity.RecentVideo
 import blackark.app.vr.data.database.entity.SavedServer
+import blackark.app.vr.data.model.LibraryVideoItem
 import blackark.app.vr.network.SMBClient
 import blackark.app.vr.network.SMBFileItem
 import blackark.app.vr.ui.components.EmptyState
@@ -137,12 +146,12 @@ import blackark.app.vr.ui.components.FancyMovieCard
 import blackark.app.vr.ui.components.FancyServerCard
 import blackark.app.vr.ui.components.LocalStorageCard
 import blackark.app.vr.ui.navigation.Screen
+import blackark.app.vr.ui.theme.AccentGold
 import blackark.app.vr.ui.theme.CardBackground
 import blackark.app.vr.ui.theme.CardBackgroundHover
 import blackark.app.vr.ui.theme.DividerGray
 import blackark.app.vr.ui.theme.ErrorRed
 import blackark.app.vr.ui.theme.NetflixRed
-import blackark.app.vr.ui.theme.StreamingBlack
 import blackark.app.vr.ui.theme.SuccessGreen
 import blackark.app.vr.ui.theme.TextPrimary
 import blackark.app.vr.ui.theme.TextSecondary
@@ -175,6 +184,10 @@ private enum class DashboardPaneDestination(val label: String) {
     Library("Library"),
 }
 
+private fun logMetadataTrace(tag: String, message: String) {
+    Log.v(tag, message)
+}
+
 private enum class DashboardPaneLayoutMode(val label: String) {
     Balanced("Balanced"),
     Focused("Focused");
@@ -193,6 +206,22 @@ private enum class ConnectedDashboardTab {
     Library,
     Settings,
 }
+
+private enum class DisconnectedDashboardTab {
+    Sources,
+    Settings,
+}
+
+private enum class SettingsAction {
+    ClearArtworkCache,
+    ClearRecentHistory,
+    ClearFavorites,
+}
+
+private data class SettingsFeedback(
+    val action: SettingsAction,
+    val detail: String? = null,
+)
 
 private data class DashboardPaneVisibility(
     val showServers: Boolean,
@@ -411,68 +440,75 @@ private fun DashboardNavigationRail(
     showLayoutToggle: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
-    NavigationRail(
-        modifier = modifier,
-        containerColor = CardBackground.copy(alpha = 0.92f),
+    Surface(
+        modifier = modifier.clip(RoundedCornerShape(24.dp)),
+        color = CardBackground.copy(alpha = 0.92f),
+        shape = RoundedCornerShape(24.dp),
+        tonalElevation = 6.dp,
+        shadowElevation = 10.dp,
     ) {
-        Surface(
-            color = NetflixRed.copy(alpha = 0.18f),
-            shape = RoundedCornerShape(14.dp),
+        NavigationRail(
+            containerColor = Color.Transparent,
         ) {
-            IconButton(onClick = onAddServerClick) {
-                Icon(
-                    imageVector = Icons.Filled.Add,
-                    contentDescription = "Add server",
-                    tint = NetflixRed,
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(12.dp))
-
-        destinations.forEach { destination ->
-            NavigationRailItem(
-                selected = selectedPane == destination,
-                onClick = { onPaneSelected(destination) },
-                icon = {
+            Surface(
+                color = NetflixRed.copy(alpha = 0.18f),
+                shape = RoundedCornerShape(14.dp),
+            ) {
+                IconButton(onClick = onAddServerClick) {
                     Icon(
-                        imageVector = destination.icon(),
-                        contentDescription = destination.label,
+                        imageVector = Icons.Filled.Add,
+                        contentDescription = stringResource(R.string.add_server),
+                        tint = NetflixRed,
                     )
-                },
-                label = { Text(destination.label) },
-                alwaysShowLabel = widthClass == DashboardWidthClass.Compact,
-                colors = NavigationRailItemDefaults.colors(
-                    selectedIconColor = TextPrimary,
-                    selectedTextColor = TextPrimary,
-                    unselectedIconColor = TextSecondary,
-                    unselectedTextColor = TextTertiary,
-                    indicatorColor = NetflixRed.copy(alpha = 0.26f),
-                ),
-            )
-        }
+                }
+            }
 
-        Spacer(modifier = Modifier.weight(1f))
+            Spacer(modifier = Modifier.height(12.dp))
 
-        if (showLayoutToggle) {
-            TextButton(onClick = onToggleLayoutMode) {
-                Icon(
-                    imageVector = if (paneLayoutMode == DashboardPaneLayoutMode.Balanced) {
-                        Icons.Filled.ViewModule
-                    } else {
-                        Icons.AutoMirrored.Filled.ViewList
+            destinations.forEach { destination ->
+                NavigationRailItem(
+                    selected = selectedPane == destination,
+                    onClick = { onPaneSelected(destination) },
+                    icon = {
+                        Icon(
+                            imageVector = destination.icon(),
+                            contentDescription = destination.label,
+                        )
                     },
-                    contentDescription = "Toggle pane layout",
-                    tint = TextSecondary,
+                    label = { Text(destination.label) },
+                    alwaysShowLabel = widthClass == DashboardWidthClass.Compact,
+                    colors = NavigationRailItemDefaults.colors(
+                        selectedIconColor = TextPrimary,
+                        selectedTextColor = TextPrimary,
+                        unselectedIconColor = TextSecondary,
+                        unselectedTextColor = TextTertiary,
+                        indicatorColor = NetflixRed.copy(alpha = 0.26f),
+                    ),
                 )
             }
 
-            Text(
-                text = paneLayoutMode.label,
-                style = MaterialTheme.typography.labelSmall,
-                color = TextTertiary,
-                modifier = Modifier.padding(bottom = 12.dp),
-            )
+            Spacer(modifier = Modifier.weight(1f))
+
+            if (showLayoutToggle) {
+                TextButton(onClick = onToggleLayoutMode) {
+                    Icon(
+                        imageVector = if (paneLayoutMode == DashboardPaneLayoutMode.Balanced) {
+                            Icons.Filled.ViewModule
+                        } else {
+                            Icons.AutoMirrored.Filled.ViewList
+                        },
+                        contentDescription = stringResource(R.string.toggle_pane_layout),
+                        tint = TextSecondary,
+                    )
+                }
+
+                Text(
+                    text = paneLayoutMode.label,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = TextTertiary,
+                    modifier = Modifier.padding(bottom = 12.dp),
+                )
+            }
         }
     }
 }
@@ -483,71 +519,78 @@ private fun ConnectedSectionRail(
     onTabSelected: (ConnectedDashboardTab) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    NavigationRail(
-        modifier = modifier,
-        containerColor = CardBackground.copy(alpha = 0.92f),
+    Surface(
+        modifier = modifier.clip(RoundedCornerShape(24.dp)),
+        color = CardBackground.copy(alpha = 0.92f),
+        shape = RoundedCornerShape(24.dp),
+        tonalElevation = 6.dp,
+        shadowElevation = 10.dp,
     ) {
-        NavigationRailItem(
-            selected = selectedTab == ConnectedDashboardTab.Files,
-            onClick = { onTabSelected(ConnectedDashboardTab.Files) },
-            icon = {
-                Icon(
-                    imageVector = Icons.Filled.FolderOpen,
-                    contentDescription = "Files",
-                )
-            },
-            label = { Text("Files") },
-            alwaysShowLabel = true,
-            colors = NavigationRailItemDefaults.colors(
-                selectedIconColor = TextPrimary,
-                selectedTextColor = TextPrimary,
-                unselectedIconColor = TextSecondary,
-                unselectedTextColor = TextTertiary,
-                indicatorColor = NetflixRed.copy(alpha = 0.26f),
-            ),
-        )
+        NavigationRail(
+            containerColor = Color.Transparent,
+        ) {
+            NavigationRailItem(
+                selected = selectedTab == ConnectedDashboardTab.Files,
+                onClick = { onTabSelected(ConnectedDashboardTab.Files) },
+                icon = {
+                    Icon(
+                        imageVector = Icons.Filled.FolderOpen,
+                        contentDescription = stringResource(R.string.files),
+                    )
+                },
+                label = { Text(stringResource(R.string.files)) },
+                alwaysShowLabel = true,
+                colors = NavigationRailItemDefaults.colors(
+                    selectedIconColor = TextPrimary,
+                    selectedTextColor = TextPrimary,
+                    unselectedIconColor = TextSecondary,
+                    unselectedTextColor = TextTertiary,
+                    indicatorColor = NetflixRed.copy(alpha = 0.26f),
+                ),
+            )
 
-        NavigationRailItem(
-            selected = selectedTab == ConnectedDashboardTab.Library,
-            onClick = { onTabSelected(ConnectedDashboardTab.Library) },
-            icon = {
-                Icon(
-                    imageVector = Icons.Filled.Favorite,
-                    contentDescription = "Library",
-                )
-            },
-            label = { Text("Library") },
-            alwaysShowLabel = true,
-            colors = NavigationRailItemDefaults.colors(
-                selectedIconColor = TextPrimary,
-                selectedTextColor = TextPrimary,
-                unselectedIconColor = TextSecondary,
-                unselectedTextColor = TextTertiary,
-                indicatorColor = NetflixRed.copy(alpha = 0.26f),
-            ),
-        )
+            NavigationRailItem(
+                selected = selectedTab == ConnectedDashboardTab.Library,
+                onClick = { onTabSelected(ConnectedDashboardTab.Library) },
+                icon = {
+                    Icon(
+                        imageVector = Icons.Filled.Favorite,
+                        contentDescription = stringResource(R.string.library),
+                    )
+                },
+                label = { Text(stringResource(R.string.library)) },
+                alwaysShowLabel = true,
+                colors = NavigationRailItemDefaults.colors(
+                    selectedIconColor = TextPrimary,
+                    selectedTextColor = TextPrimary,
+                    unselectedIconColor = TextSecondary,
+                    unselectedTextColor = TextTertiary,
+                    indicatorColor = NetflixRed.copy(alpha = 0.26f),
+                ),
+            )
 
-        Spacer(modifier = Modifier.weight(1f))
+            Spacer(modifier = Modifier.weight(1f))
 
-        NavigationRailItem(
-            selected = selectedTab == ConnectedDashboardTab.Settings,
-            onClick = { onTabSelected(ConnectedDashboardTab.Settings) },
-            icon = {
-                Icon(
-                    imageVector = Icons.Filled.Settings,
-                    contentDescription = "Settings",
-                )
-            },
-            label = { Text("Settings") },
-            alwaysShowLabel = true,
-            colors = NavigationRailItemDefaults.colors(
-                selectedIconColor = TextPrimary,
-                selectedTextColor = TextPrimary,
-                unselectedIconColor = TextSecondary,
-                unselectedTextColor = TextTertiary,
-                indicatorColor = NetflixRed.copy(alpha = 0.26f),
-            ),
-        )
+            NavigationRailItem(
+                selected = selectedTab == ConnectedDashboardTab.Settings,
+                onClick = { onTabSelected(ConnectedDashboardTab.Settings) },
+                icon = {
+                    Icon(
+                        imageVector = Icons.Filled.Settings,
+                        contentDescription = stringResource(R.string.settings),
+                    )
+                },
+                label = { Text(stringResource(R.string.settings)) },
+                alwaysShowLabel = true,
+                colors = NavigationRailItemDefaults.colors(
+                    selectedIconColor = TextPrimary,
+                    selectedTextColor = TextPrimary,
+                    unselectedIconColor = TextSecondary,
+                    unselectedTextColor = TextTertiary,
+                    indicatorColor = NetflixRed.copy(alpha = 0.26f),
+                ),
+            )
+        }
     }
 }
 
@@ -918,39 +961,6 @@ private fun ConnectedPaneResizeHandle(
     }
 }
 
-@Composable
-private fun ConnectionStatusChip(isConnected: Boolean) {
-    val containerColor = if (isConnected) SuccessGreen else CardBackground
-    val contentColor = if (isConnected) StreamingBlack else TextSecondary
-
-    Surface(
-        color = containerColor,
-        shape = RoundedCornerShape(999.dp),
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            Icon(
-                imageVector = if (isConnected) {
-                    Icons.Filled.CheckCircle
-                } else {
-                    Icons.Filled.Cloud
-                },
-                contentDescription = null,
-                tint = contentColor,
-                modifier = Modifier.size(16.dp),
-            )
-            Text(
-                text = if (isConnected) "Connected" else "Offline",
-                style = MaterialTheme.typography.labelMedium,
-                color = contentColor,
-            )
-        }
-    }
-}
-
 private fun resolveAppVersionLabel(context: Context): String {
     return runCatching {
         val packageInfo = context.packageManager.getPackageInfo(
@@ -982,16 +992,187 @@ private suspend fun resetThumbnailState(context: Context) =
 
         val database = blackark.app.vr.data.database.AppDatabase.getDatabase(appContext)
         database.videoDao().clearAllThumbnailPaths()
+        database.favoriteVideoDao().clearAllThumbnailPaths()
         database.virtualGroupMetadataDao().clearAll()
         JvrLibraryMetadataProvider.clearMemoryCaches()
     }
 
 @Composable
+private fun SourceSwitcherButton(
+    selectedSource: SavedServer?,
+    availableSources: List<SavedServer>,
+    onSourceSelected: (SavedServer) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val sourceLabel = selectedSource?.serverName?.takeIf { it.isNotBlank() }
+        ?: stringResource(R.string.source)
+    val sourceIcon = if (selectedSource?.isLocalStorage == true) {
+        Icons.Filled.FolderOpen
+    } else {
+        Icons.Filled.Cloud
+    }
+
+    Box(modifier = modifier) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(18.dp))
+                .clickable { expanded = true },
+            color = CardBackground.copy(alpha = 0.9f),
+            shape = RoundedCornerShape(18.dp),
+            tonalElevation = 2.dp,
+            border = BorderStroke(1.dp, DividerGray.copy(alpha = 0.7f)),
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(NetflixRed.copy(alpha = 0.14f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = sourceIcon,
+                        contentDescription = null,
+                        tint = NetflixRed,
+                    )
+                }
+
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = stringResource(R.string.source),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = TextTertiary,
+                    )
+                    Text(
+                        text = sourceLabel,
+                        color = TextPrimary,
+                        style = MaterialTheme.typography.titleMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+
+                Icon(
+                    imageVector = Icons.Filled.KeyboardArrowDown,
+                    contentDescription = null,
+                    tint = TextSecondary,
+                    modifier = Modifier.rotate(if (expanded) 180f else 0f),
+                )
+            }
+        }
+
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            modifier = Modifier.widthIn(min = 280.dp, max = 360.dp),
+            shape = RoundedCornerShape(20.dp),
+            containerColor = CardBackgroundHover.copy(alpha = 0.98f),
+            tonalElevation = 8.dp,
+            shadowElevation = 18.dp,
+            border = BorderStroke(1.dp, DividerGray.copy(alpha = 0.85f)),
+        ) {
+            DropdownMenuItem(
+                text = {
+                    Column {
+                        Text(
+                            text = stringResource(R.string.local_storage),
+                            color = TextPrimary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            text = stringResource(R.string.device_internal_storage),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = TextTertiary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                },
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Filled.FolderOpen,
+                        contentDescription = null,
+                        tint = AccentGold,
+                    )
+                },
+                onClick = {
+                    expanded = false
+                    onSourceSelected(SavedServer.createLocalStorageServer())
+                },
+                trailingIcon = {
+                    if (selectedSource?.isLocalStorage == true) {
+                        Icon(
+                            imageVector = Icons.Filled.CheckCircle,
+                            contentDescription = null,
+                            tint = SuccessGreen,
+                        )
+                    }
+                },
+            )
+
+            if (availableSources.isNotEmpty()) {
+                HorizontalDivider(color = DividerGray)
+            }
+
+            availableSources.forEach { server ->
+                DropdownMenuItem(
+                    text = {
+                        Column {
+                            Text(
+                                text = server.serverName,
+                                color = TextPrimary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Text(
+                                text = "${server.serverAddress}:${server.port}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = TextTertiary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    },
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Filled.Cloud,
+                            contentDescription = null,
+                            tint = NetflixRed.copy(alpha = 0.92f),
+                        )
+                    },
+                    onClick = {
+                        expanded = false
+                        onSourceSelected(server)
+                    },
+                    trailingIcon = {
+                        if (selectedSource?.id == server.id && selectedSource.isLocalStorage.not()) {
+                            Icon(
+                                imageVector = Icons.Filled.CheckCircle,
+                                contentDescription = null,
+                                tint = SuccessGreen,
+                            )
+                        }
+                    },
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun SettingsPanel(
     versionLabel: String,
-    isResettingThumbnails: Boolean,
-    resetErrorMessage: String?,
-    onResetThumbnails: () -> Unit,
+    activeAction: SettingsAction?,
+    onClearArtworkCache: () -> Unit,
+    onClearRecentHistory: () -> Unit,
+    onClearFavorites: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Card(
@@ -1005,56 +1186,120 @@ private fun SettingsPanel(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
+            Text(
+                text = stringResource(R.string.settings),
+                style = MaterialTheme.typography.headlineSmall,
+                color = TextPrimary,
+            )
+
+            HorizontalDivider(color = DividerGray)
+
+            SettingsValueRow(
+                title = stringResource(R.string.version),
+                value = versionLabel,
+            )
+            SettingsActionRow(
+                title = stringResource(R.string.clear_thumbnails_posters),
+                description = stringResource(R.string.clear_thumbnails_posters_description),
+                buttonLabel = if (activeAction == SettingsAction.ClearArtworkCache) {
+                    stringResource(R.string.settings_action_clearing)
+                } else {
+                    stringResource(R.string.settings_action_clear)
+                },
+                enabled = activeAction == null,
+                onClick = onClearArtworkCache,
+            )
+            SettingsActionRow(
+                title = stringResource(R.string.clear_recent_history),
+                description = stringResource(R.string.clear_recent_history_description),
+                buttonLabel = if (activeAction == SettingsAction.ClearRecentHistory) {
+                    stringResource(R.string.settings_action_clearing)
+                } else {
+                    stringResource(R.string.settings_action_clear)
+                },
+                enabled = activeAction == null,
+                onClick = onClearRecentHistory,
+            )
+            SettingsActionRow(
+                title = stringResource(R.string.clear_favorites),
+                description = stringResource(R.string.clear_favorites_description),
+                buttonLabel = if (activeAction == SettingsAction.ClearFavorites) {
+                    stringResource(R.string.settings_action_clearing)
+                } else {
+                    stringResource(R.string.settings_action_clear)
+                },
+                enabled = activeAction == null,
+                onClick = onClearFavorites,
+            )
+        }
+    }
+}
+
+@Composable
+private fun SettingsValueRow(
+    title: String,
+    value: String,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleMedium,
+            color = TextPrimary,
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodyMedium,
+            color = TextSecondary,
+        )
+    }
+}
+
+@Composable
+private fun SettingsActionRow(
+    title: String,
+    description: String,
+    buttonLabel: String,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    Column(
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleMedium,
+                color = TextPrimary,
+                modifier = Modifier.weight(1f),
+            )
+            Spacer(modifier = Modifier.width(16.dp))
+            Button(
+                onClick = onClick,
+                enabled = enabled,
+                colors = ButtonDefaults.buttonColors(containerColor = NetflixRed),
             ) {
                 Text(
-                    text = "Version",
-                    style = MaterialTheme.typography.titleMedium,
+                    text = buttonLabel,
                     color = TextPrimary,
-                )
-                Text(
-                    text = versionLabel,
-                    style = MaterialTheme.typography.titleMedium,
-                    color = TextPrimary,
-                )
-            }
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = "Reset cache",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = TextPrimary,
-                )
-
-                Button(
-                    onClick = onResetThumbnails,
-                    enabled = !isResettingThumbnails,
-                    colors = ButtonDefaults.buttonColors(containerColor = NetflixRed),
-                ) {
-                    Text(
-                        text = if (isResettingThumbnails) "Resetting..." else "Reset",
-                        color = TextPrimary,
-                    )
-                }
-            }
-
-            if (!resetErrorMessage.isNullOrBlank()) {
-                Text(
-                    text = resetErrorMessage,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = TextTertiary,
                 )
             }
         }
+
+        Text(
+            text = description,
+            style = MaterialTheme.typography.bodySmall,
+            color = TextTertiary,
+        )
     }
 }
 
@@ -1071,9 +1316,11 @@ fun MainDashboardScreen(
     val files by viewModel.files.collectAsStateWithLifecycle()
     val favorites by viewModel.favorites.collectAsStateWithLifecycle()
     val recentVideos by viewModel.recentVideos.collectAsStateWithLifecycle()
+    val favoritePaths = remember(favorites) { favorites.mapTo(linkedSetOf()) { it.filePath } }
 
     var showAddServerDialog by remember { mutableStateOf(false) }
     var serverToEdit by remember { mutableStateOf<SavedServer?>(null) }
+    var disconnectedDashboardTab by remember { mutableStateOf(DisconnectedDashboardTab.Sources) }
     var compactConnectedTab by remember { mutableStateOf(ConnectedDashboardTab.Files) }
     val previewResetKey = when (compactConnectedTab) {
         ConnectedDashboardTab.Files -> "files:${uiState.selectedServer?.id}:${uiState.currentPath}"
@@ -1086,26 +1333,64 @@ fun MainDashboardScreen(
         )
     }
     var connectedPreviewWidthOverrideDp by rememberSaveable { mutableStateOf<Float?>(null) }
-    var isResettingThumbnails by remember { mutableStateOf(false) }
-    var showThumbnailResetCompleteDialog by remember { mutableStateOf(false) }
-    var thumbnailResetErrorMessage by remember { mutableStateOf<String?>(null) }
+    var pendingSettingsAction by remember { mutableStateOf<SettingsAction?>(null) }
+    var activeSettingsAction by remember { mutableStateOf<SettingsAction?>(null) }
+    var settingsFeedback by remember { mutableStateOf<SettingsFeedback?>(null) }
     val dashboardScope = rememberCoroutineScope()
     val appVersionLabel = remember(context) { resolveAppVersionLabel(context) }
 
-    val quickSwitchServers = remember(servers) {
+    val availableSources = remember(servers) {
         servers
             .sortedByDescending { it.lastConnected }
-            .take(6)
     }
     val density = LocalDensity.current
     var dashboardPanelWidth by remember { mutableStateOf(1920.dp) }
     var dashboardPanelHeight by remember { mutableStateOf(1080.dp) }
 
+    fun launchSettingsAction(action: SettingsAction) {
+        if (activeSettingsAction != null) return
+
+        activeSettingsAction = action
+        settingsFeedback = null
+
+        dashboardScope.launch {
+            runCatching {
+                when (action) {
+                    SettingsAction.ClearArtworkCache -> {
+                        resetThumbnailState(context)
+                        dashboardPreviewItem = null
+                    }
+
+                    SettingsAction.ClearRecentHistory -> {
+                        viewModel.clearRecentHistory()
+                    }
+
+                    SettingsAction.ClearFavorites -> {
+                        viewModel.clearAllFavorites()
+                    }
+                }
+            }.onSuccess {
+                settingsFeedback = SettingsFeedback(action = action)
+            }
+                .onFailure { throwable ->
+                    settingsFeedback = SettingsFeedback(
+                        action = action,
+                        detail = throwable.message ?: "Unknown error",
+                    )
+                }
+
+            activeSettingsAction = null
+        }
+    }
+
     Subspace {
         SpatialMainPanel(
             modifier = SubspaceModifier
                 .width(dashboardPanelWidth)
-                .height(dashboardPanelHeight),
+                .height(dashboardPanelHeight)
+                .onSubspaceGloballyPositioned { coordinates ->
+                    AppState.updateDashboardPanelPose(coordinates.poseInRoot)
+                },
             dragPolicy = MovePolicy(),
             resizePolicy = ResizePolicy(
                 minimumSize = DpVolumeSize(
@@ -1156,46 +1441,84 @@ fun MainDashboardScreen(
                     ) {
                         Spacer(modifier = Modifier.height(20.dp))
 
-                        ServerListPanel(
-                            servers = servers,
-                            selectedServer = uiState.selectedServer,
-                            isConnecting = uiState.isConnecting,
-                            onServerClick = { server ->
-                                compactConnectedTab = ConnectedDashboardTab.Files
-                                viewModel.connectToServer(server)
-                            },
-                            onServerEdit = { server ->
-                                serverToEdit = server
-                            },
-                            onServerDelete = { server ->
-                                viewModel.deleteServer(server)
-                            },
-                            onAddServerClick = {
-                                showAddServerDialog = true
-                            },
-                            modifier = Modifier
-                                .width(panelWidth)
-                                .fillMaxHeight(0.78f)
-                        )
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            LibraryTabChip(
+                                text = stringResource(R.string.sources),
+                                selected = disconnectedDashboardTab == DisconnectedDashboardTab.Sources,
+                                onClick = {
+                                    disconnectedDashboardTab = DisconnectedDashboardTab.Sources
+                                },
+                            )
+                            LibraryTabChip(
+                                text = stringResource(R.string.settings),
+                                selected = disconnectedDashboardTab == DisconnectedDashboardTab.Settings,
+                                onClick = {
+                                    disconnectedDashboardTab = DisconnectedDashboardTab.Settings
+                                },
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        if (disconnectedDashboardTab == DisconnectedDashboardTab.Sources) {
+                            ServerListPanel(
+                                servers = servers,
+                                selectedServer = uiState.selectedServer,
+                                isConnecting = uiState.isConnecting,
+                                onServerClick = { server ->
+                                    compactConnectedTab = ConnectedDashboardTab.Files
+                                    viewModel.connectToServer(server)
+                                },
+                                onServerEdit = { server ->
+                                    serverToEdit = server
+                                },
+                                onServerDelete = { server ->
+                                    viewModel.deleteServer(server)
+                                },
+                                onAddServerClick = {
+                                    showAddServerDialog = true
+                                },
+                                modifier = Modifier
+                                    .width(panelWidth)
+                                    .fillMaxHeight(0.78f)
+                            )
+                        } else {
+                            SettingsPanel(
+                                versionLabel = appVersionLabel,
+                                activeAction = activeSettingsAction,
+                                onClearArtworkCache = {
+                                    pendingSettingsAction = SettingsAction.ClearArtworkCache
+                                },
+                                onClearRecentHistory = {
+                                    pendingSettingsAction = SettingsAction.ClearRecentHistory
+                                },
+                                onClearFavorites = {
+                                    pendingSettingsAction = SettingsAction.ClearFavorites
+                                },
+                                modifier = Modifier
+                                    .width(panelWidth)
+                                    .fillMaxHeight(0.78f)
+                            )
+                        }
                     }
                 } else {
                     Column(modifier = Modifier.fillMaxSize()) {
                         DashboardOrbitArea(
-                            isConnected = true,
-                            selectedServer = uiState.selectedServer,
-                            registeredServers = quickSwitchServers,
-                            onBackToServerSelection = {
-                                dashboardPreviewItem = null
-                                compactConnectedTab = ConnectedDashboardTab.Files
-                                viewModel.disconnect()
-                            },
-                            onSelectServer = { server ->
+                            selectedSource = uiState.selectedServer,
+                            availableSources = availableSources,
+                            onSourceSelected = { server ->
                                 dashboardPreviewItem = null
                                 compactConnectedTab = ConnectedDashboardTab.Files
                                 viewModel.connectToServer(server)
                             },
-                            onAddServerClick = {
-                                showAddServerDialog = true
+                            onDisconnect = {
+                                dashboardPreviewItem = null
+                                compactConnectedTab = ConnectedDashboardTab.Files
+                                disconnectedDashboardTab = DisconnectedDashboardTab.Sources
+                                viewModel.disconnect()
                             },
                             modifier = Modifier.fillMaxWidth(),
                         )
@@ -1214,26 +1537,15 @@ fun MainDashboardScreen(
                             if (compactConnectedTab == ConnectedDashboardTab.Settings) {
                                 SettingsPanel(
                                     versionLabel = appVersionLabel,
-                                    isResettingThumbnails = isResettingThumbnails,
-                                    resetErrorMessage = thumbnailResetErrorMessage,
-                                    onResetThumbnails = {
-                                        if (isResettingThumbnails) return@SettingsPanel
-
-                                        isResettingThumbnails = true
-                                        showThumbnailResetCompleteDialog = false
-                                        thumbnailResetErrorMessage = null
-                                        dashboardScope.launch {
-                                            runCatching { resetThumbnailState(context) }
-                                                .onSuccess {
-                                                    dashboardPreviewItem = null
-                                                    showThumbnailResetCompleteDialog = true
-                                                }
-                                                .onFailure { throwable ->
-                                                    thumbnailResetErrorMessage =
-                                                        "Reset failed: ${throwable.message ?: "Unknown error"}"
-                                                }
-                                            isResettingThumbnails = false
-                                        }
+                                    activeAction = activeSettingsAction,
+                                    onClearArtworkCache = {
+                                        pendingSettingsAction = SettingsAction.ClearArtworkCache
+                                    },
+                                    onClearRecentHistory = {
+                                        pendingSettingsAction = SettingsAction.ClearRecentHistory
+                                    },
+                                    onClearFavorites = {
+                                        pendingSettingsAction = SettingsAction.ClearFavorites
                                     },
                                     modifier = Modifier
                                         .weight(1f)
@@ -1296,7 +1608,7 @@ fun MainDashboardScreen(
                                             if (compactConnectedTab == ConnectedDashboardTab.Files) {
                                                 FileBrowserPanel(
                                                     files = files,
-                                                    recentVideos = recentVideos,
+                                                    favoritePaths = favoritePaths,
                                                     currentPath = uiState.currentPath,
                                                     isConnected = uiState.isConnected,
                                                     isLoading = uiState.isLoadingFiles,
@@ -1325,7 +1637,9 @@ fun MainDashboardScreen(
                                                                 filePath,
                                                                 fileName
                                                             )
-                                                        )
+                                                        ) {
+                                                            launchSingleTop = true
+                                                        }
                                                     },
                                                     onFavoriteToggle = { file, isFavorite ->
                                                         viewModel.toggleFavoriteForFile(
@@ -1353,7 +1667,9 @@ fun MainDashboardScreen(
                                                                 video.filePath,
                                                                 video.fileName
                                                             )
-                                                        )
+                                                        ) {
+                                                            launchSingleTop = true
+                                                        }
                                                     },
                                                     onRecentClick = { video ->
                                                         dashboardPreviewItem = null
@@ -1362,13 +1678,23 @@ fun MainDashboardScreen(
                                                                 video.filePath,
                                                                 video.fileName
                                                             )
+                                                        ) {
+                                                            launchSingleTop = true
+                                                        }
+                                                    },
+                                                    onFavoriteToggle = { filePath, fileName, serverAddress, shareName, isFavorite ->
+                                                        viewModel.toggleFavoriteEntry(
+                                                            filePath = filePath,
+                                                            fileName = fileName,
+                                                            serverAddress = serverAddress,
+                                                            shareName = shareName,
+                                                            currentIsFavorite = isFavorite,
                                                         )
                                                     },
-                                                    onFavoriteToggle = { video ->
-                                                        viewModel.toggleFavorite(
-                                                            video.id,
-                                                            !video.isFavorite
-                                                        )
+                                                    onRecentRemove = { video ->
+                                                        dashboardScope.launch {
+                                                            viewModel.removeFromRecent(video)
+                                                        }
                                                     },
                                                     onPreviewFocused = { preview ->
                                                         dashboardPreviewItem = preview
@@ -1492,7 +1818,7 @@ fun MainDashboardScreen(
                         )
                         Spacer(modifier = Modifier.height(16.dp))
                         Text(
-                            text = "Connecting to server...",
+                            text = stringResource(R.string.connecting_to_server),
                             style = MaterialTheme.typography.bodyLarge,
                             color = TextPrimary
                         )
@@ -1502,20 +1828,78 @@ fun MainDashboardScreen(
         }
     }
 
-    if (showThumbnailResetCompleteDialog) {
+    pendingSettingsAction?.let { action ->
+        val titleRes = when (action) {
+            SettingsAction.ClearArtworkCache -> R.string.clear_thumbnails_posters_confirm_title
+            SettingsAction.ClearRecentHistory -> R.string.clear_recent_history_confirm_title
+            SettingsAction.ClearFavorites -> R.string.clear_favorites_confirm_title
+        }
+        val messageRes = when (action) {
+            SettingsAction.ClearArtworkCache -> R.string.clear_thumbnails_posters_confirm_message
+            SettingsAction.ClearRecentHistory -> R.string.clear_recent_history_confirm_message
+            SettingsAction.ClearFavorites -> R.string.clear_favorites_confirm_message
+        }
+
         AlertDialog(
-            onDismissRequest = { showThumbnailResetCompleteDialog = false },
+            onDismissRequest = { pendingSettingsAction = null },
             title = {
-                Text("Reset complete")
+                Text(stringResource(titleRes))
             },
             text = {
-                Text("Thumbnail cache has been reset.")
+                Text(stringResource(messageRes))
             },
             confirmButton = {
                 TextButton(
-                    onClick = { showThumbnailResetCompleteDialog = false },
+                    onClick = {
+                        pendingSettingsAction = null
+                        launchSettingsAction(action)
+                    },
                 ) {
-                    Text("OK", color = NetflixRed)
+                    Text(stringResource(R.string.settings_action_clear), color = NetflixRed)
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { pendingSettingsAction = null },
+                ) {
+                    Text(stringResource(R.string.cancel), color = TextSecondary)
+                }
+            },
+        )
+    }
+
+    settingsFeedback?.let { feedback ->
+        val message = if (feedback.detail == null) {
+            when (feedback.action) {
+                SettingsAction.ClearArtworkCache -> stringResource(R.string.clear_thumbnails_posters_complete_message)
+                SettingsAction.ClearRecentHistory -> stringResource(R.string.clear_recent_history_complete_message)
+                SettingsAction.ClearFavorites -> stringResource(R.string.clear_favorites_complete_message)
+            }
+        } else {
+            feedback.detail
+        }
+
+        AlertDialog(
+            onDismissRequest = { settingsFeedback = null },
+            title = {
+                Text(
+                    stringResource(
+                        if (feedback.detail == null) {
+                            R.string.settings_action_complete_title
+                        } else {
+                            R.string.settings_action_failed_title
+                        }
+                    )
+                )
+            },
+            text = {
+                Text(message)
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = { settingsFeedback = null },
+                ) {
+                    Text(stringResource(R.string.ok), color = NetflixRed)
                 }
             },
         )
@@ -1524,16 +1908,12 @@ fun MainDashboardScreen(
 
 @Composable
 private fun DashboardOrbitArea(
-    isConnected: Boolean,
-    selectedServer: SavedServer?,
-    registeredServers: List<SavedServer>,
-    onBackToServerSelection: () -> Unit,
-    onSelectServer: (SavedServer) -> Unit,
-    onAddServerClick: () -> Unit,
+    selectedSource: SavedServer?,
+    availableSources: List<SavedServer>,
+    onSourceSelected: (SavedServer) -> Unit,
+    onDisconnect: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var showServerMenu by remember { mutableStateOf(false) }
-
     Surface(
         modifier = modifier.fillMaxWidth(),
         color = CardBackgroundHover.copy(alpha = 0.95f),
@@ -1546,101 +1926,16 @@ private fun DashboardOrbitArea(
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            if (isConnected) {
-                OrbiterActionButton(
-                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = "Back to server selection",
-                    onClick = onBackToServerSelection
-                )
-            }
-
-            Column(
+            SourceSwitcherButton(
+                selectedSource = selectedSource,
+                availableSources = availableSources,
+                onSourceSelected = onSourceSelected,
                 modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.Center
-            ) {
-                Text(
-                    text = if (isConnected) {
-                        selectedServer?.serverName ?: "Connected"
-                    } else {
-                        "Select Server"
-                    },
-                    style = MaterialTheme.typography.titleMedium,
-                    color = TextPrimary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-
-            ConnectionStatusChip(isConnected = isConnected)
-
-            Box {
-                TextButton(onClick = { showServerMenu = true }) {
-                    Icon(
-                        imageVector = Icons.Filled.Cloud,
-                        contentDescription = null,
-                        tint = TextSecondary,
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Servers", color = TextPrimary)
-                }
-
-                DropdownMenu(
-                    expanded = showServerMenu,
-                    onDismissRequest = { showServerMenu = false }
-                ) {
-                    DropdownMenuItem(
-                        text = { Text("Local Storage") },
-                        onClick = {
-                            showServerMenu = false
-                            onSelectServer(SavedServer.createLocalStorageServer())
-                        },
-                        trailingIcon = {
-                            if (selectedServer?.isLocalStorage == true) {
-                                Icon(
-                                    imageVector = Icons.Filled.CheckCircle,
-                                    contentDescription = null,
-                                    tint = SuccessGreen,
-                                )
-                            }
-                        }
-                    )
-
-                    if (registeredServers.isNotEmpty()) {
-                        HorizontalDivider(color = DividerGray)
-                    }
-
-                    registeredServers.forEach { server ->
-                        DropdownMenuItem(
-                            text = {
-                                Text(
-                                    text = server.serverName,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                            },
-                            onClick = {
-                                showServerMenu = false
-                                onSelectServer(server)
-                            },
-                            trailingIcon = {
-                                if (selectedServer?.id == server.id && selectedServer.isLocalStorage.not()) {
-                                    Icon(
-                                        imageVector = Icons.Filled.CheckCircle,
-                                        contentDescription = null,
-                                        tint = SuccessGreen,
-                                    )
-                                }
-                            }
-                        )
-                    }
-                }
-            }
-
-            OrbiterActionButton(
-                imageVector = Icons.Filled.Add,
-                contentDescription = "Register server",
-                onClick = onAddServerClick
             )
+
+            TextButton(onClick = onDisconnect) {
+                Text(stringResource(R.string.disconnect), color = NetflixRed)
+            }
         }
     }
 }
@@ -1669,23 +1964,22 @@ private fun DashboardWindowControls(
                     .background(CardBackground.copy(alpha = 0.75f), RoundedCornerShape(12.dp)),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(
+                Image(
                     painter = painterResource(id = R.drawable.ic_launcher_foreground),
-                    contentDescription = "App Icon",
-                    tint = Color.Unspecified,
+                    contentDescription = stringResource(R.string.app_name),
                     modifier = Modifier.size(30.dp)
                 )
             }
 
             OrbiterActionButton(
                 imageVector = Icons.Filled.Minimize,
-                contentDescription = "Minimize",
+                contentDescription = stringResource(R.string.minimize),
                 onClick = onMinimize
             )
 
             OrbiterActionButton(
                 imageVector = Icons.Filled.Close,
-                contentDescription = "Close",
+                contentDescription = stringResource(R.string.close),
                 onClick = onClose
             )
         }
@@ -1822,14 +2116,14 @@ private fun rememberVideoFileMetadata(file: SMBFileItem, isVideoFile: Boolean): 
         key2 = lookupRequest.folderPath,
     ) {
         if (cachedMetadata != null) {
-            Log.d(
+            logMetadataTrace(
                 FILE_THUMBNAIL_LOG_TAG,
                 "Metadata immediate cache hit for file=${file.path} code=${lookupRequest.code}"
             )
             return@produceState
         }
 
-        Log.d(
+        logMetadataTrace(
             FILE_THUMBNAIL_LOG_TAG,
             "Resolving metadata for file=${file.path} code=${lookupRequest.code} path='${lookupRequest.folderPath}'"
         )
@@ -1859,14 +2153,14 @@ private fun rememberGroupMetadata(groupCode: String, folderPath: String): JvrMov
         key2 = normalizedFolderPath,
     ) {
         if (cachedMetadata != null) {
-            Log.d(
+            logMetadataTrace(
                 GROUP_THUMBNAIL_LOG_TAG,
                 "Metadata immediate cache hit for group=$normalizedCode path='$normalizedFolderPath' (title='${cachedMetadata.title}')"
             )
             return@produceState
         }
 
-        Log.d(
+        logMetadataTrace(
             GROUP_THUMBNAIL_LOG_TAG,
             "Resolving metadata for virtual group code=$normalizedCode path='$normalizedFolderPath'"
         )
@@ -1877,12 +2171,12 @@ private fun rememberGroupMetadata(groupCode: String, folderPath: String): JvrMov
         )
 
         if (metadata == null) {
-            Log.d(
+            logMetadataTrace(
                 GROUP_THUMBNAIL_LOG_TAG,
                 "No remote metadata for group=$normalizedCode. Falling back to generated video thumbnail."
             )
         } else {
-            Log.d(
+            logMetadataTrace(
                 GROUP_THUMBNAIL_LOG_TAG,
                 "Metadata loaded for group=$normalizedCode posterUrl=${metadata.posterUrl ?: "<none>"}"
             )
@@ -1928,7 +2222,7 @@ private fun ServerListPanel(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "Servers",
+                    text = stringResource(R.string.sources),
                     style = MaterialTheme.typography.headlineSmall,
                     color = TextPrimary
                 )
@@ -1938,7 +2232,7 @@ private fun ServerListPanel(
                 ) {
                     Icon(
                         imageVector = Icons.Filled.Add,
-                        contentDescription = "Add Server",
+                        contentDescription = stringResource(R.string.add_server),
                         tint = NetflixRed
                     )
                 }
@@ -1984,7 +2278,7 @@ private fun ServerListPanel(
 @Composable
 private fun FileBrowserPanel(
     files: List<SMBFileItem>,
-    recentVideos: List<RecentVideo>,
+    favoritePaths: Set<String>,
     currentPath: String,
     isConnected: Boolean,
     isLoading: Boolean,
@@ -2008,7 +2302,7 @@ private fun FileBrowserPanel(
     var selectedPaths by remember { mutableStateOf<Set<String>>(emptySet()) }
     var showDeleteConfirmDialog by remember { mutableStateOf(false) }
     var isDeleteInProgress by remember { mutableStateOf(false) }
-    var activeVirtualGroupKey by remember(currentPath) { mutableStateOf<String?>(null) }
+    var activeVirtualGroupKey by rememberSaveable(currentPath) { mutableStateOf<String?>(null) }
 
     val virtualGroups = remember(files) { buildVirtualVideoGroups(files) }
     val activeVirtualGroup = remember(virtualGroups, activeVirtualGroupKey) {
@@ -2038,6 +2332,13 @@ private fun FileBrowserPanel(
             }
         } ?: currentPath
     }
+    val canNavigateUp = (activeVirtualGroup != null || (currentPath.isNotEmpty() && currentPath != "/")) && !isDeleteMode
+    val navigateUpLabel =
+        if (activeVirtualGroup != null) {
+            stringResource(R.string.back_to_folder_list)
+        } else {
+            stringResource(R.string.back_to_parent_folder)
+        }
 
     LaunchedEffect(displayItems, isDeleteMode) {
         selectedPaths = if (isDeleteMode) {
@@ -2192,7 +2493,7 @@ private fun FileBrowserPanel(
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "Files",
+                        text = stringResource(R.string.files),
                         style = MaterialTheme.typography.headlineSmall,
                         color = TextPrimary
                     )
@@ -2200,7 +2501,10 @@ private fun FileBrowserPanel(
                         isDeleteMode -> {
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
-                                text = "${selectedPaths.size} selected",
+                                text = stringResource(
+                                    R.string.files_selected_count,
+                                    selectedPaths.size,
+                                ),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = if (selectedPaths.isEmpty()) TextTertiary else NetflixRed,
                                 maxLines = 1
@@ -2234,9 +2538,9 @@ private fun FileBrowserPanel(
                                 Icons.AutoMirrored.Filled.ViewList
                             },
                             contentDescription = if (viewMode == FileBrowserViewMode.List) {
-                                "Switch to thumbnail view"
+                                stringResource(R.string.switch_to_thumbnail_view)
                             } else {
-                                "Switch to list view"
+                                stringResource(R.string.switch_to_list_view)
                             },
                             tint = if (isDeleteMode) TextTertiary else TextSecondary
                         )
@@ -2262,23 +2566,14 @@ private fun FileBrowserPanel(
                         Icon(
                             imageVector = Icons.Filled.Delete,
                             contentDescription = if (isDeleteMode) {
-                                "Confirm selected file deletion"
+                                stringResource(R.string.confirm_selected_file_deletion)
                             } else {
-                                "Select files to delete"
+                                stringResource(R.string.select_files_to_delete)
                             },
                             tint = if (isDeleteMode) NetflixRed else TextSecondary
                         )
                     }
 
-                    if ((activeVirtualGroup != null || (currentPath.isNotEmpty() && currentPath != "/")) && !isDeleteMode) {
-                        IconButton(onClick = ::handleBackAction) {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                contentDescription = "Back",
-                                tint = TextSecondary
-                            )
-                        }
-                    }
                 }
             }
 
@@ -2291,7 +2586,7 @@ private fun FileBrowserPanel(
                 !isConnected -> {
                     EmptyState(
                         icon = Icons.Filled.Cloud,
-                        message = "Connect to a server to browse files"
+                        message = stringResource(R.string.connect_to_browse_files)
                     )
                 }
 
@@ -2330,10 +2625,29 @@ private fun FileBrowserPanel(
                 }
 
                 displayItems.isEmpty() -> {
-                    EmptyState(
-                        icon = Icons.Filled.FolderOpen,
-                        message = "No files in this directory"
-                    )
+                    if (canNavigateUp) {
+                        Column(
+                            modifier = Modifier.fillMaxSize(),
+                            verticalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            NavigateUpListCard(
+                                title = navigateUpLabel,
+                                onClick = ::handleBackAction,
+                            )
+                            EmptyState(
+                                icon = Icons.Filled.FolderOpen,
+                                message = stringResource(R.string.no_files_in_directory),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .weight(1f),
+                            )
+                        }
+                    } else {
+                        EmptyState(
+                            icon = Icons.Filled.FolderOpen,
+                            message = stringResource(R.string.no_files_in_directory)
+                        )
+                    }
                 }
 
                 else -> {
@@ -2342,6 +2656,14 @@ private fun FileBrowserPanel(
                             LazyColumn(
                                 verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
+                                if (canNavigateUp) {
+                                    item(key = "navigate-up") {
+                                        NavigateUpListCard(
+                                            title = navigateUpLabel,
+                                            onClick = ::handleBackAction,
+                                        )
+                                    }
+                                }
                                 items(
                                     items = displayItems,
                                     key = { item -> item.stableKey }
@@ -2369,9 +2691,7 @@ private fun FileBrowserPanel(
                                             val file = item.file
                                             val isVideoFile =
                                                 !file.isDirectory && SMBClient.isVideoFile(file.name)
-                                            val videoInDb =
-                                                recentVideos.find { it.filePath == file.path }
-                                            val isFavorite = videoInDb?.isFavorite ?: false
+                                            val isFavorite = favoritePaths.contains(file.path)
                                             val isSelected = selectedPaths.contains(file.path)
 
                                             FileListEntryCard(
@@ -2416,6 +2736,17 @@ private fun FileBrowserPanel(
                                 verticalArrangement = Arrangement.spacedBy(10.dp),
                                 horizontalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
+                                if (canNavigateUp) {
+                                    item(
+                                        key = "navigate-up",
+                                        span = { GridItemSpan(maxLineSpan) },
+                                    ) {
+                                        NavigateUpListCard(
+                                            title = navigateUpLabel,
+                                            onClick = ::handleBackAction,
+                                        )
+                                    }
+                                }
                                 items(
                                     items = displayItems,
                                     key = { item -> item.stableKey }
@@ -2443,9 +2774,7 @@ private fun FileBrowserPanel(
                                             val file = item.file
                                             val isVideoFile =
                                                 !file.isDirectory && SMBClient.isVideoFile(file.name)
-                                            val videoInDb =
-                                                recentVideos.find { it.filePath == file.path }
-                                            val isFavorite = videoInDb?.isFavorite ?: false
+                                            val isFavorite = favoritePaths.contains(file.path)
                                             val isSelected = selectedPaths.contains(file.path)
 
                                             FileThumbnailCard(
@@ -2496,10 +2825,15 @@ private fun FileBrowserPanel(
                 }
             },
             title = {
-                Text("Delete selected files?")
+                Text(stringResource(R.string.delete_selected_files_title))
             },
             text = {
-                Text("This will permanently delete ${selectedPaths.size} file(s).")
+                Text(
+                    stringResource(
+                        R.string.delete_selected_files_message,
+                        selectedPaths.size,
+                    )
+                )
             },
             confirmButton = {
                 TextButton(
@@ -2534,7 +2868,7 @@ private fun FileBrowserPanel(
                             color = NetflixRed
                         )
                     } else {
-                        Text("Delete", color = NetflixRed)
+                        Text(stringResource(R.string.delete), color = NetflixRed)
                     }
                 }
             },
@@ -2543,7 +2877,7 @@ private fun FileBrowserPanel(
                     onClick = { showDeleteConfirmDialog = false },
                     enabled = !isDeleteInProgress
                 ) {
-                    Text("Cancel", color = TextSecondary)
+                    Text(stringResource(R.string.cancel), color = TextSecondary)
                 }
             }
         )
@@ -2592,13 +2926,14 @@ private fun buildGroupHoverPreviewSpec(
 
 
 private fun buildLibraryPreviewSpec(
-    video: RecentVideo,
+    video: LibraryVideoItem,
     allowMetadataPosterForGeneratedThumbnail: Boolean = true,
 ): GroupHoverPreviewSpec? {
+    val cachedThumbnailPath = video.thumbnailPath
     return when {
-        allowMetadataPosterForGeneratedThumbnail && !video.thumbnailPath.isNullOrBlank() -> GroupHoverPreviewSpec(
-            model = video.thumbnailPath,
-            diskCacheKey = video.thumbnailPath,
+        allowMetadataPosterForGeneratedThumbnail && !cachedThumbnailPath.isNullOrBlank() -> GroupHoverPreviewSpec(
+            model = cachedThumbnailPath,
+            diskCacheKey = cachedThumbnailPath,
             source = "cached",
         )
 
@@ -3044,6 +3379,68 @@ private fun VirtualGroupListCard(
             anchorBounds = popupAnchorBounds,
             onClick = onPopupClick,
         )
+    }
+}
+
+@Composable
+private fun NavigateUpListCard(
+    title: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isHovered by interactionSource.collectIsHoveredAsState()
+    val isFocused by interactionSource.collectIsFocusedAsState()
+
+    Card(
+        modifier = modifier
+            .fillMaxWidth()
+            .hoverable(interactionSource = interactionSource)
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = onClick,
+            ),
+        colors = CardDefaults.cardColors(containerColor = CardBackground),
+        shape = RoundedCornerShape(10.dp),
+        border = if (isHovered || isFocused) {
+            BorderStroke(1.dp, NetflixRed.copy(alpha = 0.85f))
+        } else {
+            null
+        },
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(44.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(DividerGray.copy(alpha = 0.85f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = stringResource(R.string.back),
+                    tint = TextPrimary,
+                )
+            }
+
+            Spacer(modifier = Modifier.width(12.dp))
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = TextPrimary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
     }
 }
 
@@ -3658,9 +4055,9 @@ private fun FileThumbnailCard(
                         model = imageRequest,
                         imageLoader = ThumbnailImageLoaderProvider.get(context),
                         contentDescription = if (shouldUsePoster) {
-                            "Poster thumbnail"
+                            stringResource(R.string.poster_thumbnail)
                         } else {
-                            "Video thumbnail"
+                            stringResource(R.string.video_thumbnail)
                         },
                         modifier = Modifier.fillMaxSize(),
                         contentScale = ContentScale.Crop
@@ -3686,9 +4083,9 @@ private fun FileThumbnailCard(
                                 Icons.Outlined.FavoriteBorder
                             },
                             contentDescription = if (isFavorite) {
-                                "Remove from favorites"
+                                stringResource(R.string.remove_from_favorites)
                             } else {
-                                "Add to favorites"
+                                stringResource(R.string.add_to_favorites)
                             },
                             tint = if (isFavorite) NetflixRed else TextPrimary
                         )
@@ -3698,7 +4095,7 @@ private fun FileThumbnailCard(
                 if (isSelectionMode && isSelected) {
                     Icon(
                         imageVector = Icons.Filled.CheckCircle,
-                        contentDescription = "Selected for deletion",
+                        contentDescription = stringResource(R.string.selected_for_deletion),
                         tint = NetflixRed,
                         modifier = Modifier
                             .align(Alignment.TopEnd)
@@ -3770,17 +4167,19 @@ private fun LibraryTabChip(
 
 @Composable
 private fun FavoritesPanel(
-    favorites: List<RecentVideo>,
+    favorites: List<FavoriteVideo>,
     recentVideos: List<RecentVideo>,
     isConnected: Boolean,
     currentPreviewKey: String?,
-    onFavoriteClick: (RecentVideo) -> Unit,
+    onFavoriteClick: (FavoriteVideo) -> Unit,
     onRecentClick: (RecentVideo) -> Unit,
-    onFavoriteToggle: (RecentVideo) -> Unit,
+    onFavoriteToggle: (String, String, String, String, Boolean) -> Unit,
+    onRecentRemove: (RecentVideo) -> Unit,
     onPreviewFocused: (DashboardPreviewItem?) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var selectedTab by remember { mutableStateOf(LibraryTab.Favorites) }
+    val favoritePaths = remember(favorites) { favorites.mapTo(linkedSetOf()) { it.filePath } }
     val recentItems = remember(recentVideos) {
         recentVideos.sortedByDescending { it.lastPlayed }
     }
@@ -3812,7 +4211,7 @@ private fun FavoritesPanel(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    text = "Library",
+                    text = stringResource(R.string.library),
                     style = MaterialTheme.typography.headlineSmall,
                     color = TextPrimary,
                 )
@@ -3831,7 +4230,7 @@ private fun FavoritesPanel(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 LibraryTabChip(
-                    text = "Favorites",
+                    text = stringResource(R.string.favorites),
                     selected = selectedTab == LibraryTab.Favorites,
                     onClick = {
                         if (selectedTab != LibraryTab.Favorites) {
@@ -3841,7 +4240,7 @@ private fun FavoritesPanel(
                     },
                 )
                 LibraryTabChip(
-                    text = "Recent",
+                    text = stringResource(R.string.recent),
                     selected = selectedTab == LibraryTab.Recent,
                     onClick = {
                         if (selectedTab != LibraryTab.Recent) {
@@ -3860,27 +4259,37 @@ private fun FavoritesPanel(
                 !isConnected -> {
                     EmptyState(
                         icon = Icons.Filled.Cloud,
-                        message = "Connect to view library",
+                        message = stringResource(R.string.connect_to_view_library),
                     )
                 }
 
                 selectedTab == LibraryTab.Favorites && favorites.isEmpty() -> {
                     EmptyState(
                         icon = Icons.Outlined.FavoriteBorder,
-                        message = "No favorites yet",
+                        message = stringResource(R.string.no_favorites_yet),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f),
                     )
                 }
 
                 selectedTab == LibraryTab.Recent && recentItems.isEmpty() -> {
                     EmptyState(
                         icon = Icons.Filled.Movie,
-                        message = "No recent videos yet",
+                        message = stringResource(R.string.no_recent_videos_yet),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f),
                     )
                 }
 
                 selectedTab == LibraryTab.Favorites -> {
                     LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f),
                         verticalArrangement = Arrangement.spacedBy(12.dp),
+                        contentPadding = PaddingValues(bottom = 4.dp),
                     ) {
                         items(favorites) { video ->
                             val allowMetadataPoster = remember(video.fileName) {
@@ -3899,7 +4308,6 @@ private fun FavoritesPanel(
                                 }
                             }
                             val previewItem = remember(
-                                video.id,
                                 video.filePath,
                                 video.fileName,
                                 video.resolvedTitle,
@@ -3927,7 +4335,15 @@ private fun FavoritesPanel(
                                 displayTitleOverride = displayTitle,
                                 allowMetadataPoster = allowMetadataPoster,
                                 onClick = { onFavoriteClick(video) },
-                                onFavoriteToggle = { onFavoriteToggle(video) },
+                                onFavoriteToggle = {
+                                    onFavoriteToggle(
+                                        video.filePath,
+                                        video.fileName,
+                                        video.serverAddress,
+                                        video.shareName,
+                                        true,
+                                    )
+                                },
                                 isPreviewFocused = currentPreviewKey == previewItem.key,
                                 onRequestPreview = { onPreviewFocused(previewItem) },
                                 onHoverFocusChanged = { isFocused ->
@@ -3940,10 +4356,14 @@ private fun FavoritesPanel(
 
                 else -> {
                     LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f),
                         verticalArrangement = Arrangement.spacedBy(12.dp),
+                        contentPadding = PaddingValues(bottom = 4.dp),
                     ) {
                         items(recentItems) { video ->
-                            val isFavorite = video.isFavorite || favorites.any { it.id == video.id }
+                            val isFavorite = favoritePaths.contains(video.filePath)
                             val allowMetadataPoster = remember(video.fileName) {
                                 shouldUseMetadataForIndividualVideo(video.fileName)
                             }
@@ -3989,8 +4409,17 @@ private fun FavoritesPanel(
                                 allowMetadataPoster = allowMetadataPoster,
                                 onClick = { onRecentClick(video) },
                                 onFavoriteToggle = {
-                                    onFavoriteToggle(video.copy(isFavorite = isFavorite))
+                                    onFavoriteToggle(
+                                        video.filePath,
+                                        video.fileName,
+                                        video.serverAddress,
+                                        video.shareName,
+                                        isFavorite,
+                                    )
                                 },
+                                secondaryActionIcon = Icons.Filled.Delete,
+                                secondaryActionContentDescription = stringResource(R.string.remove_from_recent),
+                                onSecondaryActionClick = { onRecentRemove(video) },
                                 isPreviewFocused = currentPreviewKey == previewItem.key,
                                 onRequestPreview = { onPreviewFocused(previewItem) },
                                 onHoverFocusChanged = { isFocused ->
@@ -4097,7 +4526,11 @@ private fun AddServerDialog(
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 Text(
-                    text = if (initialServer == null) "Add Server" else "Edit Server",
+                    text = if (initialServer == null) {
+                        stringResource(R.string.add_server)
+                    } else {
+                        stringResource(R.string.edit_server_title)
+                    },
                     style = MaterialTheme.typography.headlineSmall,
                     color = TextPrimary
                 )
@@ -4108,7 +4541,7 @@ private fun AddServerDialog(
                     OutlinedTextField(
                         value = name,
                         onValueChange = { name = it },
-                        label = { Text("Server Name") },
+                        label = { Text(stringResource(R.string.server_name)) },
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true,
                         enabled = !isTestingConnection
@@ -4116,8 +4549,8 @@ private fun AddServerDialog(
                     OutlinedTextField(
                         value = address,
                         onValueChange = { address = it },
-                        label = { Text("IP Address") },
-                        placeholder = { Text("e.g., 192.168.1.100") },
+                        label = { Text(stringResource(R.string.ip_address)) },
+                        placeholder = { Text(stringResource(R.string.ip_address_example)) },
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true,
                         enabled = !isTestingConnection
@@ -4125,8 +4558,8 @@ private fun AddServerDialog(
                     OutlinedTextField(
                         value = shareName,
                         onValueChange = { shareName = it },
-                        label = { Text("Share Name (Optional)") },
-                        placeholder = { Text("e.g., Videos") },
+                        label = { Text(stringResource(R.string.share_name_optional)) },
+                        placeholder = { Text(stringResource(R.string.share_name_example)) },
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true,
                         enabled = !isTestingConnection
@@ -4134,7 +4567,7 @@ private fun AddServerDialog(
                     OutlinedTextField(
                         value = username,
                         onValueChange = { username = it },
-                        label = { Text("Username") },
+                        label = { Text(stringResource(R.string.username)) },
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true,
                         enabled = !isTestingConnection
@@ -4142,7 +4575,7 @@ private fun AddServerDialog(
                     OutlinedTextField(
                         value = password,
                         onValueChange = { password = it },
-                        label = { Text("Password") },
+                        label = { Text(stringResource(R.string.password)) },
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true,
                         visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
@@ -4151,7 +4584,7 @@ private fun AddServerDialog(
                     OutlinedTextField(
                         value = domain,
                         onValueChange = { domain = it },
-                        label = { Text("Domain (optional)") },
+                        label = { Text(stringResource(R.string.domain_optional)) },
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true,
                         enabled = !isTestingConnection
@@ -4175,7 +4608,7 @@ private fun AddServerDialog(
                         onClick = onDismiss,
                         enabled = !isTestingConnection
                     ) {
-                        Text("Cancel", color = TextSecondary)
+                        Text(stringResource(R.string.cancel), color = TextSecondary)
                     }
                     Spacer(modifier = Modifier.width(8.dp))
 
@@ -4213,8 +4646,10 @@ private fun AddServerDialog(
                                         )
                                         onSave(serverToSave)
                                     } else {
-                                        connectionError =
-                                            "Connection failed: ${result.exceptionOrNull()?.message}"
+                                        connectionError = context.getString(
+                                            R.string.connection_failed_message,
+                                            result.exceptionOrNull()?.message.orEmpty(),
+                                        )
                                         isTestingConnection = false
                                     }
                                 }
@@ -4232,7 +4667,7 @@ private fun AddServerDialog(
                                 strokeWidth = 2.dp
                             )
                         } else {
-                            Text("Save")
+                            Text(stringResource(R.string.save))
                         }
                     }
                 }

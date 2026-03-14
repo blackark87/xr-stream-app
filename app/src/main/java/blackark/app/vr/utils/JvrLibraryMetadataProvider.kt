@@ -48,12 +48,13 @@ object JvrLibraryMetadataProvider {
     private const val TAG = "JvrLibraryMetadata"
     private const val BASE_URL = "https://jvrlibrary.com"
     private const val USER_AGENT =
-        "Mozilla/5.0 (Android; XRStream) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36"
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15"
 
     private const val SOURCE_JVR = "jvr"
     private const val SOURCE_AV_WIKI = "avwiki"
     private const val SOURCE_NONE = "none"
-    private const val THROTTLED_REQUEST_INTERVAL_MS = 750L
+    // Minimum delay between metadata requests to the same remote host.
+    private const val THROTTLED_REQUEST_INTERVAL_MS = 300L
     private val THROTTLED_HOSTS = setOf(
         "jvrlibrary.com",
         "av-wiki.net",
@@ -74,6 +75,10 @@ object JvrLibraryMetadataProvider {
     private const val VR_TOKEN_PATTERN = "(?:VR|8K|8KVR|VR8K)"
     private const val VR_BRACKET_TAG_PATTERN =
         "(?:\\[(?:$VR_TOKEN_PATTERN)(?:\\s*(?:$VR_TOKEN_PATTERN))*]|【(?:$VR_TOKEN_PATTERN)(?:\\s*(?:$VR_TOKEN_PATTERN))*】)"
+
+    private fun logMetadataTrace(message: String) {
+        Log.v(TAG, message)
+    }
 
     fun peekCached(rawCode: String): JvrMovieMetadata? {
         val code = rawCode.trim().uppercase()
@@ -114,10 +119,7 @@ object JvrLibraryMetadataProvider {
         val cacheKey = buildCacheKey(code, source)
         val allowJvrLookup = shouldLookupJvrForPath(folderPath)
 
-        Log.d(
-            TAG,
-            "Lookup request code=$code path='$folderPath' source=$source allowJvr=$allowJvrLookup"
-        )
+        logMetadataTrace("Lookup request code=$code path='$folderPath' source=$source allowJvr=$allowJvrLookup")
 
         metadataCache[cacheKey]?.let { cached ->
             val normalized = normalizeCachedMetadata(cached)
@@ -125,17 +127,14 @@ object JvrLibraryMetadataProvider {
             if (normalized != cached) {
                 savePersistedMetadata(appContext, cacheKey, source, normalized)
             }
-            Log.d(
-                TAG,
-                "Memory cache hit for $cacheKey (poster=${normalized.posterUrl ?: "<none>"})"
-            )
+            logMetadataTrace("Memory cache hit for $cacheKey (poster=${normalized.posterUrl ?: "<none>"})")
             return normalized
         }
 
         loadPersistedMetadata(appContext, cacheKey)?.let { persisted ->
             if (persisted.metadata.isMiss) {
                 missCache += cacheKey
-                Log.d(TAG, "DB miss-cache hit for $cacheKey; skipping remote lookup")
+                logMetadataTrace("DB miss-cache hit for $cacheKey; skipping remote lookup")
                 return null
             }
 
@@ -152,10 +151,7 @@ object JvrLibraryMetadataProvider {
                 savePersistedMetadata(appContext, cacheKey, source, cachedMetadata)
             }
 
-            Log.d(
-                TAG,
-                "DB cache hit for $cacheKey (poster=${cachedMetadata.posterUrl ?: "<none>"})"
-            )
+            logMetadataTrace("DB cache hit for $cacheKey (poster=${cachedMetadata.posterUrl ?: "<none>"})")
             return cachedMetadata
         }
 
@@ -180,22 +176,16 @@ object JvrLibraryMetadataProvider {
                 )
             }
 
-            Log.d(
-                TAG,
-                "DB code-level cache hit for code=$code source=${persistedByCode.metadata.source} (poster=${cachedMetadata.posterUrl ?: "<none>"})"
-            )
+            logMetadataTrace("DB code-level cache hit for code=$code source=${persistedByCode.metadata.source} (poster=${cachedMetadata.posterUrl ?: "<none>"})")
             return cachedMetadata
         }
 
         if (cacheKey in missCache) {
-            Log.d(TAG, "Memory miss-cache hit for $cacheKey; skipping remote lookup")
+            logMetadataTrace("Memory miss-cache hit for $cacheKey; skipping remote lookup")
             return null
         }
 
-        Log.d(
-            TAG,
-            "Cache miss for $cacheKey; fetching metadata (source=$source, allowJvr=$allowJvrLookup, path='$folderPath')"
-        )
+        logMetadataTrace("Cache miss for $cacheKey; fetching metadata (source=$source, allowJvr=$allowJvrLookup, path='$folderPath')")
 
         val remoteMetadata = withContext(Dispatchers.IO) {
             when (source) {
@@ -216,12 +206,9 @@ object JvrLibraryMetadataProvider {
             missCache += cacheKey
             savePersistedMiss(appContext, cacheKey, code, source)
             if (!allowJvrLookup && source != SOURCE_AV_WIKI) {
-                Log.d(
-                    TAG,
-                    "No metadata resolved for $cacheKey because path is not eligible for JVR lookup; stored DB miss"
-                )
+                logMetadataTrace("No metadata resolved for $cacheKey because path is not eligible for JVR lookup; stored DB miss")
             } else {
-                Log.d(TAG, "No metadata resolved for $cacheKey; stored DB miss")
+                logMetadataTrace("No metadata resolved for $cacheKey; stored DB miss")
             }
             return null
         }
@@ -234,10 +221,7 @@ object JvrLibraryMetadataProvider {
         savePersistedMetadata(appContext, cacheKey, source, localizedMetadata)
         missCache.remove(cacheKey)
 
-        Log.d(
-            TAG,
-            "Resolved metadata for $cacheKey title='${localizedMetadata.title}' poster=${localizedMetadata.posterUrl ?: "<none>"}"
-        )
+        logMetadataTrace("Resolved metadata for $cacheKey title='${localizedMetadata.title}' poster=${localizedMetadata.posterUrl ?: "<none>"}")
 
         return localizedMetadata
     }
@@ -340,8 +324,7 @@ object JvrLibraryMetadataProvider {
             else -> SOURCE_NONE
         }
 
-        Log.d(
-            TAG,
+        logMetadataTrace(
             "Metadata source routing path='$folderPath' normalized='$normalized' makerYear=$hasMakerYearPattern avVr=$hasAvVrPattern -> source=$source"
         )
 
@@ -385,7 +368,7 @@ object JvrLibraryMetadataProvider {
 
     private suspend fun fetchByCodeFromAvWiki(code: String): JvrMovieMetadata? {
         val avWikiUrl = "https://av-wiki.net/${code.lowercase()}/"
-        Log.d(TAG, "Starting AV-Wiki metadata lookup for $code url=$avWikiUrl")
+        logMetadataTrace("Starting AV-Wiki metadata lookup for $code url=$avWikiUrl")
         val html = fetchPageHtml(avWikiUrl) ?: return null
         return parseAvWikiMetadataHtml(code = code, html = html, baseUrl = avWikiUrl)
     }
@@ -395,22 +378,16 @@ object JvrLibraryMetadataProvider {
         val zhUrl = "$BASE_URL/zh/jvr?id=$encodedCode"
         val enUrl = "$BASE_URL/jvr?id=$encodedCode"
 
-        Log.d(TAG, "Starting JVR metadata lookup for $code")
+        logMetadataTrace("Starting JVR metadata lookup for $code")
 
         val zhMetadata = fetchPageHtml(zhUrl)?.let { parseJvrMetadataHtml(code, it) }
-        Log.d(
-            TAG,
-            "JVR ZH parse for $code -> title='${zhMetadata?.title ?: "<none>"}', poster=${zhMetadata?.posterUrl ?: "<none>"}"
-        )
+        logMetadataTrace("JVR ZH parse for $code -> title='${zhMetadata?.title ?: "<none>"}', poster=${zhMetadata?.posterUrl ?: "<none>"}")
 
         val enMetadata = fetchPageHtml(enUrl)?.let { parseJvrMetadataHtml(code, it) }
-        Log.d(
-            TAG,
-            "JVR EN parse for $code -> title='${enMetadata?.title ?: "<none>"}', poster=${enMetadata?.posterUrl ?: "<none>"}"
-        )
+        logMetadataTrace("JVR EN parse for $code -> title='${enMetadata?.title ?: "<none>"}', poster=${enMetadata?.posterUrl ?: "<none>"}")
 
         if (zhMetadata == null && enMetadata == null) {
-            Log.d(TAG, "JVR lookup finished for $code with no metadata")
+            logMetadataTrace("JVR lookup finished for $code with no metadata")
             return null
         }
 
@@ -813,7 +790,7 @@ object JvrLibraryMetadataProvider {
                 return
             }
 
-            Log.d(TAG, "Throttling $host request for ${waitMs}ms")
+            logMetadataTrace("Throttling $host request for ${waitMs}ms")
             delay(waitMs)
         }
     }
@@ -845,7 +822,7 @@ object JvrLibraryMetadataProvider {
             titleFromDiv.isNullOrBlank() &&
             !hasStructuredMetadata
         ) {
-            Log.d(TAG, "JVR HTML parse had no useful metadata for code=$code")
+            logMetadataTrace("JVR HTML parse had no useful metadata for code=$code")
             return null
         }
 
@@ -859,10 +836,7 @@ object JvrLibraryMetadataProvider {
         val normalizedImageUrl = resolvePosterImageUrl(code, ogImage, document)
         val absolutePosterUrl = normalizedImageUrl?.let(::toAbsoluteUrl)
 
-        Log.d(
-            TAG,
-            "JVR parsed HTML for $code -> title='$parsedTitle', poster=${absolutePosterUrl ?: "<none>"}, releaseDate=${releaseDate ?: "<none>"}, studio=${studio ?: "<none>"}, casts=${casts.size}, genres=${genres.size}"
-        )
+        logMetadataTrace("JVR parsed HTML for $code -> title='$parsedTitle', poster=${absolutePosterUrl ?: "<none>"}, releaseDate=${releaseDate ?: "<none>"}, studio=${studio ?: "<none>"}, casts=${casts.size}, genres=${genres.size}")
 
         return JvrMovieMetadata(
             code = code,
@@ -900,7 +874,7 @@ object JvrLibraryMetadataProvider {
             releaseDate == null &&
             casts.isEmpty()
         ) {
-            Log.d(TAG, "AV-Wiki HTML parse had no useful metadata for code=$code")
+            logMetadataTrace("AV-Wiki HTML parse had no useful metadata for code=$code")
             return null
         }
 
@@ -912,10 +886,7 @@ object JvrLibraryMetadataProvider {
         )
         val posterUrl = rawSrc.takeIf { it.isNotBlank() }?.let(::toAbsoluteUrl)
 
-        Log.d(
-            TAG,
-            "AV-Wiki parsed HTML for $code -> title='$title', poster=${posterUrl ?: "<none>"}, releaseDate=${releaseDate ?: "<none>"}, studio=${studio ?: "<none>"}, casts=${casts.size}"
-        )
+        logMetadataTrace("AV-Wiki parsed HTML for $code -> title='$title', poster=${posterUrl ?: "<none>"}, releaseDate=${releaseDate ?: "<none>"}, studio=${studio ?: "<none>"}, casts=${casts.size}")
 
         return JvrMovieMetadata(
             code = code,
@@ -939,18 +910,18 @@ object JvrLibraryMetadataProvider {
     private fun resolvePosterImageUrl(code: String, ogImage: String?, document: Document): String? {
         if (ogImage.isNullOrBlank()) {
             val fallback = extractCoverImageFromImgTag(code, document)
-            Log.d(TAG, "og:image missing for $code. <img> fallback=${fallback ?: "<none>"}")
+            logMetadataTrace("og:image missing for $code. <img> fallback=${fallback ?: "<none>"}")
             return fallback
         }
 
         if (ogImage.startsWith("https://awsimgsrc.dmm.co.jp", ignoreCase = true)) {
             val staticPoster = extractCoverImageFromImgTag(code, document)
             if (!staticPoster.isNullOrBlank()) {
-                Log.d(TAG, "og:image is awsimgsrc for $code. Using static fallback=$staticPoster")
+                logMetadataTrace("og:image is awsimgsrc for $code. Using static fallback=$staticPoster")
                 return staticPoster
             }
 
-            Log.d(TAG, "og:image is awsimgsrc for $code, but static cover fallback was not found")
+            logMetadataTrace("og:image is awsimgsrc for $code, but static cover fallback was not found")
         }
 
         return ogImage
