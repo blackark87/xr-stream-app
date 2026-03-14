@@ -128,7 +128,6 @@ import androidx.xr.compose.subspace.ResizePolicy
 import androidx.xr.compose.subspace.SpatialMainPanel
 import androidx.xr.compose.subspace.layout.SubspaceModifier
 import androidx.xr.compose.subspace.layout.height
-import androidx.xr.compose.subspace.layout.onGloballyPositioned as onSubspaceGloballyPositioned
 import androidx.xr.compose.subspace.layout.offset
 import androidx.xr.compose.subspace.layout.rotate
 import androidx.xr.compose.subspace.layout.width
@@ -177,6 +176,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import kotlin.math.roundToInt
+import androidx.xr.compose.subspace.layout.onGloballyPositioned as onSubspaceGloballyPositioned
 
 /**
  * Main Dashboard Screen - Material 3 dashboard with XR pane layout support.
@@ -2355,7 +2355,8 @@ private fun FileBrowserPanel(
             }
         } ?: currentPath
     }
-    val canNavigateUp = (activeVirtualGroup != null || (currentPath.isNotEmpty() && currentPath != "/")) && !isDeleteMode
+    val canNavigateUp =
+        (activeVirtualGroup != null || (currentPath.isNotEmpty() && currentPath != "/")) && !isDeleteMode
     val navigateUpLabel =
         if (activeVirtualGroup != null) {
             stringResource(R.string.back_to_folder_list)

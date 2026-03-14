@@ -21,9 +21,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
@@ -120,7 +118,7 @@ private fun clickInteractionPolicy(
 @Composable
 private fun rememberPlaybackScrollState(
     onDelta: (Float) -> Unit = {},
-) : androidx.compose.foundation.gestures.ScrollableState {
+): androidx.compose.foundation.gestures.ScrollableState {
     val currentOnDelta = rememberUpdatedState(onDelta)
     return rememberScrollableState { delta ->
         currentOnDelta.value(delta)
@@ -254,7 +252,8 @@ fun VideoPlayerScreen(
 
     val playerState by videoPlayerViewModel.state.collectAsState()
     val dashboardPanelPose by blackark.app.vr.AppState.dashboardPanelPose.collectAsState()
-    val requestNavigateBackState = rememberUpdatedState { videoPlayerViewModel.requestNavigateBack() }
+    val requestNavigateBackState =
+        rememberUpdatedState { videoPlayerViewModel.requestNavigateBack() }
 
     DisposableEffect(Unit) {
         blackark.app.vr.AppState.setConsumePlaybackBackKeyEvents(true)
@@ -647,7 +646,11 @@ private fun Standard2DPlayer(
                                 videoPlayerViewModel.dispatchPlaybackKeyEvent(event)
                             },
                             controlsAlignment = Alignment.BottomCenter,
-                            controlsPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 28.dp),
+                            controlsPadding = PaddingValues(
+                                start = 20.dp,
+                                end = 20.dp,
+                                bottom = 28.dp
+                            ),
                             controlsModifier = Modifier
                                 .fillMaxWidth(0.92f)
                                 .widthIn(max = 1080.dp),

@@ -72,7 +72,10 @@ class VideoRepository(
         return favoriteVideoDao.getFavoriteVideos()
     }
 
-    fun getFavoriteVideosBySource(serverAddress: String, shareName: String): Flow<List<FavoriteVideo>> {
+    fun getFavoriteVideosBySource(
+        serverAddress: String,
+        shareName: String
+    ): Flow<List<FavoriteVideo>> {
         return favoriteVideoDao.getFavoriteVideosBySource(serverAddress, shareName)
     }
 

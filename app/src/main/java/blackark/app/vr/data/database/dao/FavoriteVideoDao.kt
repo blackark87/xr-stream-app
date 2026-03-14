@@ -19,7 +19,10 @@ interface FavoriteVideoDao {
         ORDER BY fileName ASC
         """
     )
-    fun getFavoriteVideosBySource(serverAddress: String, shareName: String): Flow<List<FavoriteVideo>>
+    fun getFavoriteVideosBySource(
+        serverAddress: String,
+        shareName: String
+    ): Flow<List<FavoriteVideo>>
 
     @Query("SELECT * FROM favorite_videos WHERE filePath = :filePath LIMIT 1")
     suspend fun getFavoriteByPath(filePath: String): FavoriteVideo?

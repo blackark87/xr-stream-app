@@ -6,8 +6,8 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import blackark.app.vr.data.database.dao.FavoriteVideoDao
 import blackark.app.vr.data.database.dao.ServerDao
-import blackark.app.vr.data.database.dao.VideoDisplaySettingsDao
 import blackark.app.vr.data.database.dao.VideoDao
+import blackark.app.vr.data.database.dao.VideoDisplaySettingsDao
 import blackark.app.vr.data.database.dao.VirtualGroupMetadataDao
 import blackark.app.vr.data.database.entity.FavoriteVideo
 import blackark.app.vr.data.database.entity.JvrPerformer

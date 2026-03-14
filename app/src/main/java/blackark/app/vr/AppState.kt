@@ -35,7 +35,8 @@ object AppState {
     )
 
     private val _consumePlaybackBackKeyEvents = MutableStateFlow(false)
-    val consumePlaybackBackKeyEvents: StateFlow<Boolean> = _consumePlaybackBackKeyEvents.asStateFlow()
+    val consumePlaybackBackKeyEvents: StateFlow<Boolean> =
+        _consumePlaybackBackKeyEvents.asStateFlow()
 
     private val _dashboardPanelPose = MutableStateFlow<Pose?>(null)
     val dashboardPanelPose: StateFlow<Pose?> = _dashboardPanelPose.asStateFlow()

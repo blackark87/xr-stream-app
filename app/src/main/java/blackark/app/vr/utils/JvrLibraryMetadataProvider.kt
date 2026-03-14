@@ -53,6 +53,7 @@ object JvrLibraryMetadataProvider {
     private const val SOURCE_JVR = "jvr"
     private const val SOURCE_AV_WIKI = "avwiki"
     private const val SOURCE_NONE = "none"
+
     // Minimum delay between metadata requests to the same remote host.
     private const val THROTTLED_REQUEST_INTERVAL_MS = 300L
     private val THROTTLED_HOSTS = setOf(

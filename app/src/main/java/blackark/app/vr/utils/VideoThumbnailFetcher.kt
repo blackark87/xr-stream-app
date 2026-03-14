@@ -5,6 +5,7 @@ import android.media.MediaDataSource
 import android.media.MediaMetadataRetriever
 import android.util.Log
 import androidx.core.net.toUri
+import blackark.app.vr.data.database.entity.VideoDisplaySettings
 import coil3.ImageLoader
 import coil3.decode.DataSource
 import coil3.decode.ImageSource
@@ -12,7 +13,6 @@ import coil3.fetch.FetchResult
 import coil3.fetch.Fetcher
 import coil3.fetch.SourceFetchResult
 import coil3.request.Options
-import blackark.app.vr.data.database.entity.VideoDisplaySettings
 import jcifs.smb.SmbFile
 import jcifs.smb.SmbRandomAccessFile
 import kotlinx.coroutines.CancellationException
@@ -392,7 +392,11 @@ class VideoThumbnailFetcher(
             if (parsedIdentity != null) {
                 val existingDisplaySettings =
                     db.videoDisplaySettingsDao().getByPath(parsedIdentity.filePath)
-                if (shouldApplyInferredDisplayProfile(existingDisplaySettings, inferredDisplayProfile)) {
+                if (shouldApplyInferredDisplayProfile(
+                        existingDisplaySettings,
+                        inferredDisplayProfile
+                    )
+                ) {
                     db.videoDisplaySettingsDao().upsert(
                         VideoDisplaySettings(
                             filePath = parsedIdentity.filePath,

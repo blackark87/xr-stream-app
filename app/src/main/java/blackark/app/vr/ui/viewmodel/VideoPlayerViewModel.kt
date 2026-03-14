@@ -690,7 +690,8 @@ class VideoPlayerViewModel(
         pendingInitializationPath = requestedPath
         this.appContext = context.applicationContext
         this.currentSmbConfig = smbConfig
-        audioManager = context.applicationContext.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+        audioManager =
+            context.applicationContext.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
         registerVolumeObserverIfNeeded()
         syncVolumeStateFromSystem(reason = "initializePlayer-start")
 
