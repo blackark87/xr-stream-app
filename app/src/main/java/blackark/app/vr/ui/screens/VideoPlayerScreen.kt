@@ -1,6 +1,12 @@
 package blackark.app.vr.ui.screens
 
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
+import android.os.Build
 import android.util.Log
+import android.window.OnBackInvokedCallback
+import android.window.OnBackInvokedDispatcher
 import androidx.activity.compose.BackHandler
 import androidx.annotation.OptIn
 import androidx.compose.foundation.background
@@ -24,6 +30,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -38,6 +45,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.KeyEventType
@@ -88,8 +96,16 @@ import blackark.app.vr.ui.viewmodel.VideoFormat
 import blackark.app.vr.ui.viewmodel.VideoPlayerState
 import blackark.app.vr.ui.viewmodel.VideoPlayerViewModel
 import blackark.app.vr.ui.viewmodel.VideoPlayerViewModelFactory
+import kotlinx.coroutines.delay
 
 private const val TAG = "VideoPlayerScreen"
+
+private tailrec fun Context.findActivity(): Activity? =
+    when (this) {
+        is Activity -> this
+        is ContextWrapper -> baseContext.findActivity()
+        else -> null
+    }
 
 private fun clickInteractionPolicy(
     isEnabled: Boolean = true,
@@ -127,9 +143,24 @@ private fun PlaybackScrollInputOverlay(
     val verticalScrollState = rememberPlaybackScrollState(onDelta = onVerticalScrollDelta)
     val horizontalScrollState = rememberPlaybackScrollState(onDelta = onHorizontalScrollDelta)
     val focusRequester = remember { FocusRequester() }
+    var hasFocus by remember { mutableStateOf(false) }
+    var isFocusCaptured by remember { mutableStateOf(false) }
 
-    LaunchedEffect(showControls) {
-        focusRequester.requestFocus()
+    LaunchedEffect(hasFocus, isFocusCaptured, showControls) {
+        if (hasFocus && !isFocusCaptured) {
+            focusRequester.captureFocus()
+            return@LaunchedEffect
+        }
+        while (!hasFocus) {
+            focusRequester.requestFocus()
+            delay(200)
+        }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            focusRequester.freeFocus()
+        }
     }
 
     Box(
@@ -137,6 +168,10 @@ private fun PlaybackScrollInputOverlay(
             .fillMaxSize()
             .background(Color.Transparent)
             .focusRequester(focusRequester)
+            .onFocusChanged { focusState ->
+                hasFocus = focusState.hasFocus
+                isFocusCaptured = focusState.isCaptured
+            }
             .onPreviewKeyEvent { keyEvent ->
                 if (keyEvent.type != KeyEventType.KeyUp) {
                     return@onPreviewKeyEvent false
@@ -219,7 +254,32 @@ fun VideoPlayerScreen(
 
     val playerState by videoPlayerViewModel.state.collectAsState()
     val dashboardPanelPose by blackark.app.vr.AppState.dashboardPanelPose.collectAsState()
-    var isNavigatingBack by remember { mutableStateOf(false) }
+    val requestNavigateBackState = rememberUpdatedState { videoPlayerViewModel.requestNavigateBack() }
+
+    DisposableEffect(Unit) {
+        blackark.app.vr.AppState.setConsumePlaybackBackKeyEvents(true)
+        onDispose {
+            blackark.app.vr.AppState.setConsumePlaybackBackKeyEvents(false)
+        }
+    }
+
+    DisposableEffect(context) {
+        val activity = context.findActivity()
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU || activity == null) {
+            onDispose {}
+        } else {
+            val callback = OnBackInvokedCallback {
+                requestNavigateBackState.value.invoke()
+            }
+            activity.onBackInvokedDispatcher.registerOnBackInvokedCallback(
+                OnBackInvokedDispatcher.PRIORITY_OVERLAY,
+                callback,
+            )
+            onDispose {
+                activity.onBackInvokedDispatcher.unregisterOnBackInvokedCallback(callback)
+            }
+        }
+    }
 
     LaunchedEffect(videoFilePath, videoFileName) {
         val smbConfig = blackark.app.vr.AppState.smbConfig
@@ -240,7 +300,6 @@ fun VideoPlayerScreen(
             when (event) {
                 PlayerEvent.NavigateBack -> {
                     // Hide player chrome, pause immediately, and let NavHost tear the screen down.
-                    isNavigatingBack = true
                     videoPlayerViewModel.setControlsVisibility(false)
                     videoPlayerViewModel.pause()
                     onNavigateBack()
@@ -249,14 +308,12 @@ fun VideoPlayerScreen(
         }
     }
     Subspace {
-        if (!isNavigatingBack) {
-            SpatialVideoPlayerContent(
-                videoPlayerViewModel = videoPlayerViewModel,
-                playerState = playerState,
-                dashboardPanelPose = dashboardPanelPose,
-                onNavigateBack = { videoPlayerViewModel.requestNavigateBack() },
-            )
-        }
+        SpatialVideoPlayerContent(
+            videoPlayerViewModel = videoPlayerViewModel,
+            playerState = playerState,
+            dashboardPanelPose = dashboardPanelPose,
+            onNavigateBack = { videoPlayerViewModel.requestNavigateBack() },
+        )
     }
 }
 

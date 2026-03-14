@@ -34,6 +34,9 @@ object AppState {
         onBufferOverflow = BufferOverflow.DROP_OLDEST,
     )
 
+    private val _consumePlaybackBackKeyEvents = MutableStateFlow(false)
+    val consumePlaybackBackKeyEvents: StateFlow<Boolean> = _consumePlaybackBackKeyEvents.asStateFlow()
+
     private val _dashboardPanelPose = MutableStateFlow<Pose?>(null)
     val dashboardPanelPose: StateFlow<Pose?> = _dashboardPanelPose.asStateFlow()
 
@@ -48,9 +51,14 @@ object AppState {
         }
     }
 
+    fun setConsumePlaybackBackKeyEvents(enabled: Boolean) {
+        _consumePlaybackBackKeyEvents.value = enabled
+    }
+
     fun clear() {
         smbClient?.disconnect()
         smbClient = null
         smbConfig = null
+        _consumePlaybackBackKeyEvents.value = false
     }
 }

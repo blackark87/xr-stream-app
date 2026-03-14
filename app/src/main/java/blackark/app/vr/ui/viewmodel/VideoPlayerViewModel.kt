@@ -151,6 +151,7 @@ class VideoPlayerViewModel(
     private var pendingStereoModeToPersist: StereoMode? = null
     private var lastHandledKeyEventTimeMs = Long.MIN_VALUE
     private var lastHandledKeyCode = Int.MIN_VALUE
+    private var hasDispatchedNavigateBack = false
     private val releaseMutex = Mutex()
     private val controlsAutoHideDelayMs = 3_500L
 
@@ -307,6 +308,10 @@ class VideoPlayerViewModel(
     }
 
     fun requestNavigateBack() {
+        if (hasDispatchedNavigateBack) {
+            return
+        }
+        hasDispatchedNavigateBack = true
         viewModelScope.launch {
             _playerEvents.send(PlayerEvent.NavigateBack)
         }
@@ -1331,6 +1336,7 @@ class VideoPlayerViewModel(
             pendingVideoFormatToPersist = null
             pendingStereoModeToPersist = null
             autoDisplayInferencePending = false
+            hasDispatchedNavigateBack = false
             resetControllerAxisState()
         }
     }

@@ -129,8 +129,11 @@ import androidx.xr.compose.subspace.SpatialMainPanel
 import androidx.xr.compose.subspace.layout.SubspaceModifier
 import androidx.xr.compose.subspace.layout.height
 import androidx.xr.compose.subspace.layout.onGloballyPositioned as onSubspaceGloballyPositioned
+import androidx.xr.compose.subspace.layout.offset
+import androidx.xr.compose.subspace.layout.rotate
 import androidx.xr.compose.subspace.layout.width
 import androidx.xr.compose.unit.DpVolumeSize
+import androidx.xr.runtime.math.Pose
 import blackark.app.vr.AppState
 import blackark.app.vr.BuildConfig
 import blackark.app.vr.R
@@ -1346,6 +1349,7 @@ fun MainDashboardScreen(
     val density = LocalDensity.current
     var dashboardPanelWidth by remember { mutableStateOf(1920.dp) }
     var dashboardPanelHeight by remember { mutableStateOf(1080.dp) }
+    val initialDashboardPose = remember { AppState.dashboardPanelPose.value?.let { Pose(it) } }
 
     fun launchSettingsAction(action: SettingsAction) {
         if (activeSettingsAction != null) return
@@ -1384,14 +1388,33 @@ fun MainDashboardScreen(
     }
 
     Subspace {
-        SpatialMainPanel(
-            modifier = SubspaceModifier
+        val dashboardPanelModifier =
+            initialDashboardPose?.let { pose ->
+                SubspaceModifier
+                    .width(dashboardPanelWidth)
+                    .height(dashboardPanelHeight)
+                    .offset(
+                        x = with(density) { pose.translation.x.toDp() },
+                        y = with(density) { pose.translation.y.toDp() },
+                        z = with(density) { pose.translation.z.toDp() },
+                    )
+                    .rotate(pose.rotation)
+            } ?: SubspaceModifier
                 .width(dashboardPanelWidth)
                 .height(dashboardPanelHeight)
+
+        SpatialMainPanel(
+            modifier = dashboardPanelModifier
                 .onSubspaceGloballyPositioned { coordinates ->
-                    AppState.updateDashboardPanelPose(coordinates.poseInRoot)
+                    if (AppState.dashboardPanelPose.value == null) {
+                        AppState.updateDashboardPanelPose(coordinates.poseInRoot)
+                    }
                 },
-            dragPolicy = MovePolicy(),
+            dragPolicy = MovePolicy(
+                onMoveEnd = { event ->
+                    AppState.updateDashboardPanelPose(event.pose)
+                },
+            ),
             resizePolicy = ResizePolicy(
                 minimumSize = DpVolumeSize(
                     width = 1024.dp,

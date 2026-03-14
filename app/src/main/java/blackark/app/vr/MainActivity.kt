@@ -103,6 +103,13 @@ class MainActivity : ComponentActivity() {
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         AppState.keyEvents.tryEmit(event)
+        val shouldConsumePlaybackBack =
+            AppState.consumePlaybackBackKeyEvents.value &&
+                    (event.keyCode == KeyEvent.KEYCODE_BUTTON_B ||
+                            event.keyCode == KeyEvent.KEYCODE_BACK)
+        if (shouldConsumePlaybackBack) {
+            return true
+        }
         return super.dispatchKeyEvent(event)
     }
 
