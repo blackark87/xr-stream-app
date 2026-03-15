@@ -1424,15 +1424,6 @@ private fun SettingsChoiceRow(
                                 expanded = false
                                 onOptionSelected(mode)
                             },
-                            trailingIcon = {
-                                if (selectedMode == mode) {
-                                    Icon(
-                                        imageVector = Icons.Filled.CheckCircle,
-                                        contentDescription = null,
-                                        tint = SuccessGreen,
-                                    )
-                                }
-                            },
                         )
                     }
                 }
