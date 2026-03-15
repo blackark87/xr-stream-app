@@ -4,6 +4,7 @@ import blackark.app.vr.data.database.entity.AvAssetLocation
 import blackark.app.vr.data.database.entity.AvLibraryAsset
 import blackark.app.vr.utils.JvrCastMetadata
 import blackark.app.vr.utils.JvrMovieMetadata
+import blackark.app.vr.utils.extractVirtualGroupPart
 import java.time.LocalDate
 
 data class AvLibraryWork(
@@ -33,14 +34,20 @@ data class AvLibraryWork(
 
     val sortedParts: List<AvAssetLocation>
         get() = parts.sortedWith(
-            compareBy<AvAssetLocation>({ it.partNumber ?: Int.MAX_VALUE }, { it.fileName.lowercase() })
+            compareBy<AvAssetLocation>(
+                { it.partNumber ?: extractVirtualGroupPart(it.fileName) ?: Int.MAX_VALUE },
+                { it.fileName.lowercase() }
+            )
         )
 
+    private val representativePart: AvAssetLocation?
+        get() = sortedParts.firstOrNull()
+
     val representativePath: String?
-        get() = sortedParts.firstOrNull { it.isPresent }?.filePath ?: asset.representativePath
+        get() = representativePart?.filePath ?: asset.representativePath
 
     val representativeFileName: String?
-        get() = sortedParts.firstOrNull { it.isPresent }?.fileName ?: asset.representativeFileName
+        get() = representativePart?.fileName ?: asset.representativeFileName
 }
 
 data class AvStudioFilterOption(

@@ -826,30 +826,6 @@ private fun AvWorkDetailDialog(
                         color = TextPrimary,
                     )
                 }
-                work.representativeFileName?.let {
-                    Surface(
-                        color = CardBackgroundHover,
-                        shape = RoundedCornerShape(12.dp),
-                        border = BorderStroke(1.dp, DividerGray.copy(alpha = 0.55f)),
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-                            verticalArrangement = Arrangement.spacedBy(2.dp),
-                        ) {
-                            Text(
-                                text = "Representative file",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = TextTertiary,
-                            )
-                            Text(
-                                text = it,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = TextPrimary,
-                            )
-                        }
-                    }
-                }
-
                 if (work.casts.isNotEmpty()) {
                     Text(
                         text = "Casts",
@@ -894,7 +870,6 @@ private fun AvWorkDetailDialog(
                     sortedParts.forEach { part ->
                         AvPartRow(
                             part = part,
-                            isRepresentative = part.filePath == work.representativePath,
                             onPlay = { onPlayPart(part.filePath, part.fileName) },
                         )
                     }
@@ -988,17 +963,13 @@ private fun CastDisplayCell(
 @Composable
 private fun AvPartRow(
     part: AvAssetLocation,
-    isRepresentative: Boolean,
     onPlay: () -> Unit,
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(12.dp),
-        border = BorderStroke(
-            1.dp,
-            if (isRepresentative) NetflixRed.copy(alpha = 0.8f) else DividerGray.copy(alpha = 0.7f),
-        ),
-        color = if (isRepresentative) NetflixRed.copy(alpha = 0.08f) else Color.Transparent,
+        border = BorderStroke(1.dp, DividerGray.copy(alpha = 0.7f)),
+        color = Color.Transparent,
     ) {
         Row(
             modifier = Modifier
@@ -1023,14 +994,6 @@ private fun AvPartRow(
                     style = MaterialTheme.typography.bodySmall,
                     color = TextTertiary,
                 )
-                if (isRepresentative) {
-                    Text(
-                        text = "Representative",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = NetflixRed,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                }
             }
             IconButton(onClick = onPlay) {
                 Icon(
