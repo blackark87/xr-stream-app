@@ -21,6 +21,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -510,7 +511,10 @@ private fun ReleaseDateCalendar(
             horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            items(cells, key = { it?.toEpochDay() ?: Long.MIN_VALUE }) { date ->
+            itemsIndexed(
+                items = cells,
+                key = { index, date -> date?.toEpochDay() ?: "empty-$index" },
+            ) { _, date ->
                 if (date == null) {
                     Spacer(
                         modifier = Modifier
