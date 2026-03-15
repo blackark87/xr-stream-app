@@ -200,20 +200,11 @@ object JvrLibraryMetadataProvider {
 
         logMetadataTrace("Cache miss for $cacheKey; fetching metadata (source=$source, allowJvr=$allowJvrLookup, path='$folderPath')")
 
-        val remoteMetadata = withContext(Dispatchers.IO) {
-            when (source) {
-                SOURCE_AV_WIKI -> {
-                    fetchByCodeFromAvWiki(code) ?: if (allowJvrLookup) {
-                        fetchByCodeFromJvrLibrary(code)
-                    } else {
-                        null
-                    }
-                }
-
-                SOURCE_JVR -> if (allowJvrLookup) fetchByCodeFromJvrLibrary(code) else null
-                else -> null
-            }
-        }
+        val remoteMetadata = fetchRemoteMetadataForSource(
+            code = code,
+            source = source,
+            allowJvrLookup = allowJvrLookup,
+        )
 
         if (remoteMetadata == null) {
             missCache += cacheKey
@@ -279,13 +270,11 @@ object JvrLibraryMetadataProvider {
             return null
         }
 
-        val remoteMetadata = withContext(Dispatchers.IO) {
-            when (source) {
-                SOURCE_AV_WIKI -> fetchByCodeFromAvWiki(code) ?: fetchByCodeFromJvrLibrary(code)
-                SOURCE_JVR -> fetchByCodeFromJvrLibrary(code)
-                else -> null
-            }
-        }
+        val remoteMetadata = fetchRemoteMetadataForSource(
+            code = code,
+            source = source,
+            allowJvrLookup = true,
+        )
 
         if (remoteMetadata == null) {
             missCache += normalizedCacheKey
@@ -296,6 +285,42 @@ object JvrLibraryMetadataProvider {
         val localizedMetadata = withContext(Dispatchers.IO) {
             localizeMediaAssets(context.applicationContext, normalizedCacheKey, remoteMetadata)
         }
+        metadataCache[normalizedCacheKey] = localizedMetadata
+        savePersistedMetadata(context.applicationContext, normalizedCacheKey, source, localizedMetadata)
+        missCache.remove(normalizedCacheKey)
+        return localizedMetadata
+    }
+
+    suspend fun refreshByCacheKey(
+        context: Context,
+        cacheKey: String,
+        fallbackFolderPath: String = "",
+    ): JvrMovieMetadata? {
+        val normalizedCacheKey = cacheKey.trim()
+        if (normalizedCacheKey.isBlank()) return null
+
+        val separatorIndex = normalizedCacheKey.indexOf(':')
+        if (separatorIndex <= 0 || separatorIndex == normalizedCacheKey.lastIndex) {
+            return null
+        }
+
+        val source = normalizedCacheKey.substring(0, separatorIndex)
+        val code = normalizedCacheKey.substring(separatorIndex + 1).uppercase()
+        val allowJvrLookup = source == SOURCE_JVR || shouldLookupJvrForPath(fallbackFolderPath)
+
+        metadataCache.remove(normalizedCacheKey)
+        missCache.remove(normalizedCacheKey)
+
+        val remoteMetadata = fetchRemoteMetadataForSource(
+            code = code,
+            source = source,
+            allowJvrLookup = allowJvrLookup,
+        ) ?: return null
+
+        val localizedMetadata = withContext(Dispatchers.IO) {
+            localizeMediaAssets(context.applicationContext, normalizedCacheKey, remoteMetadata)
+        }
+
         metadataCache[normalizedCacheKey] = localizedMetadata
         savePersistedMetadata(context.applicationContext, normalizedCacheKey, source, localizedMetadata)
         missCache.remove(normalizedCacheKey)
@@ -440,6 +465,27 @@ object JvrLibraryMetadataProvider {
 
     private fun buildCacheKey(code: String, source: String): String {
         return "$source:$code"
+    }
+
+    private suspend fun fetchRemoteMetadataForSource(
+        code: String,
+        source: String,
+        allowJvrLookup: Boolean,
+    ): JvrMovieMetadata? {
+        return withContext(Dispatchers.IO) {
+            when (source) {
+                SOURCE_AV_WIKI -> {
+                    fetchByCodeFromAvWiki(code) ?: if (allowJvrLookup) {
+                        fetchByCodeFromJvrLibrary(code)
+                    } else {
+                        null
+                    }
+                }
+
+                SOURCE_JVR -> if (allowJvrLookup) fetchByCodeFromJvrLibrary(code) else null
+                else -> null
+            }
+        }
     }
 
     private suspend fun fetchByCodeFromAvWiki(code: String): JvrMovieMetadata? {

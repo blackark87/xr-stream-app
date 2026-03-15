@@ -79,6 +79,26 @@ interface AvLibraryDao {
 
     @Query(
         """
+        SELECT * FROM av_library_assets
+        WHERE sourceScope = :sourceScope
+          AND hasMetadata = 1
+          AND metadataCacheKey IS NOT NULL
+          AND metadataCacheKey IN (
+            SELECT m.cacheKey
+            FROM virtual_group_metadata AS m
+            LEFT JOIN virtual_group_metadata_performers AS p
+              ON p.cacheKey = m.cacheKey
+            WHERE m.isMiss = 0
+            GROUP BY m.cacheKey
+            HAVING COUNT(p.performerId) = 0
+          )
+        ORDER BY lastSeenAt DESC, normalizedCode ASC
+        """
+    )
+    suspend fun getPresentAssetsMissingPerformerRefs(sourceScope: String): List<AvLibraryAsset>
+
+    @Query(
+        """
         SELECT * FROM av_asset_locations
         WHERE sourceScope = :sourceScope AND isPresent = 1
         ORDER BY assetKey ASC, partNumber ASC, fileName ASC
