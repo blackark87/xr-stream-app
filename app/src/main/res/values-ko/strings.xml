@@ -4,6 +4,8 @@
     <string name="switch_to_home_space_mode">홈 스페이스 모드로 전환</string>
     <string name="switch_to_full_space_mode">풀 스페이스 모드로 전환</string>
     <string name="add_server">서버 추가</string>
+    <string name="av_background_indexing">AV 백그라운드 인덱싱</string>
+    <string name="av_background_indexing_description">연결된 소스를 백그라운드에서 전체 스캔해 AV 필터와 작품 메타데이터를 구성합니다. 기본값은 꺼짐입니다.</string>
     <string name="edit_server_title">서버 편집</string>
     <string name="add_to_favorites">즐겨찾기에 추가</string>
     <string name="back">뒤로</string>

@@ -80,6 +80,7 @@ import androidx.compose.material3.NavigationRailItemDefaults
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -1199,9 +1200,11 @@ private fun SourceSwitcherButton(
 @Composable
 private fun SettingsPanel(
     versionLabel: String,
+    isAvBackgroundIndexingEnabled: Boolean,
     playbackPreviewMode: PlaybackPreviewMode,
     onPlaybackPreviewModeChange: (PlaybackPreviewMode) -> Unit,
     activeAction: SettingsAction?,
+    onAvBackgroundIndexingChange: (Boolean) -> Unit,
     onClearArtworkCache: () -> Unit,
     onClearRecentHistory: () -> Unit,
     onClearFavorites: () -> Unit,
@@ -1241,6 +1244,12 @@ private fun SettingsPanel(
                     ),
                 onOptionSelected = onPlaybackPreviewModeChange,
             )
+            SettingsToggleRow(
+                title = stringResource(R.string.av_background_indexing),
+                description = stringResource(R.string.av_background_indexing_description),
+                checked = isAvBackgroundIndexingEnabled,
+                onCheckedChange = onAvBackgroundIndexingChange,
+            )
             SettingsActionRow(
                 title = stringResource(R.string.clear_thumbnails_posters),
                 description = stringResource(R.string.clear_thumbnails_posters_description),
@@ -1279,6 +1288,41 @@ private fun SettingsPanel(
                 value = versionLabel,
             )
         }
+    }
+}
+
+@Composable
+private fun SettingsToggleRow(
+    title: String,
+    description: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    Column(
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleMedium,
+                color = TextPrimary,
+                modifier = Modifier.weight(1f),
+            )
+            Spacer(modifier = Modifier.width(16.dp))
+            Switch(
+                checked = checked,
+                onCheckedChange = onCheckedChange,
+            )
+        }
+        Text(
+            text = description,
+            style = MaterialTheme.typography.bodyMedium,
+            color = TextSecondary,
+        )
     }
 }
 
@@ -1667,12 +1711,14 @@ fun MainDashboardScreen(
                         } else {
                             SettingsPanel(
                                 versionLabel = appVersionLabel,
+                                isAvBackgroundIndexingEnabled = uiState.isAvBackgroundIndexingEnabled,
                                 playbackPreviewMode = playbackPreviewMode,
                                 onPlaybackPreviewModeChange = { mode ->
                                     playbackPreviewMode = mode
                                     PlaybackPreviewModeStore.save(context, mode)
                                 },
                                 activeAction = activeSettingsAction,
+                                onAvBackgroundIndexingChange = viewModel::setAvBackgroundIndexingEnabled,
                                 onClearArtworkCache = {
                                     pendingSettingsAction = SettingsAction.ClearArtworkCache
                                 },
@@ -1721,12 +1767,14 @@ fun MainDashboardScreen(
                             if (compactConnectedTab == ConnectedDashboardTab.Settings) {
                                 SettingsPanel(
                                     versionLabel = appVersionLabel,
+                                    isAvBackgroundIndexingEnabled = uiState.isAvBackgroundIndexingEnabled,
                                     playbackPreviewMode = playbackPreviewMode,
                                     onPlaybackPreviewModeChange = { mode ->
                                         playbackPreviewMode = mode
                                         PlaybackPreviewModeStore.save(context, mode)
                                     },
                                     activeAction = activeSettingsAction,
+                                    onAvBackgroundIndexingChange = viewModel::setAvBackgroundIndexingEnabled,
                                     onClearArtworkCache = {
                                         pendingSettingsAction = SettingsAction.ClearArtworkCache
                                     },
@@ -1793,6 +1841,7 @@ fun MainDashboardScreen(
                                         AvLibraryPanel(
                                             avLibrary = uiState.avLibrary,
                                             isConnected = uiState.isConnected,
+                                            backgroundIndexingEnabled = uiState.isAvBackgroundIndexingEnabled,
                                             onSetFilterFamily = viewModel::setAvFilterFamily,
                                             onStudioSelected = viewModel::selectAvStudio,
                                             onCastToggled = viewModel::toggleAvCast,
