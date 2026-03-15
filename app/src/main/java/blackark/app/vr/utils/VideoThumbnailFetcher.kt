@@ -861,7 +861,7 @@ class VideoThumbnailFetcher(
 
         val targetMs =
             if (durationMs >= 50_000L) {
-                13_000L
+                12_000L
             } else {
                 (durationMs * 0.20f).toLong().coerceIn(5_000L, 10_000L)
             }
