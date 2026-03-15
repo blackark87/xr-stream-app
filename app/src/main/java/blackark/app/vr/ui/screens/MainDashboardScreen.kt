@@ -4,6 +4,8 @@ import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
 import android.util.Log
+import android.view.KeyEvent
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -91,6 +93,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -2750,6 +2753,49 @@ private fun FileBrowserPanel(
         }
         onPreviewFocused(null)
         onBackClick()
+    }
+    fun handleBrowserBack(): Boolean {
+        if (showDeleteConfirmDialog) {
+            if (!isDeleteInProgress) {
+                showDeleteConfirmDialog = false
+            }
+            return true
+        }
+
+        if (isDeleteMode) {
+            isDeleteMode = false
+            selectedPaths = emptySet()
+            return true
+        }
+
+        if (activeVirtualGroupKey != null || (currentPath.isNotEmpty() && currentPath != "/")) {
+            handleBackAction()
+            return true
+        }
+
+        return false
+    }
+
+    val backHandlerState = rememberUpdatedState(newValue = { handleBrowserBack() })
+    val shouldHandleSystemBack =
+        showDeleteConfirmDialog ||
+            isDeleteMode ||
+            activeVirtualGroupKey != null ||
+            (currentPath.isNotEmpty() && currentPath != "/")
+
+    BackHandler(enabled = shouldHandleSystemBack) {
+        backHandlerState.value.invoke()
+    }
+
+    LaunchedEffect(Unit) {
+        AppState.keyEvents.collect { event ->
+            if (
+                event.action == KeyEvent.ACTION_UP &&
+                event.keyCode == KeyEvent.KEYCODE_BUTTON_B
+            ) {
+                backHandlerState.value.invoke()
+            }
+        }
     }
     Card(
         modifier = modifier,
