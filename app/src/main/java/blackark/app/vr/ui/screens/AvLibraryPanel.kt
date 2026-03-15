@@ -386,10 +386,36 @@ private fun AvFilterSection(
         AvFilterFamily.Casts -> {
             Spacer(modifier = Modifier.height(12.dp))
             mergeTargetCast?.let { target ->
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = NetflixRed.copy(alpha = 0.12f),
+                    border = BorderStroke(1.dp, NetflixRed.copy(alpha = 0.45f)),
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = "Merge target: ${buildCastLabel(target.japaneseName, target.englishName)}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = NetflixRed,
+                            modifier = Modifier.weight(1f),
+                        )
+                        TextButton(onClick = onClearMergeTarget) {
+                            Text("Cancel")
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+            }
+            if (mergeTargetCast == null) {
                 Text(
-                    text = "Merge target: ${buildCastLabel(target.japaneseName, target.englishName)}",
+                    text = "Long press a cast card to set or merge aliases.",
                     style = MaterialTheme.typography.bodySmall,
-                    color = NetflixRed,
+                    color = TextTertiary,
                 )
                 Spacer(modifier = Modifier.height(8.dp))
             }
@@ -1333,6 +1359,8 @@ private fun CastFilterCell(
     Box(modifier = modifier) {
         Surface(
             modifier = Modifier
+                .fillMaxWidth()
+                .height(170.dp)
                 .clip(RoundedCornerShape(14.dp))
                 .combinedClickable(
                     onClick = onClick,
@@ -1350,9 +1378,11 @@ private fun CastFilterCell(
             ),
         ) {
             Column(
-                modifier = Modifier.padding(8.dp),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 8.dp, vertical = 10.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterVertically),
             ) {
                 CastAvatar(
                     imageUrl = cast.profileImageUrl,
