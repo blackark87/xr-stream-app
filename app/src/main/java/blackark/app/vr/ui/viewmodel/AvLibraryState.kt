@@ -55,7 +55,7 @@ data class AvLibraryState(
 fun AvLibrarySnapshot.applyFilters(filters: AvFilterState): List<AvLibraryWork> {
     if (works.isEmpty()) return emptyList()
 
-    return when (filters.activeFamily) {
+    val filtered = when (filters.activeFamily) {
         AvFilterFamily.None -> works
 
         AvFilterFamily.Studio -> {
@@ -73,7 +73,7 @@ fun AvLibrarySnapshot.applyFilters(filters: AvFilterState): List<AvLibraryWork> 
             } else {
                 works.filter { work ->
                     val castIds = work.casts.map { it.performerId }.toSet()
-                    filters.selectedCastIds.all(castIds::contains)
+                    filters.selectedCastIds.any(castIds::contains)
                 }
             }
         }
@@ -87,4 +87,10 @@ fun AvLibrarySnapshot.applyFilters(filters: AvFilterState): List<AvLibraryWork> 
             }
         }
     }
+
+    return filtered.sortedWith(
+        compareByDescending<AvLibraryWork> { it.releaseDate?.toEpochDay() ?: Long.MIN_VALUE }
+            .thenBy { it.displayTitle.lowercase() }
+            .thenBy { it.asset.normalizedCode.lowercase() }
+    )
 }
