@@ -1,21 +1,20 @@
 package blackark.app.vr.data.database.dao
 
 import androidx.room.Dao
-import androidx.room.Insert
-import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Upsert
 import blackark.app.vr.data.database.entity.AvAssetLocation
 import blackark.app.vr.data.database.entity.AvLibraryAsset
 
 @Dao
 interface AvLibraryDao {
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Upsert
     suspend fun upsertAsset(asset: AvLibraryAsset)
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Upsert
     suspend fun upsertLocation(location: AvAssetLocation)
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Upsert
     suspend fun upsertLocations(locations: List<AvAssetLocation>)
 
     @Query("SELECT * FROM av_library_assets WHERE assetKey = :assetKey LIMIT 1")
