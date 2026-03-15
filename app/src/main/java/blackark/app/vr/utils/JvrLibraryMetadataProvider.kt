@@ -150,7 +150,9 @@ object JvrLibraryMetadataProvider {
             val normalized = normalizeCachedMetadata(cached)
             metadataCache[cacheKey] = normalized
             if (normalized != cached) {
-                savePersistedMetadata(appContext, cacheKey, source, normalized)
+                val persistedMetadata = savePersistedMetadata(appContext, cacheKey, source, normalized)
+                metadataCache[cacheKey] = persistedMetadata
+                return persistedMetadata
             }
             logMetadataTrace("Memory cache hit for $cacheKey (poster=${normalized.posterUrl ?: "<none>"})")
             return normalized
@@ -173,7 +175,9 @@ object JvrLibraryMetadataProvider {
             missCache.remove(cacheKey)
 
             if (cachedMetadata != persistedMetadata) {
-                savePersistedMetadata(appContext, cacheKey, source, cachedMetadata)
+                val resolvedMetadata = savePersistedMetadata(appContext, cacheKey, source, cachedMetadata)
+                metadataCache[cacheKey] = resolvedMetadata
+                return resolvedMetadata
             }
 
             logMetadataTrace("DB cache hit for $cacheKey (poster=${cachedMetadata.posterUrl ?: "<none>"})")
@@ -193,12 +197,16 @@ object JvrLibraryMetadataProvider {
             missCache.remove(cacheKey)
 
             if (cachedMetadata != persistedMetadata) {
-                savePersistedMetadata(
+                val resolvedMetadata = savePersistedMetadata(
                     appContext,
                     buildCacheKey(cachedMetadata.code, persistedByCode.metadata.source),
                     persistedByCode.metadata.source,
                     cachedMetadata,
                 )
+                metadataCache[buildCacheKey(cachedMetadata.code, persistedByCode.metadata.source)] =
+                    resolvedMetadata
+                metadataCache[cacheKey] = resolvedMetadata
+                return resolvedMetadata
             }
 
             logMetadataTrace("DB code-level cache hit for code=$code source=${persistedByCode.metadata.source} (poster=${cachedMetadata.posterUrl ?: "<none>"})")
@@ -233,13 +241,13 @@ object JvrLibraryMetadataProvider {
             localizeMediaAssets(appContext, cacheKey, remoteMetadata)
         }
 
-        metadataCache[cacheKey] = localizedMetadata
-        savePersistedMetadata(appContext, cacheKey, source, localizedMetadata)
+        val persistedMetadata = savePersistedMetadata(appContext, cacheKey, source, localizedMetadata)
+        metadataCache[cacheKey] = persistedMetadata
         missCache.remove(cacheKey)
 
-        logMetadataTrace("Resolved metadata for $cacheKey title='${localizedMetadata.title}' poster=${localizedMetadata.posterUrl ?: "<none>"}")
+        logMetadataTrace("Resolved metadata for $cacheKey title='${persistedMetadata.title}' poster=${persistedMetadata.posterUrl ?: "<none>"}")
 
-        return localizedMetadata
+        return persistedMetadata
     }
 
     suspend fun getByCacheKey(
@@ -297,10 +305,15 @@ object JvrLibraryMetadataProvider {
         val localizedMetadata = withContext(Dispatchers.IO) {
             localizeMediaAssets(context.applicationContext, normalizedCacheKey, remoteMetadata)
         }
-        metadataCache[normalizedCacheKey] = localizedMetadata
-        savePersistedMetadata(context.applicationContext, normalizedCacheKey, source, localizedMetadata)
+        val persistedMetadata = savePersistedMetadata(
+            context.applicationContext,
+            normalizedCacheKey,
+            source,
+            localizedMetadata,
+        )
+        metadataCache[normalizedCacheKey] = persistedMetadata
         missCache.remove(normalizedCacheKey)
-        return localizedMetadata
+        return persistedMetadata
     }
 
     suspend fun refreshByCacheKey(
@@ -333,10 +346,15 @@ object JvrLibraryMetadataProvider {
             localizeMediaAssets(context.applicationContext, normalizedCacheKey, remoteMetadata)
         }
 
-        metadataCache[normalizedCacheKey] = localizedMetadata
-        savePersistedMetadata(context.applicationContext, normalizedCacheKey, source, localizedMetadata)
+        val persistedMetadata = savePersistedMetadata(
+            context.applicationContext,
+            normalizedCacheKey,
+            source,
+            localizedMetadata,
+        )
+        metadataCache[normalizedCacheKey] = persistedMetadata
         missCache.remove(normalizedCacheKey)
-        return localizedMetadata
+        return persistedMetadata
     }
 
     suspend fun mergePerformersManually(
@@ -425,12 +443,13 @@ object JvrLibraryMetadataProvider {
 
         metadataCache.remove(normalizedCacheKey)
         missCache.remove(normalizedCacheKey)
-        savePersistedMetadata(
+        val persistedMetadata = savePersistedMetadata(
             context = context.applicationContext,
             cacheKey = normalizedCacheKey,
             source = source,
             metadata = metadata,
         )
+        metadataCache[normalizedCacheKey] = persistedMetadata
     }
 
     internal fun toPersistedRecord(
@@ -845,8 +864,8 @@ object JvrLibraryMetadataProvider {
         cacheKey: String,
         source: String,
         metadata: JvrMovieMetadata,
-    ) {
-        withContext(Dispatchers.IO) {
+    ): JvrMovieMetadata {
+        return withContext(Dispatchers.IO) {
             try {
                 val database = AppDatabase.getDatabase(context)
                 val metadataDao = database.virtualGroupMetadataDao()
@@ -863,11 +882,13 @@ object JvrLibraryMetadataProvider {
                         metadata = resolvedMetadata,
                     )
                 )
+                resolvedMetadata
             } catch (e: Exception) {
                 Log.w(
                     TAG,
                     "Failed to save virtual group metadata to DB for $cacheKey: ${e.message}"
                 )
+                metadata
             }
         }
     }

@@ -836,6 +836,7 @@ class MainDashboardViewModel(
                         file = file,
                         scanStartedAt = syncedAt,
                         allowFingerprint = false,
+                        forceMetadataRefresh = true,
                     )
                 }
                 refreshAvSnapshot(sourceScope)
@@ -975,6 +976,7 @@ class MainDashboardViewModel(
         file: SMBFileItem,
         scanStartedAt: Long,
         allowFingerprint: Boolean = true,
+        forceMetadataRefresh: Boolean = false,
     ) {
         val existingLocation = avLibraryRepository.getLocationByPath(file.path)
         var asset = existingLocation?.let { avLibraryRepository.getAssetByKey(it.assetKey) }
@@ -999,13 +1001,13 @@ class MainDashboardViewModel(
         }
 
         val assetKey = asset?.assetKey ?: buildAssetKey(sourceScope, normalizedCode)
-        val representativePath = chooseRepresentativePath(asset?.representativePath, file)
-        val representativeFileName = if (representativePath == file.path) {
+        var representativePath = chooseRepresentativePath(asset?.representativePath, file)
+        var representativeFileName = if (representativePath == file.path) {
             file.name
         } else {
             asset?.representativeFileName ?: file.name
         }
-        val representativeFolderPath = if (representativePath == file.path) {
+        var representativeFolderPath = if (representativePath == file.path) {
             extractFolderPath(file.path)
         } else {
             asset?.representativeFolderPath ?: extractFolderPath(file.path)
@@ -1023,9 +1025,69 @@ class MainDashboardViewModel(
         var cachedReleaseDateEpochDay = asset?.cachedReleaseDateEpochDay
         var hasMetadata = asset?.hasMetadata ?: false
         var metadataResolvedAt = asset?.metadataResolvedAt
+        val resolvedSource = JvrLibraryMetadataProvider.resolveMetadataSource(extractFolderPath(file.path))
+
+        if (
+            forceMetadataRefresh &&
+            resolvedSource != null &&
+            (!hasMetadata || metadataSource != resolvedSource)
+        ) {
+            val refreshedMetadata = JvrLibraryMetadataProvider.refreshByCacheKey(
+                context = context.applicationContext,
+                cacheKey = JvrLibraryMetadataProvider.buildMetadataCacheKey(
+                    rawCode = normalizedCode,
+                    source = resolvedSource,
+                ),
+                fallbackFolderPath = extractFolderPath(file.path),
+            )
+
+            metadataSource = resolvedSource
+            metadataCacheKey = JvrLibraryMetadataProvider.buildMetadataCacheKey(
+                rawCode = normalizedCode,
+                source = resolvedSource,
+            )
+
+            if (refreshedMetadata != null) {
+                representativePath = file.path
+                representativeFileName = file.name
+                representativeFolderPath = extractFolderPath(file.path)
+                cachedTitle = refreshedMetadata.title
+                cachedPosterUrl = refreshedMetadata.posterUrl
+                cachedStudio = refreshedMetadata.studio
+                cachedReleaseDateEpochDay = refreshedMetadata.releaseDate?.toEpochDay()
+                hasMetadata = true
+                metadataResolvedAt = scanStartedAt
+            } else {
+                hasMetadata = false
+            }
+        }
+
+        if (shouldPromoteMetadataSource(current = metadataSource, candidate = resolvedSource)) {
+            val promotedSource = resolvedSource.orEmpty()
+            val promotedMetadata = JvrLibraryMetadataProvider.getByCode(
+                context = context.applicationContext,
+                rawCode = normalizedCode,
+                folderPath = extractFolderPath(file.path),
+            )
+            if (promotedMetadata != null) {
+                metadataSource = promotedSource
+                metadataCacheKey = JvrLibraryMetadataProvider.buildMetadataCacheKey(
+                    rawCode = normalizedCode,
+                    source = promotedSource,
+                )
+                representativePath = file.path
+                representativeFileName = file.name
+                representativeFolderPath = extractFolderPath(file.path)
+                cachedTitle = promotedMetadata.title
+                cachedPosterUrl = promotedMetadata.posterUrl
+                cachedStudio = promotedMetadata.studio
+                cachedReleaseDateEpochDay = promotedMetadata.releaseDate?.toEpochDay()
+                hasMetadata = true
+                metadataResolvedAt = scanStartedAt
+            }
+        }
 
         if (metadataCacheKey.isNullOrBlank()) {
-            val resolvedSource = JvrLibraryMetadataProvider.resolveMetadataSource(extractFolderPath(file.path))
             if (resolvedSource != null) {
                 metadataSource = resolvedSource
                 metadataCacheKey = JvrLibraryMetadataProvider.buildMetadataCacheKey(
@@ -1130,6 +1192,22 @@ class MainDashboardViewModel(
             candidatePartNumber != null && currentPartNumber != null &&
                 candidatePartNumber < currentPartNumber -> candidate.path
             else -> currentRepresentativePath
+        }
+    }
+
+    private fun shouldPromoteMetadataSource(
+        current: String?,
+        candidate: String?,
+    ): Boolean {
+        if (candidate.isNullOrBlank()) return false
+        return metadataSourcePriority(candidate) > metadataSourcePriority(current)
+    }
+
+    private fun metadataSourcePriority(source: String?): Int {
+        return when (source?.lowercase()) {
+            "avwiki" -> 2
+            "jvr" -> 1
+            else -> 0
         }
     }
 
