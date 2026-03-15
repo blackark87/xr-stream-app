@@ -121,7 +121,7 @@ class AvLibraryRepository(
             .getByCacheKeys(assets.mapNotNull { it.metadataCacheKey }.distinct())
             .associateBy { it.metadata.cacheKey }
 
-        val works = assets.map { asset ->
+        val works = assets.mapNotNull { asset ->
             val metadata = asset.metadataCacheKey
                 ?.let(metadataByCacheKey::get)
                 ?.takeUnless { it.metadata.isMiss }
@@ -131,6 +131,8 @@ class AvLibraryRepository(
                         fallbackCode = asset.normalizedCode,
                     )
                 }
+
+            metadata ?: return@mapNotNull null
 
             AvLibraryWork(
                 asset = asset,
