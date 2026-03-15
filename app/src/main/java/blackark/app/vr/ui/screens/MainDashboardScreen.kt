@@ -57,6 +57,7 @@ import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Minimize
 import androidx.compose.material.icons.filled.Movie
+import androidx.compose.material.icons.filled.MovieCreation
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.ViewModule
 import androidx.compose.material.icons.outlined.FavoriteBorder
@@ -161,10 +162,13 @@ import blackark.app.vr.ui.theme.TextTertiary
 import blackark.app.vr.ui.viewmodel.FileBrowserViewMode
 import blackark.app.vr.ui.viewmodel.MainDashboardViewModel
 import blackark.app.vr.ui.viewmodel.PlaybackPreviewMode
+import blackark.app.vr.utils.buildSourceScope
 import blackark.app.vr.utils.JvrCastMetadata
 import blackark.app.vr.utils.JvrLibraryMetadataProvider
 import blackark.app.vr.utils.JvrMovieMetadata
 import blackark.app.vr.utils.PlaybackPreviewModeStore
+import blackark.app.vr.utils.resolveLinkedMetadataForGroup
+import blackark.app.vr.utils.resolveLinkedMetadataForVideoPath
 import blackark.app.vr.utils.ServerCredentialAutofillStore
 import blackark.app.vr.utils.ThumbnailImageLoaderProvider
 import blackark.app.vr.utils.VideoThumbnailFetcher
@@ -209,6 +213,7 @@ private enum class DashboardWidthClass {
 private enum class ConnectedDashboardTab {
     Files,
     Library,
+    AV,
     Settings,
 }
 
@@ -564,6 +569,26 @@ private fun ConnectedSectionRail(
                     )
                 },
                 label = { Text(stringResource(R.string.library)) },
+                alwaysShowLabel = true,
+                colors = NavigationRailItemDefaults.colors(
+                    selectedIconColor = TextPrimary,
+                    selectedTextColor = TextPrimary,
+                    unselectedIconColor = TextSecondary,
+                    unselectedTextColor = TextTertiary,
+                    indicatorColor = NetflixRed.copy(alpha = 0.26f),
+                ),
+            )
+
+            NavigationRailItem(
+                selected = selectedTab == ConnectedDashboardTab.AV,
+                onClick = { onTabSelected(ConnectedDashboardTab.AV) },
+                icon = {
+                    Icon(
+                        imageVector = Icons.Filled.MovieCreation,
+                        contentDescription = "AV",
+                    )
+                },
+                label = { Text("AV") },
                 alwaysShowLabel = true,
                 colors = NavigationRailItemDefaults.colors(
                     selectedIconColor = TextPrimary,
@@ -1423,6 +1448,7 @@ fun MainDashboardScreen(
     val previewResetKey = when (compactConnectedTab) {
         ConnectedDashboardTab.Files -> "files:${uiState.selectedServer?.id}:${uiState.currentPath}"
         ConnectedDashboardTab.Library -> "library:${uiState.selectedServer?.id}"
+        ConnectedDashboardTab.AV -> "av:${uiState.selectedServer?.id}:${uiState.avLibrary.filters.activeFamily}"
         ConnectedDashboardTab.Settings -> "settings:${uiState.selectedServer?.id}"
     }
     var dashboardPreviewItem by remember(previewResetKey) {
@@ -1457,6 +1483,7 @@ fun MainDashboardScreen(
                 when (action) {
                     SettingsAction.ClearArtworkCache -> {
                         resetThumbnailState(context)
+                        viewModel.clearAvMetadataLinks()
                         dashboardPreviewItem = null
                     }
 
@@ -1695,6 +1722,7 @@ fun MainDashboardScreen(
                                     val minPrimaryPaneWidth = when (compactConnectedTab) {
                                         ConnectedDashboardTab.Files -> 460.dp
                                         ConnectedDashboardTab.Library -> 420.dp
+                                        ConnectedDashboardTab.AV -> 420.dp
                                         ConnectedDashboardTab.Settings -> 420.dp
                                     }
                                     val dividerWidth = 18.dp
@@ -1727,136 +1755,165 @@ fun MainDashboardScreen(
                                             maxPreviewWidth.value,
                                         ).dp
 
-                                    Row(modifier = Modifier.fillMaxSize()) {
-                                        Column(
-                                            modifier = Modifier
-                                                .weight(1f)
-                                                .fillMaxHeight(),
-                                        ) {
-                                            if (compactConnectedTab == ConnectedDashboardTab.Files) {
-                                                FileBrowserPanel(
-                                                    files = files,
-                                                    favoritePaths = favoritePaths,
-                                                    currentPath = uiState.currentPath,
-                                                    isConnected = uiState.isConnected,
-                                                    isLoading = uiState.isLoadingFiles,
-                                                    errorMessage = uiState.errorMessage,
-                                                    viewMode = uiState.fileViewMode,
-                                                    currentPreviewKey = dashboardPreviewItem?.key,
-                                                    onFileClick = { file ->
-                                                        dashboardPreviewItem = null
-                                                        viewModel.navigateToFile(file)
-                                                    },
-                                                    onBackClick = {
-                                                        dashboardPreviewItem = null
-                                                        viewModel.navigateBack()
-                                                    },
-                                                    onToggleViewMode = {
-                                                        dashboardPreviewItem = null
-                                                        viewModel.toggleFileViewMode()
-                                                    },
-                                                    onDeleteFiles = { selectedFiles ->
-                                                        viewModel.deleteFiles(selectedFiles)
-                                                    },
-                                                    onPlayVideo = { filePath, fileName ->
-                                                        dashboardPreviewItem = null
-                                                        navController.navigate(
-                                                            Screen.VideoPlayer.createRoute(
-                                                                filePath,
-                                                                fileName
-                                                            )
-                                                        ) {
-                                                            launchSingleTop = true
-                                                        }
-                                                    },
-                                                    onFavoriteToggle = { file, isFavorite ->
-                                                        viewModel.toggleFavoriteForFile(
-                                                            file,
-                                                            isFavorite
-                                                        )
-                                                    },
-                                                    onPreviewFocused = { preview ->
-                                                        dashboardPreviewItem = preview
-                                                    },
-                                                    modifier = Modifier
-                                                        .fillMaxWidth()
-                                                        .weight(1f)
-                                                )
-                                            } else {
-                                                FavoritesPanel(
-                                                    favorites = favorites,
-                                                    recentVideos = recentVideos,
-                                                    isConnected = uiState.isConnected,
-                                                    currentPreviewKey = dashboardPreviewItem?.key,
-                                                    onFavoriteClick = { video ->
-                                                        dashboardPreviewItem = null
-                                                        navController.navigate(
-                                                            Screen.VideoPlayer.createRoute(
-                                                                video.filePath,
-                                                                video.fileName
-                                                            )
-                                                        ) {
-                                                            launchSingleTop = true
-                                                        }
-                                                    },
-                                                    onRecentClick = { video ->
-                                                        dashboardPreviewItem = null
-                                                        navController.navigate(
-                                                            Screen.VideoPlayer.createRoute(
-                                                                video.filePath,
-                                                                video.fileName
-                                                            )
-                                                        ) {
-                                                            launchSingleTop = true
-                                                        }
-                                                    },
-                                                    onFavoriteToggle = { filePath, fileName, serverAddress, shareName, isFavorite ->
-                                                        viewModel.toggleFavoriteEntry(
-                                                            filePath = filePath,
-                                                            fileName = fileName,
-                                                            serverAddress = serverAddress,
-                                                            shareName = shareName,
-                                                            currentIsFavorite = isFavorite,
-                                                        )
-                                                    },
-                                                    onRecentRemove = { video ->
-                                                        dashboardScope.launch {
-                                                            viewModel.removeFromRecent(video)
-                                                        }
-                                                    },
-                                                    onPreviewFocused = { preview ->
-                                                        dashboardPreviewItem = preview
-                                                    },
-                                                    modifier = Modifier
-                                                        .fillMaxWidth()
-                                                        .weight(1f)
-                                                )
-                                            }
-                                        }
-
-                                        ConnectedPaneResizeHandle(
-                                            onDragDeltaPx = { deltaPx ->
-                                                val deltaDp =
-                                                    with(previewDensity) { deltaPx.toDp().value }
-                                                val currentWidth =
-                                                    connectedPreviewWidthOverrideDp
-                                                        ?: defaultPreviewWidth.value
-                                                connectedPreviewWidthOverrideDp = (
-                                                        currentWidth - deltaDp
-                                                        ).coerceIn(
-                                                        minPreviewWidth.value,
-                                                        maxPreviewWidth.value,
+                                    if (compactConnectedTab == ConnectedDashboardTab.AV) {
+                                        AvLibraryPanel(
+                                            avLibrary = uiState.avLibrary,
+                                            isConnected = uiState.isConnected,
+                                            onSetFilterFamily = viewModel::setAvFilterFamily,
+                                            onStudioSelected = viewModel::selectAvStudio,
+                                            onCastToggled = viewModel::toggleAvCast,
+                                            onReleaseDateSelected = viewModel::selectAvReleaseDate,
+                                            onClearFilters = viewModel::clearAvFilters,
+                                            onPreviousMonth = viewModel::showPreviousAvMonth,
+                                            onNextMonth = viewModel::showNextAvMonth,
+                                            onWorkSelected = viewModel::selectAvWork,
+                                            onPlayPart = { filePath, fileName ->
+                                                navController.navigate(
+                                                    Screen.VideoPlayer.createRoute(
+                                                        filePath,
+                                                        fileName
                                                     )
+                                                ) {
+                                                    launchSingleTop = true
+                                                }
                                             },
-                                            modifier = Modifier.fillMaxHeight(),
+                                            modifier = Modifier.fillMaxSize(),
                                         )
+                                    } else {
+                                        Row(modifier = Modifier.fillMaxSize()) {
+                                            Column(
+                                                modifier = Modifier
+                                                    .weight(1f)
+                                                    .fillMaxHeight(),
+                                            ) {
+                                                if (compactConnectedTab == ConnectedDashboardTab.Files) {
+                                                    FileBrowserPanel(
+                                                        files = files,
+                                                        favoritePaths = favoritePaths,
+                                                        currentPath = uiState.currentPath,
+                                                        sourceScope = uiState.selectedServer?.let {
+                                                            buildSourceScope(it.serverAddress, it.shareName)
+                                                        },
+                                                        isConnected = uiState.isConnected,
+                                                        isLoading = uiState.isLoadingFiles,
+                                                        errorMessage = uiState.errorMessage,
+                                                        viewMode = uiState.fileViewMode,
+                                                        currentPreviewKey = dashboardPreviewItem?.key,
+                                                        onFileClick = { file ->
+                                                            dashboardPreviewItem = null
+                                                            viewModel.navigateToFile(file)
+                                                        },
+                                                        onBackClick = {
+                                                            dashboardPreviewItem = null
+                                                            viewModel.navigateBack()
+                                                        },
+                                                        onToggleViewMode = {
+                                                            dashboardPreviewItem = null
+                                                            viewModel.toggleFileViewMode()
+                                                        },
+                                                        onDeleteFiles = { selectedFiles ->
+                                                            viewModel.deleteFiles(selectedFiles)
+                                                        },
+                                                        onPlayVideo = { filePath, fileName ->
+                                                            dashboardPreviewItem = null
+                                                            navController.navigate(
+                                                                Screen.VideoPlayer.createRoute(
+                                                                    filePath,
+                                                                    fileName
+                                                                )
+                                                            ) {
+                                                                launchSingleTop = true
+                                                            }
+                                                        },
+                                                        onFavoriteToggle = { file, isFavorite ->
+                                                            viewModel.toggleFavoriteForFile(
+                                                                file,
+                                                                isFavorite
+                                                            )
+                                                        },
+                                                        onPreviewFocused = { preview ->
+                                                            dashboardPreviewItem = preview
+                                                        },
+                                                        modifier = Modifier
+                                                            .fillMaxWidth()
+                                                            .weight(1f)
+                                                    )
+                                                } else {
+                                                    FavoritesPanel(
+                                                        favorites = favorites,
+                                                        recentVideos = recentVideos,
+                                                        isConnected = uiState.isConnected,
+                                                        currentPreviewKey = dashboardPreviewItem?.key,
+                                                        onFavoriteClick = { video ->
+                                                            dashboardPreviewItem = null
+                                                            navController.navigate(
+                                                                Screen.VideoPlayer.createRoute(
+                                                                    video.filePath,
+                                                                    video.fileName
+                                                                )
+                                                            ) {
+                                                                launchSingleTop = true
+                                                            }
+                                                        },
+                                                        onRecentClick = { video ->
+                                                            dashboardPreviewItem = null
+                                                            navController.navigate(
+                                                                Screen.VideoPlayer.createRoute(
+                                                                    video.filePath,
+                                                                    video.fileName
+                                                                )
+                                                            ) {
+                                                                launchSingleTop = true
+                                                            }
+                                                        },
+                                                        onFavoriteToggle = { filePath, fileName, serverAddress, shareName, isFavorite ->
+                                                            viewModel.toggleFavoriteEntry(
+                                                                filePath = filePath,
+                                                                fileName = fileName,
+                                                                serverAddress = serverAddress,
+                                                                shareName = shareName,
+                                                                currentIsFavorite = isFavorite,
+                                                            )
+                                                        },
+                                                        onRecentRemove = { video ->
+                                                            dashboardScope.launch {
+                                                                viewModel.removeFromRecent(video)
+                                                            }
+                                                        },
+                                                        onPreviewFocused = { preview ->
+                                                            dashboardPreviewItem = preview
+                                                        },
+                                                        modifier = Modifier
+                                                            .fillMaxWidth()
+                                                            .weight(1f)
+                                                    )
+                                                }
+                                            }
 
-                                        DashboardPreviewPanel(
-                                            previewItem = dashboardPreviewItem,
-                                            modifier = Modifier
-                                                .width(previewWidth)
-                                                .fillMaxHeight(),
-                                        )
+                                            ConnectedPaneResizeHandle(
+                                                onDragDeltaPx = { deltaPx ->
+                                                    val deltaDp =
+                                                        with(previewDensity) { deltaPx.toDp().value }
+                                                    val currentWidth =
+                                                        connectedPreviewWidthOverrideDp
+                                                            ?: defaultPreviewWidth.value
+                                                    connectedPreviewWidthOverrideDp = (
+                                                            currentWidth - deltaDp
+                                                            ).coerceIn(
+                                                            minPreviewWidth.value,
+                                                            maxPreviewWidth.value,
+                                                        )
+                                                },
+                                                modifier = Modifier.fillMaxHeight(),
+                                            )
+
+                                            DashboardPreviewPanel(
+                                                previewItem = dashboardPreviewItem,
+                                                modifier = Modifier
+                                                    .width(previewWidth)
+                                                    .fillMaxHeight(),
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -2251,15 +2308,9 @@ private fun rememberVideoFileMetadata(file: SMBFileItem, isVideoFile: Boolean): 
             return@produceState
         }
 
-        logMetadataTrace(
-            FILE_THUMBNAIL_LOG_TAG,
-            "Resolving metadata for file=${file.path} code=${lookupRequest.code} path='${lookupRequest.folderPath}'"
-        )
-
-        value = JvrLibraryMetadataProvider.getByCode(
+        value = resolveLinkedMetadataForVideoPath(
             context = context,
-            rawCode = lookupRequest.code,
-            folderPath = lookupRequest.folderPath,
+            videoPath = file.path,
         )
     }
 
@@ -2267,7 +2318,11 @@ private fun rememberVideoFileMetadata(file: SMBFileItem, isVideoFile: Boolean): 
 }
 
 @Composable
-private fun rememberGroupMetadata(groupCode: String, folderPath: String): JvrMovieMetadata? {
+private fun rememberGroupMetadata(
+    groupCode: String,
+    folderPath: String,
+    sourceScope: String?,
+): JvrMovieMetadata? {
     val context = LocalContext.current.applicationContext
     val normalizedCode = remember(groupCode) { groupCode.trim().uppercase() }
     val normalizedFolderPath = remember(folderPath) { folderPath.trim() }
@@ -2279,6 +2334,7 @@ private fun rememberGroupMetadata(groupCode: String, folderPath: String): JvrMov
         initialValue = cachedMetadata,
         key1 = normalizedCode,
         key2 = normalizedFolderPath,
+        key3 = sourceScope,
     ) {
         if (cachedMetadata != null) {
             logMetadataTrace(
@@ -2288,13 +2344,10 @@ private fun rememberGroupMetadata(groupCode: String, folderPath: String): JvrMov
             return@produceState
         }
 
-        logMetadataTrace(
-            GROUP_THUMBNAIL_LOG_TAG,
-            "Resolving metadata for virtual group code=$normalizedCode path='$normalizedFolderPath'"
-        )
-        val metadata = JvrLibraryMetadataProvider.getByCode(
+        val metadata = resolveLinkedMetadataForGroup(
             context = context,
-            rawCode = normalizedCode,
+            sourceScope = sourceScope,
+            normalizedCode = normalizedCode,
             folderPath = normalizedFolderPath,
         )
 
@@ -2408,6 +2461,7 @@ private fun FileBrowserPanel(
     files: List<SMBFileItem>,
     favoritePaths: Set<String>,
     currentPath: String,
+    sourceScope: String?,
     isConnected: Boolean,
     isLoading: Boolean,
     errorMessage: String?,
@@ -2801,8 +2855,9 @@ private fun FileBrowserPanel(
                                         is FileBrowserDisplayItem.Group -> {
                                             val groupMetadata =
                                                 rememberGroupMetadata(
-                                                    item.virtualGroup.key,
-                                                    currentPath
+                                                    groupCode = item.virtualGroup.key,
+                                                    folderPath = currentPath,
+                                                    sourceScope = sourceScope,
                                                 )
                                             VirtualGroupListCard(
                                                 group = item.virtualGroup,
@@ -2884,8 +2939,9 @@ private fun FileBrowserPanel(
                                         is FileBrowserDisplayItem.Group -> {
                                             val groupMetadata =
                                                 rememberGroupMetadata(
-                                                    item.virtualGroup.key,
-                                                    currentPath
+                                                    groupCode = item.virtualGroup.key,
+                                                    folderPath = currentPath,
+                                                    sourceScope = sourceScope,
                                                 )
                                             VirtualGroupThumbnailCard(
                                                 group = item.virtualGroup,

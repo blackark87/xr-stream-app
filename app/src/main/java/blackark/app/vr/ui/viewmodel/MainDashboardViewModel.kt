@@ -5,16 +5,29 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import blackark.app.vr.AppState
+import blackark.app.vr.data.database.entity.AvAssetLocation
+import blackark.app.vr.data.database.entity.AvLibraryAsset
 import blackark.app.vr.data.database.entity.FavoriteVideo
 import blackark.app.vr.data.database.entity.RecentVideo
 import blackark.app.vr.data.database.entity.SavedServer
+import blackark.app.vr.data.model.AvLibraryWork
+import blackark.app.vr.data.repository.AvLibraryRepository
 import blackark.app.vr.data.repository.ServerRepository
 import blackark.app.vr.data.repository.VideoRepository
 import blackark.app.vr.network.LocalFileClient
 import blackark.app.vr.network.SMBClient
 import blackark.app.vr.network.SMBConfig
 import blackark.app.vr.network.SMBFileItem
+import blackark.app.vr.utils.JvrLibraryMetadataProvider
+import blackark.app.vr.utils.buildAssetKey
+import blackark.app.vr.utils.buildSourceScope
+import blackark.app.vr.utils.extractFileName
+import blackark.app.vr.utils.extractFolderPath
+import blackark.app.vr.utils.extractNormalizedCodeFromFileName
+import blackark.app.vr.utils.extractVirtualGroupPart
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -22,7 +35,13 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import jcifs.smb.SmbRandomAccessFile
+import java.io.RandomAccessFile
+import java.security.MessageDigest
+import kotlin.collections.ArrayDeque
 
 data class MainDashboardState(
     val isConnected: Boolean = false,
@@ -32,7 +51,8 @@ data class MainDashboardState(
     val currentPath: String = "",
     val pathHistory: List<String> = emptyList(),
     val errorMessage: String? = null,
-    val fileViewMode: FileBrowserViewMode = FileBrowserViewMode.Thumbnail
+    val fileViewMode: FileBrowserViewMode = FileBrowserViewMode.Thumbnail,
+    val avLibrary: AvLibraryState = AvLibraryState(),
 )
 
 enum class FileBrowserViewMode {
@@ -43,13 +63,13 @@ enum class FileBrowserViewMode {
 class MainDashboardViewModel(
     private val context: Context,
     private val serverRepository: ServerRepository,
-    private val videoRepository: VideoRepository
+    private val videoRepository: VideoRepository,
+    private val avLibraryRepository: AvLibraryRepository,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(MainDashboardState())
     val uiState: StateFlow<MainDashboardState> = _uiState.asStateFlow()
 
-    // Server list from database
     val servers: StateFlow<List<SavedServer>> = serverRepository.allServers
         .stateIn(
             scope = viewModelScope,
@@ -57,11 +77,9 @@ class MainDashboardViewModel(
             initialValue = emptyList()
         )
 
-    // File list from current directory
     private val _files = MutableStateFlow<List<SMBFileItem>>(emptyList())
     val files: StateFlow<List<SMBFileItem>> = _files.asStateFlow()
 
-    // Favorites from database - filtered by currently connected source
     @OptIn(ExperimentalCoroutinesApi::class)
     val favorites: StateFlow<List<FavoriteVideo>> = _uiState
         .flatMapLatest { state ->
@@ -80,7 +98,6 @@ class MainDashboardViewModel(
             initialValue = emptyList()
         )
 
-    // Recent videos from database - filtered by currently connected source
     @OptIn(ExperimentalCoroutinesApi::class)
     val recentVideos: StateFlow<List<RecentVideo>> = _uiState
         .flatMapLatest { state ->
@@ -102,6 +119,7 @@ class MainDashboardViewModel(
 
     private var smbClient: SMBClient? = null
     private var localClient: LocalFileClient? = null
+    private var avScanJob: Job? = null
 
     private fun filterAndSortBrowsableFiles(fileList: List<SMBFileItem>): List<SMBFileItem> {
         return fileList
@@ -112,47 +130,30 @@ class MainDashboardViewModel(
             )
     }
 
-    /**
-     * Add a new server to the database
-     */
     fun addServer(server: SavedServer) {
         viewModelScope.launch {
             serverRepository.insertServer(server)
         }
     }
 
-    /**
-     * Update an existing server in the database
-     */
     fun updateServer(server: SavedServer) {
         viewModelScope.launch {
             serverRepository.updateServer(server)
-
-            // If updating the currently connected server, reconnect with new details if needed
-            // For now, we'll just disconnect to be safe if credentials changed
             if (_uiState.value.selectedServer?.id == server.id) {
                 disconnect()
             }
         }
     }
 
-    /**
-     * Delete a server from the database
-     */
     fun deleteServer(server: SavedServer) {
         viewModelScope.launch {
             serverRepository.deleteServer(server)
-
-            // If deleting the currently connected server, disconnect
             if (_uiState.value.selectedServer?.id == server.id) {
                 disconnect()
             }
         }
     }
 
-    /**
-     * Test connection to a server without saving it
-     */
     suspend fun testConnection(server: SavedServer): Result<Unit> {
         return try {
             val config = SMBConfig(
@@ -173,9 +174,6 @@ class MainDashboardViewModel(
         }
     }
 
-    /**
-     * Connect to a selected server (local or SMB)
-     */
     fun connectToServer(server: SavedServer) {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(
@@ -184,24 +182,21 @@ class MainDashboardViewModel(
             )
 
             try {
-                // Clear existing clients before connecting to a new one
                 smbClient?.disconnect()
                 smbClient = null
                 localClient?.disconnect()
                 localClient = null
+                avScanJob?.cancel()
                 AppState.clear()
 
                 val result = if (server.isLocalStorage) {
-                    // Connect to local storage
                     val client = LocalFileClient(context)
                     val connectionResult = client.connect()
-
                     if (connectionResult.isSuccess) {
                         localClient = client
                     }
                     connectionResult
                 } else {
-                    // Connect to SMB server
                     val config = SMBConfig(
                         serverAddress = server.serverAddress,
                         port = server.port,
@@ -213,7 +208,6 @@ class MainDashboardViewModel(
 
                     val client = SMBClient(config)
                     val connectionResult = client.connect()
-
                     if (connectionResult.isSuccess) {
                         smbClient = client
                         AppState.setSMBClient(client, config)
@@ -222,7 +216,6 @@ class MainDashboardViewModel(
                 }
 
                 if (result.isSuccess) {
-                    // Update last connected time
                     serverRepository.updateLastConnected(server.id)
 
                     _uiState.value = _uiState.value.copy(
@@ -231,11 +224,16 @@ class MainDashboardViewModel(
                         selectedServer = server,
                         currentPath = "",
                         pathHistory = emptyList(),
-                        errorMessage = null
+                        errorMessage = null,
+                        avLibrary = _uiState.value.avLibrary.copy(
+                            scan = AvScanState(),
+                            selectedAssetKey = null,
+                        ),
                     )
 
-                    // Load root directory files
                     loadFiles("")
+                    refreshAvSnapshot(buildSourceScope(server.serverAddress, server.shareName))
+                    startAvLibraryIndexing(server)
                 } else {
                     _uiState.value = _uiState.value.copy(
                         isConnecting = false,
@@ -253,10 +251,9 @@ class MainDashboardViewModel(
         }
     }
 
-    /**
-     * Disconnect from current server (local or SMB)
-     */
     fun disconnect() {
+        avScanJob?.cancel()
+        avScanJob = null
         smbClient?.disconnect()
         smbClient = null
         localClient?.disconnect()
@@ -267,14 +264,12 @@ class MainDashboardViewModel(
             isConnected = false,
             selectedServer = null,
             currentPath = "",
-            pathHistory = emptyList()
+            pathHistory = emptyList(),
+            avLibrary = AvLibraryState(),
         )
         _files.value = emptyList()
     }
 
-    /**
-     * Load files from the specified path (local or SMB)
-     */
     fun loadFiles(path: String) {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(
@@ -282,7 +277,6 @@ class MainDashboardViewModel(
                 errorMessage = null
             )
 
-            // Determine which client to use
             val result = when {
                 localClient != null -> localClient!!.listFiles(path)
                 smbClient != null -> smbClient!!.listFiles(path)
@@ -321,17 +315,12 @@ class MainDashboardViewModel(
         }
     }
 
-    /**
-     * Navigate to a file or directory
-     */
     fun navigateToFile(file: SMBFileItem) {
         if (!file.isDirectory) return
 
-        // Add current path to history
         val newHistory = _uiState.value.pathHistory + _uiState.value.currentPath
         _uiState.value = _uiState.value.copy(pathHistory = newHistory)
 
-        // Navigate to the directory
         val dirName = file.name.removeSuffix("/")
         val newPath = if (_uiState.value.currentPath.isEmpty()) {
             dirName
@@ -342,9 +331,6 @@ class MainDashboardViewModel(
         loadFiles(newPath)
     }
 
-    /**
-     * Navigate back to previous directory
-     */
     fun navigateBack() {
         val history = _uiState.value.pathHistory
         if (history.isEmpty()) return
@@ -478,6 +464,8 @@ class MainDashboardViewModel(
             )
         }
 
+        _uiState.value.selectedServer?.let(::startAvLibraryIndexing)
+
         return if (errors.isEmpty()) {
             Result.success(deletedCount)
         } else {
@@ -488,6 +476,114 @@ class MainDashboardViewModel(
                 )
             )
         }
+    }
+
+    fun clearAvFilters() {
+        updateAvFilters(
+            AvFilterState(
+                activeFamily = AvFilterFamily.None,
+                visibleMonth = _uiState.value.avLibrary.filters.visibleMonth,
+            )
+        )
+    }
+
+    fun setAvFilterFamily(family: AvFilterFamily) {
+        val current = _uiState.value.avLibrary.filters
+        updateAvFilters(
+            when (family) {
+                AvFilterFamily.None -> current.copy(activeFamily = AvFilterFamily.None)
+                AvFilterFamily.Studio -> current.copy(
+                    activeFamily = AvFilterFamily.Studio,
+                    selectedCastIds = emptySet(),
+                    selectedReleaseDate = null,
+                )
+
+                AvFilterFamily.Casts -> current.copy(
+                    activeFamily = AvFilterFamily.Casts,
+                    selectedStudio = null,
+                    selectedReleaseDate = null,
+                )
+
+                AvFilterFamily.ReleaseDate -> current.copy(
+                    activeFamily = AvFilterFamily.ReleaseDate,
+                    selectedStudio = null,
+                    selectedCastIds = emptySet(),
+                )
+            }
+        )
+    }
+
+    fun selectAvStudio(studio: String?) {
+        updateAvFilters(
+            _uiState.value.avLibrary.filters.copy(
+                activeFamily = if (studio == null) AvFilterFamily.None else AvFilterFamily.Studio,
+                selectedStudio = studio,
+                selectedCastIds = emptySet(),
+                selectedReleaseDate = null,
+            )
+        )
+    }
+
+    fun toggleAvCast(performerId: String) {
+        val current = _uiState.value.avLibrary.filters
+        val nextSelection = if (performerId in current.selectedCastIds) {
+            current.selectedCastIds - performerId
+        } else {
+            current.selectedCastIds + performerId
+        }
+        updateAvFilters(
+            current.copy(
+                activeFamily = if (nextSelection.isEmpty()) AvFilterFamily.None else AvFilterFamily.Casts,
+                selectedStudio = null,
+                selectedCastIds = nextSelection,
+                selectedReleaseDate = null,
+            )
+        )
+    }
+
+    fun selectAvReleaseDate(date: java.time.LocalDate?) {
+        updateAvFilters(
+            _uiState.value.avLibrary.filters.copy(
+                activeFamily = if (date == null) AvFilterFamily.None else AvFilterFamily.ReleaseDate,
+                selectedStudio = null,
+                selectedCastIds = emptySet(),
+                selectedReleaseDate = date,
+                visibleMonth = date?.let(java.time.YearMonth::from)
+                    ?: _uiState.value.avLibrary.filters.visibleMonth,
+            )
+        )
+    }
+
+    fun showPreviousAvMonth() {
+        updateAvFilters(_uiState.value.avLibrary.filters.copy(
+            visibleMonth = _uiState.value.avLibrary.filters.visibleMonth.minusMonths(1)
+        ))
+    }
+
+    fun showNextAvMonth() {
+        updateAvFilters(_uiState.value.avLibrary.filters.copy(
+            visibleMonth = _uiState.value.avLibrary.filters.visibleMonth.plusMonths(1)
+        ))
+    }
+
+    fun selectAvWork(assetKey: String?) {
+        _uiState.value = _uiState.value.copy(
+            avLibrary = _uiState.value.avLibrary.copy(
+                selectedAssetKey = assetKey,
+            )
+        )
+    }
+
+    fun refreshAvLibrary() {
+        val sourceScope = currentSourceScope() ?: return
+        viewModelScope.launch {
+            refreshAvSnapshot(sourceScope)
+        }
+    }
+
+    suspend fun clearAvMetadataLinks() {
+        avLibraryRepository.clearMetadataLinks()
+        refreshAvLibrary()
     }
 
     override fun onCleared() {
@@ -514,5 +610,408 @@ class MainDashboardViewModel(
         } else {
             videoRepository.removeFavoriteByPath(filePath)
         }
+    }
+
+    private fun updateAvFilters(filters: AvFilterState) {
+        val snapshot = _uiState.value.avLibrary.snapshot
+        _uiState.value = _uiState.value.copy(
+            avLibrary = _uiState.value.avLibrary.copy(
+                filters = filters,
+                filteredWorks = snapshot.applyFilters(filters),
+            )
+        )
+    }
+
+    private suspend fun refreshAvSnapshot(sourceScope: String) {
+        val snapshot = avLibraryRepository.loadSnapshot(sourceScope)
+        val currentFilters = _uiState.value.avLibrary.filters
+        val filteredWorks = snapshot.applyFilters(currentFilters)
+        val selectedAssetKey = _uiState.value.avLibrary.selectedAssetKey
+            ?.takeIf { key -> snapshot.works.any { it.assetKey == key } }
+
+        _uiState.value = _uiState.value.copy(
+            avLibrary = _uiState.value.avLibrary.copy(
+                snapshot = snapshot,
+                filteredWorks = filteredWorks,
+                selectedAssetKey = selectedAssetKey,
+                scan = _uiState.value.avLibrary.scan.copy(
+                    discoveredWorkCount = snapshot.works.size,
+                ),
+            )
+        )
+    }
+
+    private fun startAvLibraryIndexing(server: SavedServer) {
+        avScanJob?.cancel()
+        avScanJob = viewModelScope.launch {
+            val sourceScope = buildSourceScope(server.serverAddress, server.shareName)
+            val scanStartedAt = System.currentTimeMillis()
+            updateScanState(
+                AvScanState(
+                    isRunning = true,
+                    scannedFileCount = 0,
+                    discoveredWorkCount = _uiState.value.avLibrary.snapshot.works.size,
+                    errorMessage = null,
+                )
+            )
+
+            var scannedFiles = 0
+            var refreshCounter = 0
+
+            try {
+                val directories = ArrayDeque(resolveScanRoots())
+                while (directories.isNotEmpty() && isActive) {
+                    val path = directories.removeFirst()
+                    updateScanState(
+                        _uiState.value.avLibrary.scan.copy(
+                            isRunning = true,
+                            currentPath = path.ifBlank { "/" },
+                            scannedFileCount = scannedFiles,
+                        )
+                    )
+
+                    val listResult = listDirectoryForScan(path)
+                    if (listResult.isFailure) {
+                        Log.w(
+                            "MainDashboardViewModel",
+                            "AV scan failed for path=$path: ${listResult.exceptionOrNull()?.message}"
+                        )
+                        continue
+                    }
+
+                    val items = filterAndSortBrowsableFiles(listResult.getOrNull().orEmpty())
+                    items.forEach { item ->
+                        if (item.isDirectory) {
+                            val nextPath = buildNextScanPath(path, item)
+                            if (nextPath != null) {
+                                directories.addLast(nextPath)
+                            }
+                        } else if (SMBClient.isVideoFile(item.name)) {
+                            processScannedVideo(sourceScope, item, scanStartedAt)
+                            scannedFiles += 1
+                            refreshCounter += 1
+                            if (refreshCounter >= 20) {
+                                refreshCounter = 0
+                                refreshAvSnapshot(sourceScope)
+                                updateScanState(
+                                    _uiState.value.avLibrary.scan.copy(
+                                        isRunning = true,
+                                        currentPath = path.ifBlank { "/" },
+                                        scannedFileCount = scannedFiles,
+                                        discoveredWorkCount = _uiState.value.avLibrary.snapshot.works.size,
+                                    )
+                                )
+                            }
+                        }
+                    }
+                }
+
+                avLibraryRepository.markStaleLocationsMissing(sourceScope, scanStartedAt)
+                refreshAvSnapshot(sourceScope)
+                updateScanState(
+                    _uiState.value.avLibrary.scan.copy(
+                        isRunning = false,
+                        currentPath = null,
+                        scannedFileCount = scannedFiles,
+                        discoveredWorkCount = _uiState.value.avLibrary.snapshot.works.size,
+                        lastCompletedAt = System.currentTimeMillis(),
+                        errorMessage = null,
+                    )
+                )
+            } catch (e: Exception) {
+                Log.e("MainDashboardViewModel", "AV scan failed", e)
+                refreshAvSnapshot(sourceScope)
+                updateScanState(
+                    _uiState.value.avLibrary.scan.copy(
+                        isRunning = false,
+                        currentPath = null,
+                        scannedFileCount = scannedFiles,
+                        discoveredWorkCount = _uiState.value.avLibrary.snapshot.works.size,
+                        errorMessage = e.message ?: "Scan failed",
+                    )
+                )
+            }
+        }
+    }
+
+    private suspend fun processScannedVideo(
+        sourceScope: String,
+        file: SMBFileItem,
+        scanStartedAt: Long,
+    ) {
+        val existingLocation = avLibraryRepository.getLocationByPath(file.path)
+        var asset = existingLocation?.let { avLibraryRepository.getAssetByKey(it.assetKey) }
+        var normalizedCode = asset?.normalizedCode ?: extractNormalizedCodeFromFileName(file.name)
+        var contentFingerprint = existingLocation?.contentFingerprint
+
+        if (asset == null && normalizedCode != null) {
+            asset = avLibraryRepository.getAssetBySourceAndCode(sourceScope, normalizedCode)
+        }
+
+        if (asset == null && file.size > 0L) {
+            val fingerprintMatch = findFingerprintMatch(sourceScope, file)
+            if (fingerprintMatch != null) {
+                asset = avLibraryRepository.getAssetByKey(fingerprintMatch.first)
+                normalizedCode = asset?.normalizedCode
+                contentFingerprint = fingerprintMatch.second
+            }
+        }
+
+        if (normalizedCode == null) {
+            return
+        }
+
+        val assetKey = asset?.assetKey ?: buildAssetKey(sourceScope, normalizedCode)
+        val representativePath = chooseRepresentativePath(asset?.representativePath, file)
+        val representativeFileName = if (representativePath == file.path) {
+            file.name
+        } else {
+            asset?.representativeFileName ?: file.name
+        }
+        val representativeFolderPath = if (representativePath == file.path) {
+            extractFolderPath(file.path)
+        } else {
+            asset?.representativeFolderPath ?: extractFolderPath(file.path)
+        }
+
+        if (contentFingerprint == null && file.size > 0L) {
+            contentFingerprint = computeContentFingerprint(file.path, file.size)
+        }
+
+        var metadataCacheKey = asset?.metadataCacheKey
+        var metadataSource = asset?.metadataSource
+        var cachedTitle = asset?.cachedTitle
+        var cachedPosterUrl = asset?.cachedPosterUrl
+        var cachedStudio = asset?.cachedStudio
+        var cachedReleaseDateEpochDay = asset?.cachedReleaseDateEpochDay
+        var hasMetadata = asset?.hasMetadata ?: false
+        var metadataResolvedAt = asset?.metadataResolvedAt
+
+        if (metadataCacheKey.isNullOrBlank()) {
+            val resolvedSource = JvrLibraryMetadataProvider.resolveMetadataSource(extractFolderPath(file.path))
+            if (resolvedSource != null) {
+                metadataSource = resolvedSource
+                metadataCacheKey = JvrLibraryMetadataProvider.buildMetadataCacheKey(
+                    rawCode = normalizedCode,
+                    source = resolvedSource,
+                )
+                val metadata = JvrLibraryMetadataProvider.getByCode(
+                    context = context.applicationContext,
+                    rawCode = normalizedCode,
+                    folderPath = extractFolderPath(file.path),
+                )
+                if (metadata != null) {
+                    cachedTitle = metadata.title
+                    cachedPosterUrl = metadata.posterUrl
+                    cachedStudio = metadata.studio
+                    cachedReleaseDateEpochDay = metadata.releaseDate?.toEpochDay()
+                    hasMetadata = true
+                    metadataResolvedAt = scanStartedAt
+                }
+            }
+        } else {
+            val metadata = JvrLibraryMetadataProvider.getByCacheKey(
+                context = context.applicationContext,
+                cacheKey = metadataCacheKey,
+            )
+            if (metadata != null) {
+                cachedTitle = metadata.title
+                cachedPosterUrl = metadata.posterUrl
+                cachedStudio = metadata.studio
+                cachedReleaseDateEpochDay = metadata.releaseDate?.toEpochDay()
+                hasMetadata = true
+                metadataResolvedAt = metadataResolvedAt ?: scanStartedAt
+            }
+        }
+
+        avLibraryRepository.upsertAsset(
+            AvLibraryAsset(
+                assetKey = assetKey,
+                sourceScope = sourceScope,
+                normalizedCode = normalizedCode,
+                metadataCacheKey = metadataCacheKey,
+                metadataSource = metadataSource,
+                representativePath = representativePath,
+                representativeFileName = representativeFileName,
+                representativeFolderPath = representativeFolderPath,
+                cachedTitle = cachedTitle,
+                cachedPosterUrl = cachedPosterUrl,
+                cachedStudio = cachedStudio,
+                cachedReleaseDateEpochDay = cachedReleaseDateEpochDay,
+                hasMetadata = hasMetadata,
+                lastSeenAt = scanStartedAt,
+                lastScannedAt = scanStartedAt,
+                metadataResolvedAt = metadataResolvedAt,
+            )
+        )
+
+        avLibraryRepository.upsertLocation(
+            AvAssetLocation(
+                filePath = file.path,
+                assetKey = assetKey,
+                sourceScope = sourceScope,
+                fileName = file.name,
+                partNumber = extractVirtualGroupPart(file.name),
+                size = file.size,
+                lastModified = file.lastModified,
+                contentFingerprint = contentFingerprint,
+                lastSeenAt = scanStartedAt,
+                isPresent = true,
+            )
+        )
+    }
+
+    private suspend fun findFingerprintMatch(
+        sourceScope: String,
+        file: SMBFileItem,
+    ): Pair<String, String>? {
+        val candidates = avLibraryRepository.getMissingFingerprintCandidates(sourceScope, file.size)
+        if (candidates.isEmpty()) {
+            return null
+        }
+
+        val fingerprint = computeContentFingerprint(file.path, file.size) ?: return null
+        val matched = candidates.firstOrNull { it.contentFingerprint == fingerprint } ?: return null
+        return matched.assetKey to fingerprint
+    }
+
+    private fun chooseRepresentativePath(
+        currentRepresentativePath: String?,
+        candidate: SMBFileItem,
+    ): String {
+        if (currentRepresentativePath.isNullOrBlank()) {
+            return candidate.path
+        }
+
+        val currentRepresentativeName = extractFileName(currentRepresentativePath)
+        val currentPartNumber = extractVirtualGroupPart(currentRepresentativeName)
+        val candidatePartNumber = extractVirtualGroupPart(candidate.name)
+
+        return when {
+            currentPartNumber == null && candidatePartNumber != null -> currentRepresentativePath
+            currentPartNumber != null && candidatePartNumber == null -> candidate.path
+            candidatePartNumber != null && currentPartNumber != null &&
+                candidatePartNumber < currentPartNumber -> candidate.path
+            else -> currentRepresentativePath
+        }
+    }
+
+    private suspend fun resolveScanRoots(): List<String> {
+        return when {
+            localClient != null -> {
+                val roots = localClient!!.listFiles("")
+                    .getOrNull()
+                    .orEmpty()
+                    .filter { it.isDirectory }
+                    .map { it.path }
+                    .distinct()
+                    .sortedBy { it.length }
+
+                roots.filter { candidate ->
+                    roots.none { other ->
+                        other != candidate && candidate.startsWith("${other.trimEnd('/')}/")
+                    }
+                }
+            }
+
+            else -> listOf("")
+        }
+    }
+
+    private suspend fun listDirectoryForScan(path: String): Result<List<SMBFileItem>> {
+        return when {
+            localClient != null -> localClient!!.listFiles(path)
+            smbClient != null -> smbClient!!.listFiles(path)
+            else -> Result.failure(IllegalStateException("No active connection"))
+        }
+    }
+
+    private fun buildNextScanPath(currentPath: String, item: SMBFileItem): String? {
+        return when {
+            localClient != null -> item.path
+            smbClient != null -> {
+                if (currentPath.isBlank()) item.name else "$currentPath/${item.name}"
+            }
+
+            else -> null
+        }
+    }
+
+    private suspend fun computeContentFingerprint(path: String, size: Long): String? {
+        if (size <= 0L) return null
+
+        return withContext(Dispatchers.IO) {
+            val digest = MessageDigest.getInstance("SHA-256")
+            digest.update(size.toString().toByteArray())
+
+            try {
+                when {
+                    path.startsWith("smb://", ignoreCase = true) && smbClient != null -> {
+                        val smbFile = smbClient!!.getSmbFile(path)
+                        SmbRandomAccessFile(smbFile, "r").use { file ->
+                            updateDigestWithFileSamples(
+                                read = { offset, buffer, length ->
+                                    file.seek(offset)
+                                    file.read(buffer, 0, length)
+                                },
+                                size = size,
+                                digest = digest,
+                            )
+                        }
+                    }
+
+                    else -> {
+                        RandomAccessFile(path, "r").use { file ->
+                            updateDigestWithFileSamples(
+                                read = { offset, buffer, length ->
+                                    file.seek(offset)
+                                    file.read(buffer, 0, length)
+                                },
+                                size = size,
+                                digest = digest,
+                            )
+                        }
+                    }
+                }
+
+                digest.digest().joinToString("") { "%02x".format(it) }
+            } catch (e: Exception) {
+                Log.w("MainDashboardViewModel", "Failed to compute fingerprint for $path: ${e.message}")
+                null
+            }
+        }
+    }
+
+    private fun updateDigestWithFileSamples(
+        read: (Long, ByteArray, Int) -> Int,
+        size: Long,
+        digest: MessageDigest,
+    ) {
+        val firstChunk = ByteArray(minOf(64 * 1024L, size).toInt())
+        val firstRead = read(0L, firstChunk, firstChunk.size)
+        if (firstRead > 0) {
+            digest.update(firstChunk, 0, firstRead)
+        }
+
+        val tailSize = minOf(64 * 1024L, size).toInt()
+        val tailChunk = ByteArray(tailSize)
+        val tailOffset = (size - tailSize).coerceAtLeast(0L)
+        val tailRead = read(tailOffset, tailChunk, tailChunk.size)
+        if (tailRead > 0) {
+            digest.update(tailChunk, 0, tailRead)
+        }
+    }
+
+    private fun updateScanState(scanState: AvScanState) {
+        _uiState.value = _uiState.value.copy(
+            avLibrary = _uiState.value.avLibrary.copy(
+                scan = scanState,
+            )
+        )
+    }
+
+    private fun currentSourceScope(): String? {
+        val server = _uiState.value.selectedServer ?: return null
+        return buildSourceScope(server.serverAddress, server.shareName)
     }
 }

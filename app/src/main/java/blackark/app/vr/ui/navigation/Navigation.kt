@@ -15,6 +15,7 @@ import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import blackark.app.vr.data.database.AppDatabase
+import blackark.app.vr.data.repository.AvLibraryRepository
 import blackark.app.vr.data.repository.ServerRepository
 import blackark.app.vr.data.repository.VideoRepository
 import blackark.app.vr.ui.screens.MainDashboardScreen
@@ -46,6 +47,12 @@ fun AppNavigation(navController: NavHostController, context: Context) {
         VideoRepository(
             database.videoDao(),
             database.favoriteVideoDao(),
+        )
+    }
+    val avLibraryRepository = remember(database) {
+        AvLibraryRepository(
+            avLibraryDao = database.avLibraryDao(),
+            virtualGroupMetadataDao = database.virtualGroupMetadataDao(),
         )
     }
 
@@ -82,7 +89,8 @@ fun AppNavigation(navController: NavHostController, context: Context) {
                 factory = MainDashboardViewModelFactory(
                     appContext,
                     serverRepository,
-                    videoRepository
+                    videoRepository,
+                    avLibraryRepository,
                 )
             )
 
