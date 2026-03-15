@@ -5,6 +5,7 @@ import blackark.app.vr.data.model.AvLibrarySnapshot
 import blackark.app.vr.data.model.AvLibraryWork
 import blackark.app.vr.data.model.AvReleaseDateCount
 import blackark.app.vr.data.model.AvStudioFilterOption
+import blackark.app.vr.data.model.AV_CAST_FILTER_NONE_ID
 import java.time.LocalDate
 import java.time.YearMonth
 
@@ -71,9 +72,12 @@ fun AvLibrarySnapshot.applyFilters(filters: AvFilterState): List<AvLibraryWork> 
             if (filters.selectedCastIds.isEmpty()) {
                 works
             } else {
+                val includeWorksWithoutCasts = AV_CAST_FILTER_NONE_ID in filters.selectedCastIds
+                val selectedPerformerIds = filters.selectedCastIds - AV_CAST_FILTER_NONE_ID
                 works.filter { work ->
                     val castIds = work.casts.map { it.performerId }.toSet()
-                    filters.selectedCastIds.any(castIds::contains)
+                    (includeWorksWithoutCasts && castIds.isEmpty()) ||
+                        selectedPerformerIds.any(castIds::contains)
                 }
             }
         }

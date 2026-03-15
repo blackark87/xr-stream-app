@@ -9,6 +9,7 @@ import blackark.app.vr.data.model.AvLibrarySnapshot
 import blackark.app.vr.data.model.AvLibraryWork
 import blackark.app.vr.data.model.AvReleaseDateCount
 import blackark.app.vr.data.model.AvStudioFilterOption
+import blackark.app.vr.data.model.AV_CAST_FILTER_NONE_ID
 import blackark.app.vr.utils.JvrLibraryMetadataProvider
 import java.time.LocalDate
 
@@ -171,11 +172,16 @@ class AvLibraryRepository(
     private fun buildCastOptions(works: List<AvLibraryWork>): List<AvCastFilterOption> {
         val optionsById = linkedMapOf<String, AvCastFilterOption>()
         val counts = linkedMapOf<String, Int>()
+        var worksWithoutCasts = 0
 
         works.forEach { work ->
             val uniqueCasts = work.casts
                 .distinctBy { it.performerId }
                 .filter { it.performerId.isNotBlank() }
+
+            if (uniqueCasts.isEmpty()) {
+                worksWithoutCasts += 1
+            }
 
             uniqueCasts.forEach { cast ->
                 counts[cast.performerId] = (counts[cast.performerId] ?: 0) + 1
@@ -192,7 +198,7 @@ class AvLibraryRepository(
             }
         }
 
-        return optionsById.values
+        val castOptions = optionsById.values
             .map { option ->
                 option.copy(itemCount = counts[option.performerId] ?: 0)
             }
@@ -201,6 +207,21 @@ class AvLibraryRepository(
                     .thenBy { it.japaneseName?.lowercase().orEmpty() }
                     .thenBy { it.englishName.lowercase() }
             )
+
+        return buildList {
+            if (worksWithoutCasts > 0) {
+                add(
+                    AvCastFilterOption(
+                        performerId = AV_CAST_FILTER_NONE_ID,
+                        englishName = "None",
+                        japaneseName = null,
+                        profileImageUrl = null,
+                        itemCount = worksWithoutCasts,
+                    )
+                )
+            }
+            addAll(castOptions)
+        }
     }
 
     private fun buildReleaseDateCounts(works: List<AvLibraryWork>): List<AvReleaseDateCount> {
