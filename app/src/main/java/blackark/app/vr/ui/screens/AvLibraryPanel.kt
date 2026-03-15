@@ -628,6 +628,7 @@ private fun CastFilterGrid(
                         isPendingMergeSource = pendingMergeSourceCast?.performerId == cast.performerId,
                         onClick = {
                             when {
+                                cast.isNoneOption && mergeTargetCast == null -> onCastToggled(cast.performerId)
                                 mergeTargetCast == null -> onCastToggled(cast.performerId)
                                 mergeTargetCast.performerId != cast.performerId -> {
                                     onMergeCandidateSelected(cast)
@@ -1427,6 +1428,7 @@ private fun CastFilterCell(
     modifier: Modifier = Modifier,
 ) {
     var menuExpanded by remember(cast.performerId) { mutableStateOf(false) }
+    val supportsLongPressMenu = !cast.isNoneOption
     Box(modifier = modifier) {
         Surface(
             modifier = Modifier
@@ -1435,7 +1437,11 @@ private fun CastFilterCell(
                 .clip(RoundedCornerShape(14.dp))
                 .combinedClickable(
                     onClick = onClick,
-                    onLongClick = { menuExpanded = true },
+                    onLongClick = if (supportsLongPressMenu) {
+                        { menuExpanded = true }
+                    } else {
+                        null
+                    },
                 ),
             color = if (isSelected) {
                 NetflixRed.copy(alpha = 0.16f)
@@ -1477,7 +1483,9 @@ private fun CastFilterCell(
                 }
                 CastAvatar(
                     imageUrl = cast.profileImageUrl,
-                    placeholderText = if (
+                    placeholderText = if (cast.isNoneOption) {
+                        "None"
+                    } else if (
                         cast.englishName.isBlank() &&
                         cast.japaneseName.isNullOrBlank()
                     ) "?" else "\uD83D\uDC64",
@@ -1499,37 +1507,39 @@ private fun CastFilterCell(
             }
         }
 
-        DropdownMenu(
-            expanded = menuExpanded,
-            onDismissRequest = { menuExpanded = false },
-            containerColor = CardBackgroundHover,
-            shape = RoundedCornerShape(14.dp),
-        ) {
-            if (mergeTargetCast?.performerId == cast.performerId) {
+        if (supportsLongPressMenu) {
+            DropdownMenu(
+                expanded = menuExpanded,
+                onDismissRequest = { menuExpanded = false },
+                containerColor = CardBackgroundHover,
+                shape = RoundedCornerShape(14.dp),
+            ) {
+                if (mergeTargetCast?.performerId == cast.performerId) {
+                    DropdownMenuItem(
+                        text = { Text("Clear merge target") },
+                        onClick = {
+                            menuExpanded = false
+                            onClearMergeTarget()
+                        },
+                    )
+                } else {
+                    DropdownMenuItem(
+                        text = { Text("Set merge target") },
+                        onClick = {
+                            menuExpanded = false
+                            onSetMergeTarget()
+                        },
+                    )
+                }
+
                 DropdownMenuItem(
-                    text = { Text("Clear merge target") },
+                    text = { Text("Add alias") },
                     onClick = {
                         menuExpanded = false
-                        onClearMergeTarget()
-                    },
-                )
-            } else {
-                DropdownMenuItem(
-                    text = { Text("Set merge target") },
-                    onClick = {
-                        menuExpanded = false
-                        onSetMergeTarget()
+                        onAddCastAliasRequested()
                     },
                 )
             }
-
-            DropdownMenuItem(
-                text = { Text("Add alias") },
-                onClick = {
-                    menuExpanded = false
-                    onAddCastAliasRequested()
-                },
-            )
         }
     }
 }

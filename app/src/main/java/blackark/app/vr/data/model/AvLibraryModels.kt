@@ -7,6 +7,8 @@ import blackark.app.vr.utils.JvrMovieMetadata
 import blackark.app.vr.utils.extractVirtualGroupPart
 import java.time.LocalDate
 
+const val AV_CAST_FILTER_NONE_ID = "__none__"
+
 data class AvLibraryWork(
     val asset: AvLibraryAsset,
     val metadata: JvrMovieMetadata?,
@@ -61,7 +63,10 @@ data class AvCastFilterOption(
     val japaneseName: String?,
     val profileImageUrl: String?,
     val itemCount: Int,
-)
+) {
+    val isNoneOption: Boolean
+        get() = performerId == AV_CAST_FILTER_NONE_ID
+}
 
 data class AvReleaseDateCount(
     val date: LocalDate,
