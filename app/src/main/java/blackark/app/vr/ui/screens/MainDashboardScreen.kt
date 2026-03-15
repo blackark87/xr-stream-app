@@ -166,17 +166,17 @@ import blackark.app.vr.ui.theme.TextTertiary
 import blackark.app.vr.ui.viewmodel.FileBrowserViewMode
 import blackark.app.vr.ui.viewmodel.MainDashboardViewModel
 import blackark.app.vr.ui.viewmodel.PlaybackPreviewMode
-import blackark.app.vr.utils.buildSourceScope
 import blackark.app.vr.utils.ImageCacheVersionStore
 import blackark.app.vr.utils.JvrCastMetadata
 import blackark.app.vr.utils.JvrLibraryMetadataProvider
 import blackark.app.vr.utils.JvrMovieMetadata
 import blackark.app.vr.utils.PlaybackPreviewModeStore
-import blackark.app.vr.utils.resolveLinkedMetadataForGroup
-import blackark.app.vr.utils.resolveLinkedMetadataForVideoPath
 import blackark.app.vr.utils.ServerCredentialAutofillStore
 import blackark.app.vr.utils.ThumbnailImageLoaderProvider
 import blackark.app.vr.utils.VideoThumbnailFetcher
+import blackark.app.vr.utils.buildSourceScope
+import blackark.app.vr.utils.resolveLinkedMetadataForGroup
+import blackark.app.vr.utils.resolveLinkedMetadataForVideoPath
 import coil3.compose.AsyncImage
 import coil3.compose.rememberAsyncImagePainter
 import coil3.request.CachePolicy
@@ -1917,7 +1917,10 @@ fun MainDashboardScreen(
                                                         favoritePaths = favoritePaths,
                                                         currentPath = uiState.currentPath,
                                                         sourceScope = uiState.selectedServer?.let {
-                                                            buildSourceScope(it.serverAddress, it.shareName)
+                                                            buildSourceScope(
+                                                                it.serverAddress,
+                                                                it.shareName
+                                                            )
                                                         },
                                                         metadataRefreshToken = uiState.fileMetadataRefreshToken,
                                                         isConnected = uiState.isConnected,
@@ -2424,9 +2427,14 @@ private fun rememberVideoFileMetadata(
         buildVideoMetadataLookupRequest(file.path)
     } ?: return null
 
-    val cachedMetadata = remember(context, lookupRequest.code, lookupRequest.folderPath, refreshToken) {
-        JvrLibraryMetadataProvider.peekCached(context, lookupRequest.code, lookupRequest.folderPath)
-    }
+    val cachedMetadata =
+        remember(context, lookupRequest.code, lookupRequest.folderPath, refreshToken) {
+            JvrLibraryMetadataProvider.peekCached(
+                context,
+                lookupRequest.code,
+                lookupRequest.folderPath
+            )
+        }
 
     val metadataState = produceState<JvrMovieMetadata?>(
         initialValue = cachedMetadata,
@@ -2793,6 +2801,7 @@ private fun FileBrowserPanel(
         onPreviewFocused(null)
         onBackClick()
     }
+
     fun handleBrowserBack(): Boolean {
         if (showDeleteConfirmDialog) {
             if (!isDeleteInProgress) {
@@ -2818,9 +2827,9 @@ private fun FileBrowserPanel(
     val backHandlerState = rememberUpdatedState(newValue = { handleBrowserBack() })
     val shouldHandleSystemBack =
         showDeleteConfirmDialog ||
-            isDeleteMode ||
-            activeVirtualGroupKey != null ||
-            (currentPath.isNotEmpty() && currentPath != "/")
+                isDeleteMode ||
+                activeVirtualGroupKey != null ||
+                (currentPath.isNotEmpty() && currentPath != "/")
 
     BackHandler(enabled = shouldHandleSystemBack) {
         backHandlerState.value.invoke()
@@ -4892,7 +4901,7 @@ private fun AddServerDialog(
     }
     var isTestingConnection by remember { mutableStateOf(false) }
     var connectionError by remember { mutableStateOf<String?>(null) }
-    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val scope = rememberCoroutineScope()
 
     // Use standard Dialog composable
     androidx.compose.ui.window.Dialog(

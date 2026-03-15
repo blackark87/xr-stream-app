@@ -4,9 +4,8 @@ import android.content.Context
 import android.util.Log
 import blackark.app.vr.data.database.AppDatabase
 import blackark.app.vr.data.database.dao.VirtualGroupMetadataDao
-import blackark.app.vr.data.database.entity.JvrPerformerAlias
-import blackark.app.vr.data.database.entity.JvrPerformerMergeRule
 import blackark.app.vr.data.database.entity.JvrPerformer
+import blackark.app.vr.data.database.entity.JvrPerformerAlias
 import blackark.app.vr.data.database.entity.VirtualGroupMetadata
 import blackark.app.vr.data.database.entity.VirtualGroupMetadataGenre
 import blackark.app.vr.data.database.entity.VirtualGroupMetadataPerformerCrossRef
@@ -150,7 +149,8 @@ object JvrLibraryMetadataProvider {
             val normalized = normalizeCachedMetadata(cached)
             metadataCache[cacheKey] = normalized
             if (normalized != cached) {
-                val persistedMetadata = savePersistedMetadata(appContext, cacheKey, source, normalized)
+                val persistedMetadata =
+                    savePersistedMetadata(appContext, cacheKey, source, normalized)
                 metadataCache[cacheKey] = persistedMetadata
                 return persistedMetadata
             }
@@ -175,7 +175,8 @@ object JvrLibraryMetadataProvider {
             missCache.remove(cacheKey)
 
             if (cachedMetadata != persistedMetadata) {
-                val resolvedMetadata = savePersistedMetadata(appContext, cacheKey, source, cachedMetadata)
+                val resolvedMetadata =
+                    savePersistedMetadata(appContext, cacheKey, source, cachedMetadata)
                 metadataCache[cacheKey] = resolvedMetadata
                 return resolvedMetadata
             }
@@ -241,7 +242,8 @@ object JvrLibraryMetadataProvider {
             localizeMediaAssets(appContext, cacheKey, remoteMetadata)
         }
 
-        val persistedMetadata = savePersistedMetadata(appContext, cacheKey, source, localizedMetadata)
+        val persistedMetadata =
+            savePersistedMetadata(appContext, cacheKey, source, localizedMetadata)
         metadataCache[cacheKey] = persistedMetadata
         missCache.remove(cacheKey)
 
@@ -393,10 +395,16 @@ object JvrLibraryMetadataProvider {
                 return@withContext
             }
 
-            val matchedCanonicalIds = metadataDao.getAliasesByKeys(candidates.map(PerformerAliasCandidate::aliasKey))
-                .map { alias -> resolveCanonicalPerformerId(metadataDao, alias.canonicalPerformerId) }
-                .filter { it.isNotBlank() && it != canonicalPerformerId }
-                .distinct()
+            val matchedCanonicalIds =
+                metadataDao.getAliasesByKeys(candidates.map(PerformerAliasCandidate::aliasKey))
+                    .map { alias ->
+                        resolveCanonicalPerformerId(
+                            metadataDao,
+                            alias.canonicalPerformerId
+                        )
+                    }
+                    .filter { it.isNotBlank() && it != canonicalPerformerId }
+                    .distinct()
 
             matchedCanonicalIds.forEach { sourcePerformerId ->
                 metadataDao.mergePerformerInto(
@@ -1490,13 +1498,13 @@ object JvrLibraryMetadataProvider {
         metadataDao: VirtualGroupMetadataDao,
         source: String,
         cast: JvrCastMetadata,
-    ): JvrCastMetadata? {
+    ): JvrCastMetadata {
         val englishName = normalizeText(cast.englishName)
         val japaneseName = normalizeText(cast.japaneseName)
             ?.takeUnless {
                 it.equals(englishName, ignoreCase = true) &&
-                    !englishName.isNullOrBlank() &&
-                    containsEnglishLetters(englishName)
+                        !englishName.isNullOrBlank() &&
+                        containsEnglishLetters(englishName)
             }
         val candidates = buildPerformerAliasCandidates(
             legacyPerformerId = cast.performerId,
@@ -1680,7 +1688,7 @@ object JvrLibraryMetadataProvider {
 
         val incomingHasDistinctEnglishName =
             incoming.englishName.isNotBlank() &&
-                !incoming.englishName.equals(incoming.japaneseName, ignoreCase = true)
+                    !incoming.englishName.equals(incoming.japaneseName, ignoreCase = true)
 
         return incoming.copy(
             englishName = when {

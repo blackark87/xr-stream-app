@@ -59,7 +59,10 @@ suspend fun resolveLinkedMetadataForGroup(
         virtualGroupMetadataDao = database.virtualGroupMetadataDao(),
     )
     val asset = if (sourceScope != null) {
-        avLibraryRepository.getAssetBySourceAndCode(sourceScope, sanitizeNormalizedCode(normalizedCode))
+        avLibraryRepository.getAssetBySourceAndCode(
+            sourceScope,
+            sanitizeNormalizedCode(normalizedCode)
+        )
     } else {
         null
     }

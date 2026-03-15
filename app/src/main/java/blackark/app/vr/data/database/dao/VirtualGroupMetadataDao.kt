@@ -4,9 +4,9 @@ import androidx.room.Dao
 import androidx.room.Query
 import androidx.room.Transaction
 import androidx.room.Upsert
+import blackark.app.vr.data.database.entity.JvrPerformer
 import blackark.app.vr.data.database.entity.JvrPerformerAlias
 import blackark.app.vr.data.database.entity.JvrPerformerMergeRule
-import blackark.app.vr.data.database.entity.JvrPerformer
 import blackark.app.vr.data.database.entity.VirtualGroupMetadata
 import blackark.app.vr.data.database.entity.VirtualGroupMetadataGenre
 import blackark.app.vr.data.database.entity.VirtualGroupMetadataPerformerCrossRef

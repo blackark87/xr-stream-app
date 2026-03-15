@@ -191,7 +191,8 @@ class VideoPlayerViewModel(
     }
 
     fun setVideoFormat(format: VideoFormat) {
-        val nextStereoMode = if (format == VideoFormat.Format2D) StereoMode.Mono else _state.value.stereoMode
+        val nextStereoMode =
+            if (format == VideoFormat.Format2D) StereoMode.Mono else _state.value.stereoMode
         _state.value = _state.value.copy(
             videoFormat = format,
             stereoMode = nextStereoMode,

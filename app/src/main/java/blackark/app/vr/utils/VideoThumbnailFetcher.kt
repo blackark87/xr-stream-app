@@ -412,7 +412,10 @@ class VideoThumbnailFetcher(
                         "Updated DB thumbnail/title via asset linkage for ${linkedPaths.size} path(s) title=${resolvedTitle ?: "<unchanged>"}",
                     )
                 } else {
-                    Log.d(tag, "No asset-linked history rows found for thumbnail update fileName=$fileName")
+                    Log.d(
+                        tag,
+                        "No asset-linked history rows found for thumbnail update fileName=$fileName"
+                    )
                 }
             }
 

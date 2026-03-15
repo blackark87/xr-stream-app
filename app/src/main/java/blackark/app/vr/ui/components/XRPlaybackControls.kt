@@ -57,8 +57,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.media3.common.util.UnstableApi
-import blackark.app.vr.ui.viewmodel.PlaybackPreviewMode
 import blackark.app.vr.ui.viewmodel.PlaybackMenu
+import blackark.app.vr.ui.viewmodel.PlaybackPreviewMode
 import blackark.app.vr.ui.viewmodel.StereoMode
 import blackark.app.vr.ui.viewmodel.VideoFormat
 import blackark.app.vr.ui.viewmodel.VideoPlayerState

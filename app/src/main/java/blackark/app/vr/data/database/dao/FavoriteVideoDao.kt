@@ -43,7 +43,11 @@ interface FavoriteVideoDao {
     suspend fun updateThumbnailAndTitleByPath(filePath: String, path: String, title: String?)
 
     @Query("UPDATE favorite_videos SET thumbnailPath = :path, resolvedTitle = COALESCE(:title, resolvedTitle) WHERE filePath IN (:filePaths)")
-    suspend fun updateThumbnailAndTitleByPaths(filePaths: List<String>, path: String, title: String?)
+    suspend fun updateThumbnailAndTitleByPaths(
+        filePaths: List<String>,
+        path: String,
+        title: String?
+    )
 
     @Query("UPDATE favorite_videos SET thumbnailPath = NULL")
     suspend fun clearAllThumbnailPaths()

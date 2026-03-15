@@ -27,7 +27,10 @@ interface AvLibraryDao {
         LIMIT 1
         """
     )
-    suspend fun getAssetBySourceAndCode(sourceScope: String, normalizedCode: String): AvLibraryAsset?
+    suspend fun getAssetBySourceAndCode(
+        sourceScope: String,
+        normalizedCode: String
+    ): AvLibraryAsset?
 
     @Query("SELECT * FROM av_asset_locations WHERE filePath = :filePath LIMIT 1")
     suspend fun getLocationByPath(filePath: String): AvAssetLocation?
@@ -42,7 +45,10 @@ interface AvLibraryDao {
         ORDER BY lastSeenAt DESC
         """
     )
-    suspend fun getMissingFingerprintCandidates(sourceScope: String, size: Long): List<AvAssetLocation>
+    suspend fun getMissingFingerprintCandidates(
+        sourceScope: String,
+        size: Long
+    ): List<AvAssetLocation>
 
     @Query(
         """

@@ -10,7 +10,6 @@ import blackark.app.vr.data.database.entity.AvLibraryAsset
 import blackark.app.vr.data.database.entity.FavoriteVideo
 import blackark.app.vr.data.database.entity.RecentVideo
 import blackark.app.vr.data.database.entity.SavedServer
-import blackark.app.vr.data.model.AvLibraryWork
 import blackark.app.vr.data.repository.AvLibraryRepository
 import blackark.app.vr.data.repository.ServerRepository
 import blackark.app.vr.data.repository.VideoRepository
@@ -20,17 +19,18 @@ import blackark.app.vr.network.SMBConfig
 import blackark.app.vr.network.SMBFileItem
 import blackark.app.vr.utils.AvLibrarySettingsStore
 import blackark.app.vr.utils.JvrLibraryMetadataProvider
+import blackark.app.vr.utils.JvrMovieMetadata
 import blackark.app.vr.utils.buildAssetKey
 import blackark.app.vr.utils.buildSourceScope
 import blackark.app.vr.utils.extractFileName
 import blackark.app.vr.utils.extractFolderPath
 import blackark.app.vr.utils.extractNormalizedCodeFromFileName
 import blackark.app.vr.utils.extractVirtualGroupPart
-import blackark.app.vr.utils.JvrMovieMetadata
+import jcifs.smb.SmbRandomAccessFile
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -41,10 +41,8 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import jcifs.smb.SmbRandomAccessFile
 import java.io.RandomAccessFile
 import java.security.MessageDigest
-import kotlin.collections.ArrayDeque
 
 data class MainDashboardState(
     val isConnected: Boolean = false,
@@ -583,15 +581,19 @@ class MainDashboardViewModel(
     }
 
     fun showPreviousAvMonth() {
-        updateAvFilters(_uiState.value.avLibrary.filters.copy(
-            visibleMonth = _uiState.value.avLibrary.filters.visibleMonth.minusMonths(1)
-        ))
+        updateAvFilters(
+            _uiState.value.avLibrary.filters.copy(
+                visibleMonth = _uiState.value.avLibrary.filters.visibleMonth.minusMonths(1)
+            )
+        )
     }
 
     fun showNextAvMonth() {
-        updateAvFilters(_uiState.value.avLibrary.filters.copy(
-            visibleMonth = _uiState.value.avLibrary.filters.visibleMonth.plusMonths(1)
-        ))
+        updateAvFilters(
+            _uiState.value.avLibrary.filters.copy(
+                visibleMonth = _uiState.value.avLibrary.filters.visibleMonth.plusMonths(1)
+            )
+        )
     }
 
     fun selectAvWork(assetKey: String?) {
@@ -1025,7 +1027,8 @@ class MainDashboardViewModel(
         var cachedReleaseDateEpochDay = asset?.cachedReleaseDateEpochDay
         var hasMetadata = asset?.hasMetadata ?: false
         var metadataResolvedAt = asset?.metadataResolvedAt
-        val resolvedSource = JvrLibraryMetadataProvider.resolveMetadataSource(extractFolderPath(file.path))
+        val resolvedSource =
+            JvrLibraryMetadataProvider.resolveMetadataSource(extractFolderPath(file.path))
 
         if (
             forceMetadataRefresh &&
@@ -1190,7 +1193,8 @@ class MainDashboardViewModel(
             currentPartNumber == null && candidatePartNumber != null -> currentRepresentativePath
             currentPartNumber != null && candidatePartNumber == null -> candidate.path
             candidatePartNumber != null && currentPartNumber != null &&
-                candidatePartNumber < currentPartNumber -> candidate.path
+                    candidatePartNumber < currentPartNumber -> candidate.path
+
             else -> currentRepresentativePath
         }
     }
@@ -1291,7 +1295,10 @@ class MainDashboardViewModel(
 
                 digest.digest().joinToString("") { "%02x".format(it) }
             } catch (e: Exception) {
-                Log.w("MainDashboardViewModel", "Failed to compute fingerprint for $path: ${e.message}")
+                Log.w(
+                    "MainDashboardViewModel",
+                    "Failed to compute fingerprint for $path: ${e.message}"
+                )
                 null
             }
         }

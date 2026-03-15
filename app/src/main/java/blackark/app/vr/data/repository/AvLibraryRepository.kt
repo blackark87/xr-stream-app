@@ -4,12 +4,12 @@ import blackark.app.vr.data.database.dao.AvLibraryDao
 import blackark.app.vr.data.database.dao.VirtualGroupMetadataDao
 import blackark.app.vr.data.database.entity.AvAssetLocation
 import blackark.app.vr.data.database.entity.AvLibraryAsset
+import blackark.app.vr.data.model.AV_CAST_FILTER_NONE_ID
 import blackark.app.vr.data.model.AvCastFilterOption
 import blackark.app.vr.data.model.AvLibrarySnapshot
 import blackark.app.vr.data.model.AvLibraryWork
 import blackark.app.vr.data.model.AvReleaseDateCount
 import blackark.app.vr.data.model.AvStudioFilterOption
-import blackark.app.vr.data.model.AV_CAST_FILTER_NONE_ID
 import blackark.app.vr.utils.JvrLibraryMetadataProvider
 import java.time.LocalDate
 
@@ -29,7 +29,10 @@ class AvLibraryRepository(
         return avLibraryDao.getAssetByKey(assetKey)
     }
 
-    suspend fun getAssetBySourceAndCode(sourceScope: String, normalizedCode: String): AvLibraryAsset? {
+    suspend fun getAssetBySourceAndCode(
+        sourceScope: String,
+        normalizedCode: String
+    ): AvLibraryAsset? {
         return avLibraryDao.getAssetBySourceAndCode(sourceScope, normalizedCode)
     }
 

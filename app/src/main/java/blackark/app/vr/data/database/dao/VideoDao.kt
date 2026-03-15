@@ -79,7 +79,11 @@ interface VideoDao {
     suspend fun updateThumbnailAndTitle(videoId: Long, path: String, title: String?)
 
     @Query("UPDATE recent_videos SET thumbnailPath = :path, resolvedTitle = COALESCE(:title, resolvedTitle) WHERE filePath IN (:filePaths)")
-    suspend fun updateThumbnailAndTitleByPaths(filePaths: List<String>, path: String, title: String?)
+    suspend fun updateThumbnailAndTitleByPaths(
+        filePaths: List<String>,
+        path: String,
+        title: String?
+    )
 
     @Query("UPDATE recent_videos SET thumbnailPath = NULL")
     suspend fun clearAllThumbnailPaths()

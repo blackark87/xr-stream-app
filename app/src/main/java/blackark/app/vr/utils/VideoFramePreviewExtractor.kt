@@ -166,7 +166,8 @@ object VideoFramePreviewExtractor {
     }
 
     private fun normalizePreviewFrame(bitmap: Bitmap): Bitmap {
-        val inferredProfile = inferDisplayProfileFromFrame(bitmap.width, bitmap.height) ?: return bitmap
+        val inferredProfile =
+            inferDisplayProfileFromFrame(bitmap.width, bitmap.height) ?: return bitmap
         return try {
             when (inferredProfile.stereoMode) {
                 "SideBySide" -> Bitmap.createBitmap(bitmap, 0, 0, bitmap.width / 2, bitmap.height)

@@ -1,6 +1,7 @@
 package blackark.app.vr.ui.screens
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -21,14 +22,12 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
@@ -38,7 +37,6 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.MovieCreation
-import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -61,14 +59,14 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
@@ -90,12 +88,12 @@ import blackark.app.vr.ui.theme.TextSecondary
 import blackark.app.vr.ui.theme.TextTertiary
 import blackark.app.vr.ui.viewmodel.AvFilterFamily
 import blackark.app.vr.ui.viewmodel.AvLibraryState
-import coil3.compose.AsyncImage
-import coil3.request.CachePolicy
-import coil3.request.ImageRequest
 import blackark.app.vr.utils.JvrCastMetadata
 import blackark.app.vr.utils.JvrMovieMetadata
 import blackark.app.vr.utils.VideoThumbnailFetcher
+import coil3.compose.AsyncImage
+import coil3.request.CachePolicy
+import coil3.request.ImageRequest
 import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.YearMonth
@@ -427,7 +425,12 @@ private fun AvFilterSection(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
-                            text = "Merge target: ${buildCastLabel(target.japaneseName, target.englishName)}",
+                            text = "Merge target: ${
+                                buildCastLabel(
+                                    target.japaneseName,
+                                    target.englishName
+                                )
+                            }",
                             style = MaterialTheme.typography.bodySmall,
                             color = NetflixRed,
                             modifier = Modifier.weight(1f),
@@ -451,7 +454,12 @@ private fun AvFilterSection(
                             verticalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
                             Text(
-                                text = "Ready to merge ${buildCastLabel(source.japaneseName, source.englishName)} into ${buildCastLabel(target.japaneseName, target.englishName)}",
+                                text = "Ready to merge ${
+                                    buildCastLabel(
+                                        source.japaneseName,
+                                        source.englishName
+                                    )
+                                } into ${buildCastLabel(target.japaneseName, target.englishName)}",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = TextPrimary,
                             )
@@ -752,119 +760,119 @@ private fun ReleaseDateCalendar(
             .widthIn(max = 252.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(onClick = onPreviousMonth) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = null,
+                )
+            }
             Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                IconButton(onClick = onPreviousMonth) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = null,
-                    )
-                }
-                Row(
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                    Icon(
-                        imageVector = Icons.Filled.CalendarMonth,
-                        contentDescription = null,
-                        tint = NetflixRed,
-                    )
-                    Text(
+                Icon(
+                    imageVector = Icons.Filled.CalendarMonth,
+                    contentDescription = null,
+                    tint = NetflixRed,
+                )
+                Text(
                     text = monthLabel,
                     style = MaterialTheme.typography.titleSmall,
                     color = TextPrimary,
                 )
             }
-                IconButton(onClick = onNextMonth) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                        contentDescription = null,
-                    )
-                }
+            IconButton(onClick = onNextMonth) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                    contentDescription = null,
+                )
             }
+        }
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(2.dp),
-            ) {
-                listOf("M", "T", "W", "T", "F", "S", "S").forEach { label ->
-                    Text(
-                        text = label,
-                        modifier = Modifier.weight(1f),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = TextTertiary,
-                        textAlign = TextAlign.Center,
-                    )
-                }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            listOf("M", "T", "W", "T", "F", "S", "S").forEach { label ->
+                Text(
+                    text = label,
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = TextTertiary,
+                    textAlign = TextAlign.Center,
+                )
             }
+        }
 
-            Column(
-                verticalArrangement = Arrangement.spacedBy(2.dp),
-            ) {
-                cells.chunked(7).forEach { week ->
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(2.dp),
-                    ) {
-                        week.forEach { date ->
-                            if (date == null) {
-                                Spacer(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .aspectRatio(1f)
-                                )
-                            } else {
-                                val isSelected = selectedDate == date
-                                val count = counts[date] ?: 0
-                                Surface(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .aspectRatio(1f)
-                                        .clip(RoundedCornerShape(10.dp))
-                                        .clickable { onDateSelected(if (isSelected) null else date) },
-                                    color = if (isSelected) {
-                                        NetflixRed.copy(alpha = 0.16f)
-                                    } else {
-                                        CardBackground
-                                    },
-                                    shape = RoundedCornerShape(10.dp),
-                                    border = BorderStroke(
-                                        1.dp,
-                                        if (isSelected) NetflixRed else DividerGray.copy(alpha = 0.7f),
-                                    ),
-                                ) {
-                                    Column(
-                                        modifier = Modifier.padding(horizontal = 2.dp, vertical = 4.dp),
-                                        horizontalAlignment = Alignment.CenterHorizontally,
-                                        verticalArrangement = Arrangement.Center,
-                                    ) {
-                                        Text(
-                                            text = date.dayOfMonth.toString(),
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = TextPrimary,
-                                        )
-                                        Text(
-                                            text = if (count > 0) count.toString() else "",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = if (count > 0) NetflixRed else Color.Transparent,
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                        repeat((7 - week.size).coerceAtLeast(0)) {
+        Column(
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            cells.chunked(7).forEach { week ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    week.forEach { date ->
+                        if (date == null) {
                             Spacer(
                                 modifier = Modifier
                                     .weight(1f)
                                     .aspectRatio(1f)
                             )
+                        } else {
+                            val isSelected = selectedDate == date
+                            val count = counts[date] ?: 0
+                            Surface(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .aspectRatio(1f)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .clickable { onDateSelected(if (isSelected) null else date) },
+                                color = if (isSelected) {
+                                    NetflixRed.copy(alpha = 0.16f)
+                                } else {
+                                    CardBackground
+                                },
+                                shape = RoundedCornerShape(10.dp),
+                                border = BorderStroke(
+                                    1.dp,
+                                    if (isSelected) NetflixRed else DividerGray.copy(alpha = 0.7f),
+                                ),
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(horizontal = 2.dp, vertical = 4.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.Center,
+                                ) {
+                                    Text(
+                                        text = date.dayOfMonth.toString(),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = TextPrimary,
+                                    )
+                                    Text(
+                                        text = if (count > 0) count.toString() else "",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = if (count > 0) NetflixRed else Color.Transparent,
+                                    )
+                                }
+                            }
                         }
+                    }
+                    repeat((7 - week.size).coerceAtLeast(0)) {
+                        Spacer(
+                            modifier = Modifier
+                                .weight(1f)
+                                .aspectRatio(1f)
+                        )
                     }
                 }
             }
+        }
     }
 }
 
@@ -1108,7 +1116,8 @@ private fun AvWorkDetailDialog(
                             ) {
                                 row.forEach { cast ->
                                     CastDisplayCell(
-                                        imageUrl = cast.profileImageUrl ?: cast.remoteProfileImageUrl,
+                                        imageUrl = cast.profileImageUrl
+                                            ?: cast.remoteProfileImageUrl,
                                         japaneseName = cast.japaneseName,
                                         englishName = cast.englishName,
                                         modifier = Modifier.weight(1f),
@@ -1843,7 +1852,7 @@ private fun buildCastLabel(japaneseName: String?, englishName: String): String {
     }
 }
 
-private fun buildWorkCastSummary(casts: List<blackark.app.vr.utils.JvrCastMetadata>): String? {
+private fun buildWorkCastSummary(casts: List<JvrCastMetadata>): String? {
     if (casts.isEmpty()) return null
 
     val visibleLabels = casts
@@ -1876,6 +1885,6 @@ private fun shouldShowVrBadge(work: AvLibraryWork): Boolean {
     )
 
     return work.asset.metadataSource.equals("jvr", ignoreCase = true) ||
-        Regex("(^|/)av/vr(/|$)", RegexOption.IGNORE_CASE).containsMatchIn(representativePath) ||
-        stereoPattern.containsMatchIn(representativeFileName)
+            Regex("(^|/)av/vr(/|$)", RegexOption.IGNORE_CASE).containsMatchIn(representativePath) ||
+            stereoPattern.containsMatchIn(representativeFileName)
 }
