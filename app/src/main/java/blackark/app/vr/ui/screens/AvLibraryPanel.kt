@@ -7,8 +7,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -248,7 +246,6 @@ fun AvLibraryPanel(
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun AvFilterSection(
     avLibrary: AvLibraryState,
@@ -262,52 +259,67 @@ private fun AvFilterSection(
 ) {
     val filters = avLibrary.filters
 
-    FlowRow(
+    Column(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        StudioFilterTrigger(
-            studios = avLibrary.studioOptions.map { it.studio },
-            selectedStudio = filters.selectedStudio,
-            onStudioSelected = onStudioSelected,
-            modifier = Modifier.widthIn(min = 152.dp, max = 280.dp),
-        )
-        FilterTriggerButton(
-            label = if (filters.selectedCastIds.isEmpty()) {
-                "Casts"
-            } else {
-                "Casts (${filters.selectedCastIds.size})"
-            },
-            selected = filters.activeFamily == AvFilterFamily.Casts || filters.selectedCastIds.isNotEmpty(),
-            onClick = {
-                if (filters.activeFamily == AvFilterFamily.Casts && filters.selectedCastIds.isEmpty()) {
-                    onSetFilterFamily(AvFilterFamily.None)
-                } else {
-                    onSetFilterFamily(AvFilterFamily.Casts)
-                }
-            },
-            modifier = Modifier.widthIn(min = 132.dp, max = 220.dp),
-        )
-        ReleaseDateFilterTrigger(
-            month = filters.visibleMonth,
-            selectedDate = filters.selectedReleaseDate,
-            counts = avLibrary.releaseDateCounts.associate { it.date to it.itemCount },
-            onPreviousMonth = onPreviousMonth,
-            onNextMonth = onNextMonth,
-            onDateSelected = onReleaseDateSelected,
-            modifier = Modifier.widthIn(min = 164.dp, max = 240.dp),
-        )
-        if (
-            filters.selectedStudio != null ||
-            filters.selectedCastIds.isNotEmpty() ||
-            filters.selectedReleaseDate != null
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            TextButton(
-                onClick = onClearFilters,
-                modifier = Modifier.align(Alignment.CenterVertically),
+            StudioFilterTrigger(
+                studios = avLibrary.studioOptions.map { it.studio },
+                selectedStudio = filters.selectedStudio,
+                onStudioSelected = onStudioSelected,
+                modifier = Modifier
+                    .weight(1f)
+                    .widthIn(min = 152.dp),
+            )
+            FilterTriggerButton(
+                label = if (filters.selectedCastIds.isEmpty()) {
+                    "Casts"
+                } else {
+                    "Casts (${filters.selectedCastIds.size})"
+                },
+                selected = filters.activeFamily == AvFilterFamily.Casts || filters.selectedCastIds.isNotEmpty(),
+                onClick = {
+                    if (filters.activeFamily == AvFilterFamily.Casts && filters.selectedCastIds.isEmpty()) {
+                        onSetFilterFamily(AvFilterFamily.None)
+                    } else {
+                        onSetFilterFamily(AvFilterFamily.Casts)
+                    }
+                },
+                modifier = Modifier
+                    .weight(1f)
+                    .widthIn(min = 132.dp),
+            )
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            ReleaseDateFilterTrigger(
+                month = filters.visibleMonth,
+                selectedDate = filters.selectedReleaseDate,
+                counts = avLibrary.releaseDateCounts.associate { it.date to it.itemCount },
+                onPreviousMonth = onPreviousMonth,
+                onNextMonth = onNextMonth,
+                onDateSelected = onReleaseDateSelected,
+                modifier = Modifier
+                    .weight(1f)
+                    .widthIn(min = 164.dp),
+            )
+            if (
+                filters.selectedStudio != null ||
+                filters.selectedCastIds.isNotEmpty() ||
+                filters.selectedReleaseDate != null
             ) {
-                Text("Clear")
+                TextButton(onClick = onClearFilters) {
+                    Text("Clear")
+                }
             }
         }
     }
