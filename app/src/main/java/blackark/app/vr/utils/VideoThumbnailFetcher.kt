@@ -859,7 +859,12 @@ class VideoThumbnailFetcher(
     private fun computePreferredThumbnailTimeUs(durationMs: Long): Long {
         if (durationMs <= 0L) return 7_500_000L
 
-        val targetMs = (durationMs * 0.20f).toLong().coerceIn(5_000L, 10_000L)
+        val targetMs =
+            if (durationMs >= 50_000L) {
+                13_000L
+            } else {
+                (durationMs * 0.20f).toLong().coerceIn(5_000L, 10_000L)
+            }
         return targetMs * 1_000L
     }
 
