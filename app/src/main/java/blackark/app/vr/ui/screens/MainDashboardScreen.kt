@@ -1228,10 +1228,6 @@ private fun SettingsPanel(
 
             HorizontalDivider(color = DividerGray)
 
-            SettingsValueRow(
-                title = stringResource(R.string.version),
-                value = versionLabel,
-            )
             SettingsChoiceRow(
                 title = stringResource(R.string.seek_preview_mode_title),
                 description = stringResource(R.string.seek_preview_mode_description),
@@ -1277,6 +1273,10 @@ private fun SettingsPanel(
                 },
                 enabled = activeAction == null,
                 onClick = onClearFavorites,
+            )
+            SettingsValueRow(
+                title = stringResource(R.string.version),
+                value = versionLabel,
             )
         }
     }
@@ -1356,52 +1356,113 @@ private fun SettingsChoiceRow(
     options: List<Pair<PlaybackPreviewMode, String>>,
     onOptionSelected: (PlaybackPreviewMode) -> Unit,
 ) {
-    Column(
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        Text(
-            text = title,
-            style = MaterialTheme.typography.titleMedium,
-            color = TextPrimary,
-        )
+    var expanded by remember { mutableStateOf(false) }
+    val selectedLabel =
+        options.firstOrNull { it.first == selectedMode }?.second.orEmpty()
 
+    Column(
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            options.forEach { (mode, label) ->
-                val selected = selectedMode == mode
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = TextPrimary,
+                )
+                Text(
+                    text = description,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextTertiary,
+                )
+            }
+
+            Spacer(modifier = Modifier.width(16.dp))
+
+            Box {
                 Surface(
                     modifier = Modifier
-                        .weight(1f)
-                        .clickable { onOptionSelected(mode) },
-                    color =
-                        if (selected) {
-                            NetflixRed.copy(alpha = 0.18f)
-                        } else {
-                            CardBackgroundHover.copy(alpha = 0.72f)
-                        },
+                        .widthIn(min = 200.dp, max = 240.dp)
+                        .clickable { expanded = true },
+                    color = CardBackgroundHover.copy(alpha = 0.94f),
                     shape = RoundedCornerShape(14.dp),
-                    border = BorderStroke(1.dp, if (selected) NetflixRed else DividerGray),
+                    border = BorderStroke(
+                        1.dp,
+                        if (expanded) {
+                            NetflixRed.copy(alpha = 0.85f)
+                        } else {
+                            DividerGray
+                        },
+                    ),
                 ) {
-                    Text(
-                        text = label,
-                        style = MaterialTheme.typography.labelLarge,
-                        color = if (selected) TextPrimary else TextSecondary,
-                        textAlign = TextAlign.Center,
+                    Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 12.dp),
-                    )
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = selectedLabel,
+                            style = MaterialTheme.typography.labelLarge,
+                            color = TextPrimary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Icon(
+                            imageVector = Icons.Filled.KeyboardArrowDown,
+                            contentDescription = null,
+                            tint = if (expanded) NetflixRed else TextSecondary,
+                            modifier = Modifier.rotate(if (expanded) 180f else 0f),
+                        )
+                    }
+                }
+
+                DropdownMenu(
+                    expanded = expanded,
+                    onDismissRequest = { expanded = false },
+                    modifier = Modifier.widthIn(min = 220.dp, max = 260.dp),
+                    shape = RoundedCornerShape(20.dp),
+                    containerColor = CardBackgroundHover.copy(alpha = 0.98f),
+                    tonalElevation = 8.dp,
+                    shadowElevation = 18.dp,
+                    border = BorderStroke(1.dp, DividerGray.copy(alpha = 0.85f)),
+                ) {
+                    options.forEach { (mode, label) ->
+                        DropdownMenuItem(
+                            text = {
+                                Text(
+                                    text = label,
+                                    color = TextPrimary,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            },
+                            onClick = {
+                                expanded = false
+                                onOptionSelected(mode)
+                            },
+                            trailingIcon = {
+                                if (selectedMode == mode) {
+                                    Icon(
+                                        imageVector = Icons.Filled.CheckCircle,
+                                        contentDescription = null,
+                                        tint = SuccessGreen,
+                                    )
+                                }
+                            },
+                        )
+                    }
                 }
             }
         }
-
-        Text(
-            text = description,
-            style = MaterialTheme.typography.bodySmall,
-            color = TextTertiary,
-        )
     }
 }
 
