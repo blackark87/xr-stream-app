@@ -3,6 +3,9 @@ package blackark.app.vr.utils
 import android.content.Context
 import android.util.Log
 import blackark.app.vr.data.database.AppDatabase
+import blackark.app.vr.data.database.dao.VirtualGroupMetadataDao
+import blackark.app.vr.data.database.entity.JvrPerformerAlias
+import blackark.app.vr.data.database.entity.JvrPerformerMergeRule
 import blackark.app.vr.data.database.entity.JvrPerformer
 import blackark.app.vr.data.database.entity.VirtualGroupMetadata
 import blackark.app.vr.data.database.entity.VirtualGroupMetadataGenre
@@ -53,6 +56,9 @@ object JvrLibraryMetadataProvider {
     private const val SOURCE_JVR = "jvr"
     private const val SOURCE_AV_WIKI = "avwiki"
     private const val SOURCE_NONE = "none"
+    private const val ALIAS_KIND_ENGLISH = "english"
+    private const val ALIAS_KIND_JAPANESE = "japanese"
+    private const val ALIAS_KIND_LEGACY = "legacy"
 
     // Minimum delay between metadata requests to the same remote host.
     private const val THROTTLED_REQUEST_INTERVAL_MS = 300L
@@ -64,6 +70,12 @@ object JvrLibraryMetadataProvider {
     private val missCache = ConcurrentHashMap.newKeySet<String>()
     private val requestThrottleMutex = Mutex()
     private val lastRequestAtByHost = mutableMapOf<String, Long>()
+
+    private data class PerformerAliasCandidate(
+        val aliasKey: String,
+        val aliasKind: String,
+        val aliasValue: String,
+    )
 
     private val placeholderTitlePatterns = listOf(
         Regex("^\\s*not\\s+found\\s*$", RegexOption.IGNORE_CASE),
@@ -325,6 +337,100 @@ object JvrLibraryMetadataProvider {
         savePersistedMetadata(context.applicationContext, normalizedCacheKey, source, localizedMetadata)
         missCache.remove(normalizedCacheKey)
         return localizedMetadata
+    }
+
+    suspend fun mergePerformersManually(
+        context: Context,
+        sourcePerformerId: String,
+        targetPerformerId: String,
+    ) {
+        withContext(Dispatchers.IO) {
+            AppDatabase.getDatabase(context.applicationContext)
+                .virtualGroupMetadataDao()
+                .mergePerformerInto(
+                    sourcePerformerId = sourcePerformerId,
+                    targetPerformerId = targetPerformerId,
+                    isManual = true,
+                )
+        }
+    }
+
+    suspend fun addPerformerAliasesManually(
+        context: Context,
+        performerId: String,
+        englishName: String?,
+        japaneseName: String?,
+    ) {
+        withContext(Dispatchers.IO) {
+            val metadataDao = AppDatabase.getDatabase(context.applicationContext)
+                .virtualGroupMetadataDao()
+            val canonicalPerformerId = resolveCanonicalPerformerId(metadataDao, performerId)
+            val candidates = buildPerformerAliasCandidates(
+                legacyPerformerId = null,
+                englishName = normalizeText(englishName),
+                japaneseName = normalizeText(japaneseName),
+            )
+
+            if (candidates.isEmpty()) {
+                return@withContext
+            }
+
+            val matchedCanonicalIds = metadataDao.getAliasesByKeys(candidates.map(PerformerAliasCandidate::aliasKey))
+                .map { alias -> resolveCanonicalPerformerId(metadataDao, alias.canonicalPerformerId) }
+                .filter { it.isNotBlank() && it != canonicalPerformerId }
+                .distinct()
+
+            matchedCanonicalIds.forEach { sourcePerformerId ->
+                metadataDao.mergePerformerInto(
+                    sourcePerformerId = sourcePerformerId,
+                    targetPerformerId = canonicalPerformerId,
+                    isManual = true,
+                )
+            }
+
+            val existingCanonical = metadataDao.getPerformerById(canonicalPerformerId)
+            val mergedCanonical = mergeCanonicalPerformer(
+                canonicalPerformerId = canonicalPerformerId,
+                existing = existingCanonical,
+                cast = JvrCastMetadata(
+                    performerId = canonicalPerformerId,
+                    englishName = englishName.orEmpty(),
+                    japaneseName = japaneseName,
+                ),
+            )
+            metadataDao.upsertPerformers(listOf(mergedCanonical))
+            metadataDao.upsertAliases(
+                candidates.map { candidate ->
+                    JvrPerformerAlias(
+                        aliasKey = candidate.aliasKey,
+                        canonicalPerformerId = canonicalPerformerId,
+                        aliasKind = candidate.aliasKind,
+                        aliasValue = candidate.aliasValue,
+                        source = "manual",
+                        updatedAt = System.currentTimeMillis(),
+                    )
+                }
+            )
+        }
+    }
+
+    suspend fun saveManualMetadata(
+        context: Context,
+        cacheKey: String,
+        source: String,
+        metadata: JvrMovieMetadata,
+    ) {
+        val normalizedCacheKey = cacheKey.trim()
+        if (normalizedCacheKey.isBlank()) return
+
+        metadataCache.remove(normalizedCacheKey)
+        missCache.remove(normalizedCacheKey)
+        savePersistedMetadata(
+            context = context.applicationContext,
+            cacheKey = normalizedCacheKey,
+            source = source,
+            metadata = metadata,
+        )
     }
 
     internal fun toPersistedRecord(
@@ -742,15 +848,21 @@ object JvrLibraryMetadataProvider {
     ) {
         withContext(Dispatchers.IO) {
             try {
-                AppDatabase.getDatabase(context)
-                    .virtualGroupMetadataDao()
-                    .replace(
-                        toPersistedRecord(
-                            cacheKey = cacheKey,
-                            source = source,
-                            metadata = metadata,
-                        )
+                val database = AppDatabase.getDatabase(context)
+                val metadataDao = database.virtualGroupMetadataDao()
+                val resolvedMetadata = resolveCanonicalCastMetadata(
+                    metadataDao = metadataDao,
+                    source = source,
+                    metadata = metadata,
+                )
+
+                metadataDao.replace(
+                    toPersistedRecord(
+                        cacheKey = cacheKey,
+                        source = source,
+                        metadata = resolvedMetadata,
                     )
+                )
             } catch (e: Exception) {
                 Log.w(
                     TAG,
@@ -1333,6 +1445,284 @@ object JvrLibraryMetadataProvider {
         return genres
             .mapNotNull(::normalizeText)
             .distinct()
+    }
+
+    private suspend fun resolveCanonicalCastMetadata(
+        metadataDao: VirtualGroupMetadataDao,
+        source: String,
+        metadata: JvrMovieMetadata,
+    ): JvrMovieMetadata {
+        if (metadata.casts.isEmpty()) return metadata
+
+        val resolvedCasts = metadata.casts.mapNotNull { cast ->
+            resolveCanonicalCast(
+                metadataDao = metadataDao,
+                source = source,
+                cast = cast,
+            )
+        }.distinctBy { it.performerId }
+
+        return metadata.copy(casts = resolvedCasts)
+    }
+
+    private suspend fun resolveCanonicalCast(
+        metadataDao: VirtualGroupMetadataDao,
+        source: String,
+        cast: JvrCastMetadata,
+    ): JvrCastMetadata? {
+        val englishName = normalizeText(cast.englishName)
+        val japaneseName = normalizeText(cast.japaneseName)
+            ?.takeUnless {
+                it.equals(englishName, ignoreCase = true) &&
+                    !englishName.isNullOrBlank() &&
+                    containsEnglishLetters(englishName)
+            }
+        val candidates = buildPerformerAliasCandidates(
+            legacyPerformerId = cast.performerId,
+            englishName = englishName,
+            japaneseName = japaneseName,
+        )
+
+        val matchedCanonicalIds = candidates
+            .takeIf { it.isNotEmpty() }
+            ?.let { metadataDao.getAliasesByKeys(it.map(PerformerAliasCandidate::aliasKey)) }
+            .orEmpty()
+            .map { alias -> resolveCanonicalPerformerId(metadataDao, alias.canonicalPerformerId) }
+            .filter { it.isNotBlank() }
+            .distinct()
+
+        val canonicalPerformerId = when {
+            matchedCanonicalIds.isEmpty() -> {
+                buildCanonicalPerformerId(
+                    englishName = englishName,
+                    japaneseName = japaneseName,
+                    fallbackId = cast.performerId,
+                )
+            }
+
+            matchedCanonicalIds.size == 1 -> matchedCanonicalIds.first()
+
+            else -> {
+                val targetPerformerId = choosePreferredPerformerId(
+                    metadataDao = metadataDao,
+                    performerIds = matchedCanonicalIds,
+                    englishName = englishName,
+                    japaneseName = japaneseName,
+                )
+                matchedCanonicalIds
+                    .filter { it != targetPerformerId }
+                    .forEach { sourcePerformerId ->
+                        metadataDao.mergePerformerInto(
+                            sourcePerformerId = sourcePerformerId,
+                            targetPerformerId = targetPerformerId,
+                            isManual = false,
+                        )
+                    }
+                targetPerformerId
+            }
+        }
+
+        val existingCanonicalPerformer = metadataDao.getPerformerById(canonicalPerformerId)
+        val mergedCanonicalPerformer = mergeCanonicalPerformer(
+            canonicalPerformerId = canonicalPerformerId,
+            existing = existingCanonicalPerformer,
+            cast = cast.copy(
+                englishName = englishName ?: cast.englishName,
+                japaneseName = japaneseName,
+            ),
+        )
+
+        metadataDao.upsertPerformers(listOf(mergedCanonicalPerformer))
+
+        val aliases = candidates.map { candidate ->
+            JvrPerformerAlias(
+                aliasKey = candidate.aliasKey,
+                canonicalPerformerId = canonicalPerformerId,
+                aliasKind = candidate.aliasKind,
+                aliasValue = candidate.aliasValue,
+                source = source,
+                updatedAt = System.currentTimeMillis(),
+            )
+        }
+        if (aliases.isNotEmpty()) {
+            metadataDao.upsertAliases(aliases)
+        }
+
+        return JvrCastMetadata(
+            performerId = canonicalPerformerId,
+            englishName = mergedCanonicalPerformer.englishName,
+            japaneseName = mergedCanonicalPerformer.japaneseName,
+            profileImageUrl = resolveStoredPerformerImageUrl(mergedCanonicalPerformer),
+            remoteProfileImageUrl = mergedCanonicalPerformer.remoteProfileImageUrl,
+        )
+    }
+
+    private suspend fun resolveCanonicalPerformerId(
+        metadataDao: VirtualGroupMetadataDao,
+        performerId: String,
+    ): String {
+        var resolved = performerId.trim()
+        val visited = linkedSetOf<String>()
+
+        while (resolved.isNotBlank() && visited.add(resolved)) {
+            val next = metadataDao.getMergeRuleBySource(resolved)?.targetPerformerId
+                ?.trim()
+                ?.takeIf { it.isNotBlank() && it != resolved }
+                ?: break
+            resolved = next
+        }
+
+        return resolved
+    }
+
+    private suspend fun choosePreferredPerformerId(
+        metadataDao: VirtualGroupMetadataDao,
+        performerIds: List<String>,
+        englishName: String?,
+        japaneseName: String?,
+    ): String {
+        val performersById = metadataDao.getPerformersByIds(performerIds.distinct())
+            .associateBy { it.performerId }
+
+        return performerIds.distinct()
+            .maxWithOrNull(
+                compareBy<String> { performerId ->
+                    scorePerformerCandidate(
+                        performer = performersById[performerId],
+                        englishName = englishName,
+                        japaneseName = japaneseName,
+                    )
+                }.thenByDescending { it.length }
+            )
+            ?: performerIds.first()
+    }
+
+    private fun scorePerformerCandidate(
+        performer: JvrPerformer?,
+        englishName: String?,
+        japaneseName: String?,
+    ): Int {
+        if (performer == null) return 0
+
+        var score = 0
+        if (!performer.japaneseName.isNullOrBlank()) score += 6
+        if (performer.englishName.isNotBlank()) score += 5
+        if (!performer.localProfileImageUrl.isNullOrBlank()) score += 4
+        if (!performer.remoteProfileImageUrl.isNullOrBlank()) score += 3
+        if (
+            !japaneseName.isNullOrBlank() &&
+            performer.japaneseName.equals(japaneseName, ignoreCase = true)
+        ) {
+            score += 12
+        }
+        if (
+            !englishName.isNullOrBlank() &&
+            performer.englishName.equals(englishName, ignoreCase = true)
+        ) {
+            score += 10
+        }
+        return score
+    }
+
+    private fun mergeCanonicalPerformer(
+        canonicalPerformerId: String,
+        existing: JvrPerformer?,
+        cast: JvrCastMetadata,
+    ): JvrPerformer {
+        val englishName = normalizeText(cast.englishName)
+        val japaneseName = normalizeText(cast.japaneseName)
+        val remoteProfileImageUrl = cast.remoteProfileImageUrl
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+            ?.takeUnless(::isLocalImageUrl)
+            ?.let(::toAbsoluteUrl)
+            ?: cast.profileImageUrl
+                ?.trim()
+                ?.takeIf { it.isNotBlank() }
+                ?.takeUnless(::isLocalImageUrl)
+                ?.let(::toAbsoluteUrl)
+        val localProfileImageUrl = cast.profileImageUrl
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+            ?.let(::validateLocalImageUrl)
+
+        val incoming = JvrPerformer(
+            performerId = canonicalPerformerId,
+            englishName = englishName ?: japaneseName.orEmpty(),
+            japaneseName = japaneseName,
+            remoteProfileImageUrl = remoteProfileImageUrl,
+            localProfileImageUrl = localProfileImageUrl,
+            updatedAt = System.currentTimeMillis(),
+        )
+
+        if (existing == null) return incoming
+
+        val incomingHasDistinctEnglishName =
+            incoming.englishName.isNotBlank() &&
+                !incoming.englishName.equals(incoming.japaneseName, ignoreCase = true)
+
+        return incoming.copy(
+            englishName = when {
+                incomingHasDistinctEnglishName -> incoming.englishName
+                existing.englishName.isNotBlank() -> existing.englishName
+                else -> incoming.englishName
+            },
+            japaneseName = incoming.japaneseName ?: existing.japaneseName,
+            remoteProfileImageUrl = incoming.remoteProfileImageUrl
+                ?: existing.remoteProfileImageUrl,
+            localProfileImageUrl = incoming.localProfileImageUrl ?: existing.localProfileImageUrl,
+            updatedAt = maxOf(existing.updatedAt, incoming.updatedAt),
+        )
+    }
+
+    private fun buildPerformerAliasCandidates(
+        legacyPerformerId: String?,
+        englishName: String?,
+        japaneseName: String?,
+    ): List<PerformerAliasCandidate> {
+        val candidates = linkedMapOf<String, PerformerAliasCandidate>()
+
+        japaneseName
+            ?.let(::normalizePerformerAliasValue)
+            ?.takeIf { it.isNotBlank() }
+            ?.let { normalized ->
+                candidates["jp:$normalized"] = PerformerAliasCandidate(
+                    aliasKey = "jp:$normalized",
+                    aliasKind = ALIAS_KIND_JAPANESE,
+                    aliasValue = normalized,
+                )
+            }
+
+        englishName
+            ?.let(::normalizePerformerAliasValue)
+            ?.takeIf { it.isNotBlank() }
+            ?.let { normalized ->
+                candidates["en:$normalized"] = PerformerAliasCandidate(
+                    aliasKey = "en:$normalized",
+                    aliasKind = ALIAS_KIND_ENGLISH,
+                    aliasValue = normalized,
+                )
+            }
+
+        legacyPerformerId
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+            ?.let { normalized ->
+                candidates["legacy:$normalized"] = PerformerAliasCandidate(
+                    aliasKey = "legacy:$normalized",
+                    aliasKind = ALIAS_KIND_LEGACY,
+                    aliasValue = normalized,
+                )
+            }
+
+        return candidates.values.toList()
+    }
+
+    private fun normalizePerformerAliasValue(value: String): String {
+        return value
+            .lowercase()
+            .replace(Regex("\\s+"), " ")
+            .trim()
     }
 
     private fun normalizeCasts(casts: List<JvrCastMetadata>): List<JvrCastMetadata> {

@@ -26,6 +26,7 @@ import blackark.app.vr.utils.extractFileName
 import blackark.app.vr.utils.extractFolderPath
 import blackark.app.vr.utils.extractNormalizedCodeFromFileName
 import blackark.app.vr.utils.extractVirtualGroupPart
+import blackark.app.vr.utils.JvrMovieMetadata
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
@@ -605,6 +606,83 @@ class MainDashboardViewModel(
         val sourceScope = currentSourceScope() ?: return
         viewModelScope.launch {
             refreshAvSnapshot(sourceScope)
+        }
+    }
+
+    fun mergeAvPerformers(
+        sourcePerformerId: String,
+        targetPerformerId: String,
+    ) {
+        if (sourcePerformerId.isBlank() || targetPerformerId.isBlank() || sourcePerformerId == targetPerformerId) {
+            return
+        }
+
+        val sourceScope = currentSourceScope() ?: return
+        viewModelScope.launch {
+            JvrLibraryMetadataProvider.mergePerformersManually(
+                context = context.applicationContext,
+                sourcePerformerId = sourcePerformerId,
+                targetPerformerId = targetPerformerId,
+            )
+
+            val currentFilters = _uiState.value.avLibrary.filters
+            if (sourcePerformerId in currentFilters.selectedCastIds) {
+                updateAvFilters(
+                    currentFilters.copy(
+                        selectedCastIds = currentFilters.selectedCastIds
+                            .minus(sourcePerformerId)
+                            .plus(targetPerformerId)
+                    )
+                )
+            }
+
+            refreshAvSnapshot(sourceScope)
+        }
+    }
+
+    fun addAvPerformerAliases(
+        performerId: String,
+        englishName: String?,
+        japaneseName: String?,
+    ) {
+        if (performerId.isBlank()) return
+
+        val sourceScope = currentSourceScope() ?: return
+        viewModelScope.launch {
+            JvrLibraryMetadataProvider.addPerformerAliasesManually(
+                context = context.applicationContext,
+                performerId = performerId,
+                englishName = englishName,
+                japaneseName = japaneseName,
+            )
+            refreshAvSnapshot(sourceScope)
+        }
+    }
+
+    fun saveAvWorkMetadata(
+        assetKey: String,
+        metadata: JvrMovieMetadata,
+    ) {
+        if (assetKey.isBlank()) return
+
+        val sourceScope = currentSourceScope() ?: return
+        viewModelScope.launch {
+            val asset = avLibraryRepository.getAssetByKey(assetKey) ?: return@launch
+            val cacheKey = asset.metadataCacheKey ?: return@launch
+            val source = asset.metadataSource
+                ?.takeIf { it.isNotBlank() }
+                ?: cacheKey.substringBefore(':', "")
+            if (source.isBlank()) return@launch
+
+            JvrLibraryMetadataProvider.saveManualMetadata(
+                context = context.applicationContext,
+                cacheKey = cacheKey,
+                source = source,
+                metadata = metadata,
+            )
+
+            refreshAvSnapshot(sourceScope)
+            bumpFileMetadataRefreshToken()
         }
     }
 

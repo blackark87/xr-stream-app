@@ -1711,6 +1711,9 @@ fun MainDashboardScreen(
                                             onPreviousMonth = viewModel::showPreviousAvMonth,
                                             onNextMonth = viewModel::showNextAvMonth,
                                             onWorkSelected = viewModel::selectAvWork,
+                                            onMergeCast = viewModel::mergeAvPerformers,
+                                            onAddCastAlias = viewModel::addAvPerformerAliases,
+                                            onSaveWorkMetadata = viewModel::saveAvWorkMetadata,
                                             onPlayPart = { filePath, fileName ->
                                                 navController.navigate(
                                                     Screen.VideoPlayer.createRoute(

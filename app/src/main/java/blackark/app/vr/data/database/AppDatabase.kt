@@ -13,6 +13,8 @@ import blackark.app.vr.data.database.dao.VirtualGroupMetadataDao
 import blackark.app.vr.data.database.entity.AvAssetLocation
 import blackark.app.vr.data.database.entity.AvLibraryAsset
 import blackark.app.vr.data.database.entity.FavoriteVideo
+import blackark.app.vr.data.database.entity.JvrPerformerAlias
+import blackark.app.vr.data.database.entity.JvrPerformerMergeRule
 import blackark.app.vr.data.database.entity.JvrPerformer
 import blackark.app.vr.data.database.entity.RecentVideo
 import blackark.app.vr.data.database.entity.SavedServer
@@ -32,9 +34,11 @@ import blackark.app.vr.data.database.entity.VirtualGroupMetadataPerformerCrossRe
         VirtualGroupMetadata::class,
         VirtualGroupMetadataGenre::class,
         JvrPerformer::class,
+        JvrPerformerAlias::class,
+        JvrPerformerMergeRule::class,
         VirtualGroupMetadataPerformerCrossRef::class,
     ],
-    version = 12,
+    version = 13,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
