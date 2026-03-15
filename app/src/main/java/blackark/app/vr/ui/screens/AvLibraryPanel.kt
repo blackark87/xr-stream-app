@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -21,7 +22,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -90,6 +90,7 @@ import java.util.Locale
 fun AvLibraryPanel(
     avLibrary: AvLibraryState,
     isConnected: Boolean,
+    backgroundIndexingEnabled: Boolean,
     onSetFilterFamily: (AvFilterFamily) -> Unit,
     onStudioSelected: (String?) -> Unit,
     onCastToggled: (String) -> Unit,
@@ -138,6 +139,7 @@ fun AvLibraryPanel(
                             color = TextPrimary,
                         )
                         val statusText = when {
+                            !backgroundIndexingEnabled -> "Background indexing is off"
                             avLibrary.scan.isRunning -> "Scanning ${avLibrary.scan.scannedFileCount} files"
                             avLibrary.scan.lastCompletedAt != null -> "Indexed ${avLibrary.snapshot.works.size} works"
                             else -> "Metadata-driven library"
@@ -188,6 +190,14 @@ fun AvLibraryPanel(
                     Spacer(modifier = Modifier.height(12.dp))
 
                     when {
+                        avLibrary.snapshot.works.isEmpty() && !backgroundIndexingEnabled -> {
+                            EmptyState(
+                                icon = Icons.Filled.MovieCreation,
+                                message = "Enable AV background indexing in Settings to build the filter library.",
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                        }
+
                         avLibrary.filteredWorks.isEmpty() && avLibrary.scan.isRunning -> {
                             EmptyState(
                                 icon = Icons.Filled.MovieCreation,
@@ -450,111 +460,121 @@ private fun ReleaseDateCalendar(
         }
     }
 
-    Column(
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
+    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+        val calendarWidth = minOf(maxWidth, 392.dp)
+        Column(
+            modifier = Modifier.width(calendarWidth),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            IconButton(onClick = onPreviousMonth) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = null,
-                )
-            }
             Row(
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Icon(
-                    imageVector = Icons.Filled.CalendarMonth,
-                    contentDescription = null,
-                    tint = NetflixRed,
-                )
-                Text(
-                    text = monthLabel,
-                    style = MaterialTheme.typography.titleMedium,
-                    color = TextPrimary,
-                )
-            }
-            IconButton(onClick = onNextMonth) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                    contentDescription = null,
-                )
-            }
-        }
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-            listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun").forEach { label ->
-                Text(
-                    text = label,
-                    modifier = Modifier.weight(1f),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = TextTertiary,
-                    textAlign = TextAlign.Center,
-                )
-            }
-        }
-
-        LazyVerticalGrid(
-            columns = GridCells.Fixed(7),
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(max = 320.dp),
-            userScrollEnabled = false,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            itemsIndexed(
-                items = cells,
-                key = { index, date -> date?.toEpochDay() ?: "empty-$index" },
-            ) { _, date ->
-                if (date == null) {
-                    Spacer(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .aspectRatio(1f)
+                IconButton(onClick = onPreviousMonth) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = null,
                     )
-                } else {
-                    val isSelected = selectedDate == date
-                    val count = counts[date] ?: 0
-                    Surface(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .aspectRatio(1f)
-                            .clip(RoundedCornerShape(12.dp))
-                            .clickable { onDateSelected(if (isSelected) null else date) },
-                        color = if (isSelected) NetflixRed.copy(alpha = 0.16f) else Color.Transparent,
-                        shape = RoundedCornerShape(12.dp),
-                        border = BorderStroke(
-                            1.dp,
-                            if (isSelected) NetflixRed else DividerGray.copy(alpha = 0.6f),
-                        ),
+                }
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.CalendarMonth,
+                        contentDescription = null,
+                        tint = NetflixRed,
+                    )
+                    Text(
+                        text = monthLabel,
+                        style = MaterialTheme.typography.titleMedium,
+                        color = TextPrimary,
+                    )
+                }
+                IconButton(onClick = onNextMonth) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                        contentDescription = null,
+                    )
+                }
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun").forEach { label ->
+                    Text(
+                        text = label,
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = TextTertiary,
+                        textAlign = TextAlign.Center,
+                    )
+                }
+            }
+
+            Column(
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                cells.chunked(7).forEach { week ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
                     ) {
-                        Column(
-                            modifier = Modifier.padding(6.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.Center,
-                        ) {
-                            Text(
-                                text = date.dayOfMonth.toString(),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = TextPrimary,
-                            )
-                            if (count > 0) {
-                                Spacer(modifier = Modifier.height(2.dp))
-                                Text(
-                                    text = count.toString(),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = NetflixRed,
+                        week.forEach { date ->
+                            if (date == null) {
+                                Spacer(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .aspectRatio(1.35f)
                                 )
+                            } else {
+                                val isSelected = selectedDate == date
+                                val count = counts[date] ?: 0
+                                Surface(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .aspectRatio(1.35f)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .clickable { onDateSelected(if (isSelected) null else date) },
+                                    color = if (isSelected) {
+                                        NetflixRed.copy(alpha = 0.16f)
+                                    } else {
+                                        Color.Transparent
+                                    },
+                                    shape = RoundedCornerShape(10.dp),
+                                    border = BorderStroke(
+                                        1.dp,
+                                        if (isSelected) NetflixRed else DividerGray.copy(alpha = 0.6f),
+                                    ),
+                                ) {
+                                    Column(
+                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 5.dp),
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        verticalArrangement = Arrangement.Center,
+                                    ) {
+                                        Text(
+                                            text = date.dayOfMonth.toString(),
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = TextPrimary,
+                                        )
+                                        Text(
+                                            text = if (count > 0) count.toString() else "",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = if (count > 0) NetflixRed else Color.Transparent,
+                                        )
+                                    }
+                                }
                             }
+                        }
+                        repeat((7 - week.size).coerceAtLeast(0)) { trailingIndex ->
+                            Spacer(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .aspectRatio(1.35f)
+                            )
                         }
                     }
                 }

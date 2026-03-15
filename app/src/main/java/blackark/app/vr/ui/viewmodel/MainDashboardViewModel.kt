@@ -18,6 +18,7 @@ import blackark.app.vr.network.LocalFileClient
 import blackark.app.vr.network.SMBClient
 import blackark.app.vr.network.SMBConfig
 import blackark.app.vr.network.SMBFileItem
+import blackark.app.vr.utils.AvLibrarySettingsStore
 import blackark.app.vr.utils.JvrLibraryMetadataProvider
 import blackark.app.vr.utils.buildAssetKey
 import blackark.app.vr.utils.buildSourceScope
@@ -28,6 +29,7 @@ import blackark.app.vr.utils.extractVirtualGroupPart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -53,6 +55,7 @@ data class MainDashboardState(
     val errorMessage: String? = null,
     val fileViewMode: FileBrowserViewMode = FileBrowserViewMode.Thumbnail,
     val avLibrary: AvLibraryState = AvLibraryState(),
+    val isAvBackgroundIndexingEnabled: Boolean = false,
 )
 
 enum class FileBrowserViewMode {
@@ -67,7 +70,13 @@ class MainDashboardViewModel(
     private val avLibraryRepository: AvLibraryRepository,
 ) : ViewModel() {
 
-    private val _uiState = MutableStateFlow(MainDashboardState())
+    private val _uiState = MutableStateFlow(
+        MainDashboardState(
+            isAvBackgroundIndexingEnabled = AvLibrarySettingsStore.isBackgroundIndexingEnabled(
+                context.applicationContext
+            )
+        )
+    )
     val uiState: StateFlow<MainDashboardState> = _uiState.asStateFlow()
 
     val servers: StateFlow<List<SavedServer>> = serverRepository.allServers
@@ -233,7 +242,7 @@ class MainDashboardViewModel(
 
                     loadFiles("")
                     refreshAvSnapshot(buildSourceScope(server.serverAddress, server.shareName))
-                    startAvLibraryIndexing(server)
+                    startAvLibraryIndexingIfEnabled(server)
                 } else {
                     _uiState.value = _uiState.value.copy(
                         isConnecting = false,
@@ -266,6 +275,7 @@ class MainDashboardViewModel(
             currentPath = "",
             pathHistory = emptyList(),
             avLibrary = AvLibraryState(),
+            isAvBackgroundIndexingEnabled = _uiState.value.isAvBackgroundIndexingEnabled,
         )
         _files.value = emptyList()
     }
@@ -464,7 +474,7 @@ class MainDashboardViewModel(
             )
         }
 
-        _uiState.value.selectedServer?.let(::startAvLibraryIndexing)
+        _uiState.value.selectedServer?.let(::startAvLibraryIndexingIfEnabled)
 
         return if (errors.isEmpty()) {
             Result.success(deletedCount)
@@ -581,6 +591,18 @@ class MainDashboardViewModel(
         }
     }
 
+    fun setAvBackgroundIndexingEnabled(enabled: Boolean) {
+        AvLibrarySettingsStore.setBackgroundIndexingEnabled(context.applicationContext, enabled)
+        _uiState.value = _uiState.value.copy(isAvBackgroundIndexingEnabled = enabled)
+
+        if (!enabled) {
+            stopAvLibraryIndexing()
+            return
+        }
+
+        _uiState.value.selectedServer?.let(::startAvLibraryIndexingIfEnabled)
+    }
+
     suspend fun clearAvMetadataLinks() {
         avLibraryRepository.clearMetadataLinks()
         refreshAvLibrary()
@@ -639,6 +661,26 @@ class MainDashboardViewModel(
                 ),
             )
         )
+    }
+
+    private fun stopAvLibraryIndexing() {
+        avScanJob?.cancel()
+        avScanJob = null
+        updateScanState(
+            _uiState.value.avLibrary.scan.copy(
+                isRunning = false,
+                currentPath = null,
+                errorMessage = null,
+            )
+        )
+    }
+
+    private fun startAvLibraryIndexingIfEnabled(server: SavedServer) {
+        if (!_uiState.value.isAvBackgroundIndexingEnabled) {
+            stopAvLibraryIndexing()
+            return
+        }
+        startAvLibraryIndexing(server)
     }
 
     private fun startAvLibraryIndexing(server: SavedServer) {
@@ -715,6 +757,15 @@ class MainDashboardViewModel(
                         scannedFileCount = scannedFiles,
                         discoveredWorkCount = _uiState.value.avLibrary.snapshot.works.size,
                         lastCompletedAt = System.currentTimeMillis(),
+                        errorMessage = null,
+                    )
+                )
+            } catch (_: CancellationException) {
+                refreshAvSnapshot(sourceScope)
+                updateScanState(
+                    _uiState.value.avLibrary.scan.copy(
+                        isRunning = false,
+                        currentPath = null,
                         errorMessage = null,
                     )
                 )
