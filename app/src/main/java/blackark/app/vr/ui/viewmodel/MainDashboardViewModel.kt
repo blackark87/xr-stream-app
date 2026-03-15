@@ -549,7 +549,7 @@ class MainDashboardViewModel(
         }
         updateAvFilters(
             current.copy(
-                activeFamily = if (nextSelection.isEmpty()) AvFilterFamily.None else AvFilterFamily.Casts,
+                activeFamily = AvFilterFamily.Casts,
                 selectedStudio = null,
                 selectedCastIds = nextSelection,
                 selectedReleaseDate = null,
