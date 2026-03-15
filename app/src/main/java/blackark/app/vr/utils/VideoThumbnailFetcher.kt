@@ -533,15 +533,16 @@ class VideoThumbnailFetcher(
 
     private fun buildThumbnailIdentityKey(path: String): String {
         val modeKey = if (allowMetadataPoster) "poster" else "frame"
+        val generation = ImageCacheVersionStore.thumbnailGeneration(options.context)
         val fileName = extractFileName(path)
         if (fileName.isBlank()) {
             val normalizedPath = path.substringBefore('?').substringBefore('#').trim().lowercase()
-            return "$THUMBNAIL_CACHE_VERSION:$modeKey:$normalizedPath"
+            return "$THUMBNAIL_CACHE_VERSION:$generation:$modeKey:$normalizedPath"
         }
 
         val stem = fileName.substringBeforeLast('.', fileName)
         val identity = stem.trim().lowercase().ifBlank { fileName.lowercase() }
-        return "$THUMBNAIL_CACHE_VERSION:$modeKey:$identity"
+        return "$THUMBNAIL_CACHE_VERSION:$generation:$modeKey:$identity"
     }
 
     private fun isMetadataLookupEligible(folderPath: String): Boolean {
@@ -935,7 +936,8 @@ class VideoThumbnailFetcher(
 
         fun diskCacheKey(path: String, allowMetadataPoster: Boolean = true): String {
             val modeKey = if (allowMetadataPoster) "poster" else "frame"
-            return "$THUMBNAIL_CACHE_VERSION:$modeKey:$path"
+            val generation = ImageCacheVersionStore.thumbnailGeneration()
+            return "$THUMBNAIL_CACHE_VERSION:$generation:$modeKey:$path"
         }
 
         private fun createFetcherForPath(

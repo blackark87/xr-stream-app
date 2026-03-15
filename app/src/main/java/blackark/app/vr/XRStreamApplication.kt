@@ -1,6 +1,7 @@
 package blackark.app.vr
 
 import android.app.Application
+import blackark.app.vr.utils.ImageCacheVersionStore
 import blackark.app.vr.utils.VideoThumbnailFetcher
 import coil3.ImageLoader
 import coil3.SingletonImageLoader
@@ -19,6 +20,7 @@ class XRStreamApplication : Application(), SingletonImageLoader.Factory {
     override fun onCreate() {
         super.onCreate()
         android.util.Log.d("XRStreamApplication", "Application created")
+        ImageCacheVersionStore.initialize(this)
 
         // Ensure Compose AsyncImage always uses our loader with SMB thumbnail fetchers.
         SingletonImageLoader.setSafe { context ->
@@ -63,6 +65,5 @@ class XRStreamApplication : Application(), SingletonImageLoader.Factory {
             .build()
     }
 }
-
 
 
