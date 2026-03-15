@@ -35,7 +35,6 @@ import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.MovieCreation
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -59,6 +58,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
@@ -769,9 +769,18 @@ private fun AvWorkDetailDialog(
     val sortedParts = remember(work.parts) { work.sortedParts }
     Dialog(onDismissRequest = onDismiss) {
         Card(
+            modifier = Modifier
+                .padding(12.dp)
+                .shadow(
+                    elevation = 28.dp,
+                    shape = RoundedCornerShape(24.dp),
+                    ambientColor = NetflixRed.copy(alpha = 0.18f),
+                    spotColor = Color.Black.copy(alpha = 0.55f),
+                ),
             colors = CardDefaults.cardColors(containerColor = CardBackground),
             shape = RoundedCornerShape(24.dp),
-            border = BorderStroke(1.dp, DividerGray.copy(alpha = 0.7f)),
+            border = BorderStroke(2.dp, NetflixRed.copy(alpha = 0.38f)),
+            elevation = CardDefaults.cardElevation(defaultElevation = 18.dp),
         ) {
             Column(
                 modifier = Modifier
@@ -983,16 +992,17 @@ private fun AvPartRow(
                 verticalArrangement = Arrangement.spacedBy(3.dp),
             ) {
                 Text(
-                    text = part.fileName,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = TextPrimary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+                    text = part.partNumber?.let { "Part $it" } ?: "Single file",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = NetflixRed,
+                    fontWeight = FontWeight.SemiBold,
                 )
                 Text(
-                    text = part.partNumber?.let { "Part $it" } ?: "Single file",
+                    text = part.fileName,
                     style = MaterialTheme.typography.bodySmall,
-                    color = TextTertiary,
+                    color = TextSecondary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
             IconButton(onClick = onPlay) {
