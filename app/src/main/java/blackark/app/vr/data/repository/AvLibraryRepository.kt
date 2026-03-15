@@ -72,6 +72,10 @@ class AvLibraryRepository(
         return avLibraryDao.getPresentLocationsByAssetKey(assetKey)
     }
 
+    suspend fun getPresentAssetsMissingPerformerRefs(sourceScope: String): List<AvLibraryAsset> {
+        return avLibraryDao.getPresentAssetsMissingPerformerRefs(sourceScope)
+    }
+
     suspend fun markStaleLocationsMissing(sourceScope: String, scanStartedAt: Long) {
         avLibraryDao.markStaleLocationsMissing(sourceScope, scanStartedAt)
     }

@@ -131,6 +131,9 @@ class MainDashboardViewModel(
     private var localClient: LocalFileClient? = null
     private var avScanJob: Job? = null
     private var avVisibleSyncJob: Job? = null
+    private var avCastRepairJob: Job? = null
+    private var avCastRepairSourceScope: String? = null
+    private val avCastRepairAttemptedCacheKeys = mutableSetOf<String>()
 
     private fun filterAndSortBrowsableFiles(fileList: List<SMBFileItem>): List<SMBFileItem> {
         return fileList
@@ -199,6 +202,10 @@ class MainDashboardViewModel(
                 localClient = null
                 avScanJob?.cancel()
                 avVisibleSyncJob?.cancel()
+                avCastRepairJob?.cancel()
+                avCastRepairJob = null
+                avCastRepairSourceScope = null
+                avCastRepairAttemptedCacheKeys.clear()
                 AppState.clear()
 
                 val result = if (server.isLocalStorage) {
@@ -268,6 +275,10 @@ class MainDashboardViewModel(
         avScanJob = null
         avVisibleSyncJob?.cancel()
         avVisibleSyncJob = null
+        avCastRepairJob?.cancel()
+        avCastRepairJob = null
+        avCastRepairSourceScope = null
+        avCastRepairAttemptedCacheKeys.clear()
         smbClient?.disconnect()
         smbClient = null
         localClient?.disconnect()
@@ -667,6 +678,66 @@ class MainDashboardViewModel(
                 ),
             )
         )
+
+        startAvCastRepairIfNeeded(sourceScope)
+    }
+
+    private fun startAvCastRepairIfNeeded(sourceScope: String) {
+        if (avCastRepairJob?.isActive == true && avCastRepairSourceScope == sourceScope) {
+            return
+        }
+
+        avCastRepairJob?.cancel()
+        avCastRepairSourceScope = sourceScope
+        avCastRepairJob = viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val candidates = avLibraryRepository
+                    .getPresentAssetsMissingPerformerRefs(sourceScope)
+                    .filter { asset ->
+                        val cacheKey = asset.metadataCacheKey
+                        !cacheKey.isNullOrBlank() && cacheKey !in avCastRepairAttemptedCacheKeys
+                    }
+
+                if (candidates.isEmpty()) {
+                    return@launch
+                }
+
+                var repairedAny = false
+                candidates.forEach { asset ->
+                    if (!isActive) return@launch
+
+                    val cacheKey = asset.metadataCacheKey ?: return@forEach
+                    avCastRepairAttemptedCacheKeys += cacheKey
+
+                    val refreshedMetadata = JvrLibraryMetadataProvider.refreshByCacheKey(
+                        context = context.applicationContext,
+                        cacheKey = cacheKey,
+                        fallbackFolderPath = asset.representativeFolderPath.orEmpty(),
+                    )
+
+                    if (refreshedMetadata?.casts?.isNotEmpty() == true) {
+                        repairedAny = true
+                    }
+                }
+
+                if (repairedAny && isActive) {
+                    withContext(Dispatchers.Main) {
+                        refreshAvSnapshot(sourceScope)
+                    }
+                }
+            } catch (_: CancellationException) {
+                // Ignore cancellation when switching sources or shutting down.
+            } catch (e: Exception) {
+                Log.w(
+                    "MainDashboardViewModel",
+                    "Failed to repair AV cast metadata for $sourceScope: ${e.message}"
+                )
+            } finally {
+                if (avCastRepairSourceScope == sourceScope) {
+                    avCastRepairSourceScope = null
+                }
+            }
+        }
     }
 
     private fun syncCurrentListingForAv(files: List<SMBFileItem>) {

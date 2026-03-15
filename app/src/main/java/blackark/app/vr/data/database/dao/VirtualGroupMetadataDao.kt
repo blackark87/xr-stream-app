@@ -1,10 +1,9 @@
 package blackark.app.vr.data.database.dao
 
 import androidx.room.Dao
-import androidx.room.Insert
-import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Transaction
+import androidx.room.Upsert
 import blackark.app.vr.data.database.entity.JvrPerformer
 import blackark.app.vr.data.database.entity.VirtualGroupMetadata
 import blackark.app.vr.data.database.entity.VirtualGroupMetadataGenre
@@ -25,16 +24,16 @@ interface VirtualGroupMetadataDao {
     @Query("SELECT * FROM virtual_group_metadata WHERE code = :code AND isMiss = 0 ORDER BY updatedAt DESC LIMIT 1")
     suspend fun getLatestHitByCode(code: String): VirtualGroupMetadataRecord?
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Upsert
     suspend fun upsertMetadata(metadata: VirtualGroupMetadata)
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Upsert
     suspend fun upsertGenres(genres: List<VirtualGroupMetadataGenre>)
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Upsert
     suspend fun upsertPerformers(performers: List<JvrPerformer>)
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Upsert
     suspend fun upsertPerformerRefs(refs: List<VirtualGroupMetadataPerformerCrossRef>)
 
     @Query("SELECT * FROM jvr_performers WHERE performerId IN (:performerIds)")
