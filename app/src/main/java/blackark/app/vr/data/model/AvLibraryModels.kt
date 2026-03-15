@@ -31,11 +31,16 @@ data class AvLibraryWork(
     val casts: List<JvrCastMetadata>
         get() = metadata?.casts.orEmpty()
 
+    val sortedParts: List<AvAssetLocation>
+        get() = parts.sortedWith(
+            compareBy<AvAssetLocation>({ it.partNumber ?: Int.MAX_VALUE }, { it.fileName.lowercase() })
+        )
+
     val representativePath: String?
-        get() = asset.representativePath ?: parts.firstOrNull { it.isPresent }?.filePath
+        get() = sortedParts.firstOrNull { it.isPresent }?.filePath ?: asset.representativePath
 
     val representativeFileName: String?
-        get() = asset.representativeFileName ?: parts.firstOrNull { it.isPresent }?.fileName
+        get() = sortedParts.firstOrNull { it.isPresent }?.fileName ?: asset.representativeFileName
 }
 
 data class AvStudioFilterOption(

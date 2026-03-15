@@ -3,6 +3,7 @@ package blackark.app.vr.ui.screens
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -64,6 +65,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
 import blackark.app.vr.R
 import blackark.app.vr.data.database.entity.AvAssetLocation
 import blackark.app.vr.data.model.AvCastFilterOption
@@ -256,67 +258,51 @@ private fun AvFilterSection(
 ) {
     val filters = avLibrary.filters
 
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            StudioFilterTrigger(
-                studios = avLibrary.studioOptions.map { it.studio },
-                selectedStudio = filters.selectedStudio,
-                onStudioSelected = onStudioSelected,
-                modifier = Modifier
-                    .weight(1f)
-                    .widthIn(min = 152.dp),
-            )
-            FilterTriggerButton(
-                label = if (filters.selectedCastIds.isEmpty()) {
-                    "Casts"
+        StudioFilterTrigger(
+            studios = avLibrary.studioOptions.map { it.studio },
+            selectedStudio = filters.selectedStudio,
+            onStudioSelected = onStudioSelected,
+            modifier = Modifier.widthIn(min = 136.dp, max = 200.dp),
+        )
+        FilterTriggerButton(
+            label = if (filters.selectedCastIds.isEmpty()) {
+                "Casts"
+            } else {
+                "Casts (${filters.selectedCastIds.size})"
+            },
+            selected = filters.activeFamily == AvFilterFamily.Casts || filters.selectedCastIds.isNotEmpty(),
+            onClick = {
+                if (filters.activeFamily == AvFilterFamily.Casts && filters.selectedCastIds.isEmpty()) {
+                    onSetFilterFamily(AvFilterFamily.None)
                 } else {
-                    "Casts (${filters.selectedCastIds.size})"
-                },
-                selected = filters.activeFamily == AvFilterFamily.Casts || filters.selectedCastIds.isNotEmpty(),
-                onClick = {
-                    if (filters.activeFamily == AvFilterFamily.Casts && filters.selectedCastIds.isEmpty()) {
-                        onSetFilterFamily(AvFilterFamily.None)
-                    } else {
-                        onSetFilterFamily(AvFilterFamily.Casts)
-                    }
-                },
-                modifier = Modifier
-                    .weight(1f)
-                    .widthIn(min = 132.dp),
-            )
-        }
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            ReleaseDateFilterTrigger(
-                month = filters.visibleMonth,
-                selectedDate = filters.selectedReleaseDate,
-                counts = avLibrary.releaseDateCounts.associate { it.date to it.itemCount },
-                onPreviousMonth = onPreviousMonth,
-                onNextMonth = onNextMonth,
-                onDateSelected = onReleaseDateSelected,
-                modifier = Modifier
-                    .weight(1f)
-                    .widthIn(min = 164.dp),
-            )
-            if (
-                filters.selectedStudio != null ||
-                filters.selectedCastIds.isNotEmpty() ||
-                filters.selectedReleaseDate != null
-            ) {
-                TextButton(onClick = onClearFilters) {
-                    Text("Clear")
+                    onSetFilterFamily(AvFilterFamily.Casts)
                 }
+            },
+            modifier = Modifier.widthIn(min = 116.dp, max = 160.dp),
+        )
+        ReleaseDateFilterTrigger(
+            month = filters.visibleMonth,
+            selectedDate = filters.selectedReleaseDate,
+            counts = avLibrary.releaseDateCounts.associate { it.date to it.itemCount },
+            onPreviousMonth = onPreviousMonth,
+            onNextMonth = onNextMonth,
+            onDateSelected = onReleaseDateSelected,
+            modifier = Modifier.widthIn(min = 124.dp, max = 168.dp),
+        )
+        if (
+            filters.selectedStudio != null ||
+            filters.selectedCastIds.isNotEmpty() ||
+            filters.selectedReleaseDate != null
+        ) {
+            TextButton(onClick = onClearFilters) {
+                Text("Clear")
             }
         }
     }
@@ -375,7 +361,7 @@ private fun StudioFilterTrigger(
             shape = RoundedCornerShape(16.dp),
             modifier = Modifier
                 .background(CardBackgroundHover)
-                .widthIn(min = 220.dp, max = 320.dp),
+                .widthIn(min = 200.dp, max = 260.dp),
         ) {
             DropdownMenuItem(
                 text = { Text("All studios") },
@@ -434,6 +420,10 @@ private fun FilterTriggerButton(
             )
         }
     }
+}
+
+private fun buildReleaseDateLabel(selectedDate: LocalDate?): String {
+    return selectedDate?.format(DateTimeFormatter.ofPattern("MMM d", Locale.US)) ?: "Release date"
 }
 
 private fun buildFilterSummary(
@@ -495,7 +485,7 @@ private fun ReleaseDateFilterTrigger(
 
     Box(modifier = modifier) {
         FilterTriggerButton(
-            label = selectedDate?.toString() ?: "Release date",
+            label = buildReleaseDateLabel(selectedDate),
             selected = selectedDate != null,
             onClick = { expanded = true },
             modifier = Modifier.fillMaxWidth(),
@@ -507,7 +497,7 @@ private fun ReleaseDateFilterTrigger(
             shape = RoundedCornerShape(18.dp),
             modifier = Modifier
                 .background(CardBackgroundHover)
-                .widthIn(min = 300.dp, max = 420.dp),
+                .widthIn(min = 252.dp, max = 280.dp),
         ) {
             Column(
                 modifier = Modifier.padding(12.dp),
@@ -574,8 +564,8 @@ private fun ReleaseDateCalendar(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .widthIn(max = 360.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+            .widthIn(max = 252.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -589,20 +579,20 @@ private fun ReleaseDateCalendar(
                     )
                 }
                 Row(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                     Icon(
                         imageVector = Icons.Filled.CalendarMonth,
                         contentDescription = null,
                         tint = NetflixRed,
                     )
                     Text(
-                        text = monthLabel,
-                        style = MaterialTheme.typography.titleMedium,
-                        color = TextPrimary,
-                    )
-                }
+                    text = monthLabel,
+                    style = MaterialTheme.typography.titleSmall,
+                    color = TextPrimary,
+                )
+            }
                 IconButton(onClick = onNextMonth) {
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.ArrowForward,
@@ -613,9 +603,9 @@ private fun ReleaseDateCalendar(
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
             ) {
-                listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun").forEach { label ->
+                listOf("M", "T", "W", "T", "F", "S", "S").forEach { label ->
                     Text(
                         text = label,
                         modifier = Modifier.weight(1f),
@@ -627,19 +617,19 @@ private fun ReleaseDateCalendar(
             }
 
             Column(
-                verticalArrangement = Arrangement.spacedBy(4.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
                 cells.chunked(7).forEach { week ->
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(2.dp),
                     ) {
                         week.forEach { date ->
                             if (date == null) {
                                 Spacer(
                                     modifier = Modifier
                                         .weight(1f)
-                                        .aspectRatio(1.2f)
+                                        .aspectRatio(1f)
                                 )
                             } else {
                                 val isSelected = selectedDate == date
@@ -647,7 +637,7 @@ private fun ReleaseDateCalendar(
                                 Surface(
                                     modifier = Modifier
                                         .weight(1f)
-                                        .aspectRatio(1.2f)
+                                        .aspectRatio(1f)
                                         .clip(RoundedCornerShape(10.dp))
                                         .clickable { onDateSelected(if (isSelected) null else date) },
                                     color = if (isSelected) {
@@ -662,7 +652,7 @@ private fun ReleaseDateCalendar(
                                     ),
                                 ) {
                                     Column(
-                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 5.dp),
+                                        modifier = Modifier.padding(horizontal = 2.dp, vertical = 4.dp),
                                         horizontalAlignment = Alignment.CenterHorizontally,
                                         verticalArrangement = Arrangement.Center,
                                     ) {
@@ -684,7 +674,7 @@ private fun ReleaseDateCalendar(
                             Spacer(
                                 modifier = Modifier
                                     .weight(1f)
-                                    .aspectRatio(1.2f)
+                                    .aspectRatio(1f)
                             )
                         }
                     }
@@ -776,28 +766,45 @@ private fun AvWorkDetailDialog(
     onDismiss: () -> Unit,
     onPlayPart: (String, String) -> Unit,
 ) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        confirmButton = {},
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Close")
-            }
-        },
-        title = {
-            Text(
-                text = work.displayTitle,
-                color = TextPrimary,
-            )
-        },
-        text = {
+    val sortedParts = remember(work.parts) { work.sortedParts }
+    Dialog(onDismissRequest = onDismiss) {
+        Card(
+            colors = CardDefaults.cardColors(containerColor = CardBackground),
+            shape = RoundedCornerShape(24.dp),
+            border = BorderStroke(1.dp, DividerGray.copy(alpha = 0.7f)),
+        ) {
             Column(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = 560.dp)
+                    .widthIn(max = 720.dp)
+                    .padding(20.dp)
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.Top,
+                ) {
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Text(
+                            text = work.displayTitle,
+                            style = MaterialTheme.typography.headlineSmall,
+                            color = TextPrimary,
+                        )
+                        Text(
+                            text = work.asset.normalizedCode,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TextTertiary,
+                        )
+                    }
+                    TextButton(onClick = onDismiss) {
+                        Text("Close")
+                    }
+                }
+
                 PosterThumbnail(
                     posterUrl = work.displayPosterUrl,
                     modifier = Modifier
@@ -805,11 +812,6 @@ private fun AvWorkDetailDialog(
                         .height(220.dp),
                 )
 
-                Text(
-                    text = work.asset.normalizedCode,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = TextTertiary,
-                )
                 work.studio?.let {
                     Text(
                         text = "Studio: $it",
@@ -823,6 +825,29 @@ private fun AvWorkDetailDialog(
                         style = MaterialTheme.typography.bodyMedium,
                         color = TextPrimary,
                     )
+                }
+                work.representativeFileName?.let {
+                    Surface(
+                        color = CardBackgroundHover,
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(1.dp, DividerGray.copy(alpha = 0.55f)),
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                            verticalArrangement = Arrangement.spacedBy(2.dp),
+                        ) {
+                            Text(
+                                text = "Representative file",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = TextTertiary,
+                            )
+                            Text(
+                                text = it,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = TextPrimary,
+                            )
+                        }
+                    }
                 }
 
                 if (work.casts.isNotEmpty()) {
@@ -866,16 +891,17 @@ private fun AvWorkDetailDialog(
                 Column(
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    work.parts.forEach { part ->
+                    sortedParts.forEach { part ->
                         AvPartRow(
                             part = part,
+                            isRepresentative = part.filePath == work.representativePath,
                             onPlay = { onPlayPart(part.filePath, part.fileName) },
                         )
                     }
                 }
             }
-        },
-    )
+        }
+    }
 }
 
 @Composable
@@ -962,13 +988,17 @@ private fun CastDisplayCell(
 @Composable
 private fun AvPartRow(
     part: AvAssetLocation,
+    isRepresentative: Boolean,
     onPlay: () -> Unit,
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(12.dp),
-        border = BorderStroke(1.dp, DividerGray.copy(alpha = 0.7f)),
-        color = Color.Transparent,
+        border = BorderStroke(
+            1.dp,
+            if (isRepresentative) NetflixRed.copy(alpha = 0.8f) else DividerGray.copy(alpha = 0.7f),
+        ),
+        color = if (isRepresentative) NetflixRed.copy(alpha = 0.08f) else Color.Transparent,
     ) {
         Row(
             modifier = Modifier
@@ -993,6 +1023,14 @@ private fun AvPartRow(
                     style = MaterialTheme.typography.bodySmall,
                     color = TextTertiary,
                 )
+                if (isRepresentative) {
+                    Text(
+                        text = "Representative",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = NetflixRed,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
             }
             IconButton(onClick = onPlay) {
                 Icon(
