@@ -34,6 +34,9 @@ interface VideoDao {
     @Query("SELECT * FROM recent_videos WHERE filePath = :path LIMIT 1")
     suspend fun getVideoByPath(path: String): RecentVideo?
 
+    @Query("SELECT * FROM recent_videos WHERE filePath IN (:paths) ORDER BY lastPlayed DESC")
+    suspend fun getVideosByPaths(paths: List<String>): List<RecentVideo>
+
     @Query("SELECT * FROM recent_videos WHERE fileName = :fileName ORDER BY lastPlayed DESC LIMIT 1")
     suspend fun getLatestVideoByFileName(fileName: String): RecentVideo?
 
@@ -74,6 +77,9 @@ interface VideoDao {
 
     @Query("UPDATE recent_videos SET thumbnailPath = :path, resolvedTitle = COALESCE(:title, resolvedTitle) WHERE id = :videoId")
     suspend fun updateThumbnailAndTitle(videoId: Long, path: String, title: String?)
+
+    @Query("UPDATE recent_videos SET thumbnailPath = :path, resolvedTitle = COALESCE(:title, resolvedTitle) WHERE filePath IN (:filePaths)")
+    suspend fun updateThumbnailAndTitleByPaths(filePaths: List<String>, path: String, title: String?)
 
     @Query("UPDATE recent_videos SET thumbnailPath = NULL")
     suspend fun clearAllThumbnailPaths()

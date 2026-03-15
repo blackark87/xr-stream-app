@@ -87,6 +87,18 @@ object JvrLibraryMetadataProvider {
         return metadataCache[buildCacheKey(code, SOURCE_JVR)]
     }
 
+    fun buildMetadataCacheKey(rawCode: String, source: String): String {
+        return buildCacheKey(rawCode.trim().uppercase(), source.trim())
+    }
+
+    fun resolveMetadataSource(folderPath: String): String? {
+        return metadataSourceForPath(folderPath).takeUnless { it == SOURCE_NONE }
+    }
+
+    fun peekCachedByCacheKey(cacheKey: String): JvrMovieMetadata? {
+        return metadataCache[cacheKey.trim()]
+    }
+
     fun clearMemoryCaches() {
         metadataCache.clear()
         missCache.clear()
@@ -224,6 +236,69 @@ object JvrLibraryMetadataProvider {
 
         logMetadataTrace("Resolved metadata for $cacheKey title='${localizedMetadata.title}' poster=${localizedMetadata.posterUrl ?: "<none>"}")
 
+        return localizedMetadata
+    }
+
+    suspend fun getByCacheKey(
+        context: Context,
+        cacheKey: String,
+    ): JvrMovieMetadata? {
+        val normalizedCacheKey = cacheKey.trim()
+        if (normalizedCacheKey.isBlank()) return null
+
+        metadataCache[normalizedCacheKey]?.let { cached ->
+            val normalized = normalizeCachedMetadata(cached)
+            metadataCache[normalizedCacheKey] = normalized
+            return normalized
+        }
+
+        val separatorIndex = normalizedCacheKey.indexOf(':')
+        if (separatorIndex <= 0 || separatorIndex == normalizedCacheKey.lastIndex) {
+            return null
+        }
+
+        val source = normalizedCacheKey.substring(0, separatorIndex)
+        val code = normalizedCacheKey.substring(separatorIndex + 1).uppercase()
+
+        loadPersistedMetadata(context.applicationContext, normalizedCacheKey)?.let { persisted ->
+            if (persisted.metadata.isMiss) {
+                missCache += normalizedCacheKey
+                return null
+            }
+
+            val persistedMetadata = toMovieMetadata(
+                record = persisted,
+                fallbackCode = code,
+            )
+            val cachedMetadata = normalizeCachedMetadata(persistedMetadata)
+            metadataCache[normalizedCacheKey] = cachedMetadata
+            return cachedMetadata
+        }
+
+        if (normalizedCacheKey in missCache) {
+            return null
+        }
+
+        val remoteMetadata = withContext(Dispatchers.IO) {
+            when (source) {
+                SOURCE_AV_WIKI -> fetchByCodeFromAvWiki(code) ?: fetchByCodeFromJvrLibrary(code)
+                SOURCE_JVR -> fetchByCodeFromJvrLibrary(code)
+                else -> null
+            }
+        }
+
+        if (remoteMetadata == null) {
+            missCache += normalizedCacheKey
+            savePersistedMiss(context.applicationContext, normalizedCacheKey, code, source)
+            return null
+        }
+
+        val localizedMetadata = withContext(Dispatchers.IO) {
+            localizeMediaAssets(context.applicationContext, normalizedCacheKey, remoteMetadata)
+        }
+        metadataCache[normalizedCacheKey] = localizedMetadata
+        savePersistedMetadata(context.applicationContext, normalizedCacheKey, source, localizedMetadata)
+        missCache.remove(normalizedCacheKey)
         return localizedMetadata
     }
 

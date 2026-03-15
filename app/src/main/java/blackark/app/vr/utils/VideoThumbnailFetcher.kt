@@ -5,7 +5,9 @@ import android.media.MediaDataSource
 import android.media.MediaMetadataRetriever
 import android.util.Log
 import androidx.core.net.toUri
+import blackark.app.vr.data.database.AppDatabase
 import blackark.app.vr.data.database.entity.VideoDisplaySettings
+import blackark.app.vr.data.repository.AvLibraryRepository
 import coil3.ImageLoader
 import coil3.decode.DataSource
 import coil3.decode.ImageSource
@@ -284,23 +286,43 @@ class VideoThumbnailFetcher(
         targetThumbnailFile: java.io.File,
     ): SourceFetchResult? {
         val folderPath = extractFolderPath(videoPath)
-        if (!isMetadataLookupEligible(folderPath)) {
-            return null
-        }
-
         val code = extractMovieCode(videoPath)
-        if (code.isNullOrBlank()) {
-            logMetadataTrace("Metadata lookup skipped: no movie code extracted from path=$videoPath")
-            return null
+        val db = AppDatabase.getDatabase(options.context)
+        val avLibraryRepository = AvLibraryRepository(
+            avLibraryDao = db.avLibraryDao(),
+            virtualGroupMetadataDao = db.virtualGroupMetadataDao(),
+        )
+        val parsedIdentity = parseVideoIdentity(videoPath)
+        val sourceScope = parsedIdentity?.let(::buildSourceScope)
+        val linkedAsset = if (sourceScope != null) {
+            avLibraryRepository.findAssetForPathOrCode(
+                filePath = parsedIdentity.filePath,
+                sourceScope = sourceScope,
+                normalizedCode = code,
+            )
+        } else {
+            null
         }
+        val metadata = when {
+            !linkedAsset?.metadataCacheKey.isNullOrBlank() -> {
+                JvrLibraryMetadataProvider.getByCacheKey(
+                    context = options.context.applicationContext,
+                    cacheKey = linkedAsset!!.metadataCacheKey!!,
+                )
+            }
 
-        logMetadataTrace("Trying metadata poster lookup for code=$code folder='$folderPath'")
-        val metadata = JvrLibraryMetadataProvider.getByCode(
-            context = options.context.applicationContext,
-            rawCode = code,
-            folderPath = folderPath,
-        ) ?: run {
-            logMetadataTrace("Metadata poster unavailable for code=$code (path=$videoPath)")
+            !code.isNullOrBlank() && isMetadataLookupEligible(folderPath) -> {
+                JvrLibraryMetadataProvider.getByCode(
+                    context = options.context.applicationContext,
+                    rawCode = code,
+                    folderPath = folderPath,
+                )
+            }
+
+            else -> null
+        }
+        if (metadata == null) {
+            logMetadataTrace("Metadata lookup skipped: no movie code extracted from path=$videoPath")
             return null
         }
 
@@ -353,7 +375,11 @@ class VideoThumbnailFetcher(
         inferredDisplayProfile: InferredDisplayProfile? = null,
     ) {
         try {
-            val db = blackark.app.vr.data.database.AppDatabase.getDatabase(options.context)
+            val db = AppDatabase.getDatabase(options.context)
+            val avLibraryRepository = AvLibraryRepository(
+                avLibraryDao = db.avLibraryDao(),
+                virtualGroupMetadataDao = db.virtualGroupMetadataDao(),
+            )
             val parsedIdentity = parseVideoIdentity(videoPath)
             val fileName = parsedIdentity?.fileName ?: extractFileName(videoPath)
             if (fileName.isBlank()) {
@@ -369,25 +395,51 @@ class VideoThumbnailFetcher(
                     "Updated DB thumbnail/title for video ${videoByPath.id} fileName=$fileName path=$thumbnailPath title=${resolvedTitle ?: "<unchanged>"}",
                 )
             } else {
-                val videoByFileName = db.videoDao().getLatestVideoByFileName(fileName)
-                if (videoByFileName != null) {
-                    db.videoDao()
-                        .updateThumbnailAndTitle(videoByFileName.id, thumbnailPath, resolvedTitle)
+                val linkedPaths = resolveLinkedAssetPaths(
+                    videoPath = videoPath,
+                    parsedIdentity = parsedIdentity,
+                    fileName = fileName,
+                    avLibraryRepository = avLibraryRepository,
+                )
+                if (linkedPaths.isNotEmpty()) {
+                    db.videoDao().updateThumbnailAndTitleByPaths(
+                        filePaths = linkedPaths,
+                        path = thumbnailPath,
+                        title = resolvedTitle,
+                    )
                     Log.d(
                         tag,
-                        "Updated DB thumbnail/title fallback for video ${videoByFileName.id} fileName=$fileName path=$thumbnailPath title=${resolvedTitle ?: "<unchanged>"}",
+                        "Updated DB thumbnail/title via asset linkage for ${linkedPaths.size} path(s) title=${resolvedTitle ?: "<unchanged>"}",
                     )
                 } else {
-                    Log.d(tag, "No history row found for thumbnail update fileName=$fileName")
+                    Log.d(tag, "No asset-linked history rows found for thumbnail update fileName=$fileName")
                 }
             }
 
-            val favoritePath = parsedIdentity?.filePath ?: videoPath
-            db.favoriteVideoDao().updateThumbnailAndTitleByPath(
-                filePath = favoritePath,
-                path = thumbnailPath,
-                title = resolvedTitle,
-            )
+            val favoritePaths = buildList {
+                parsedIdentity?.filePath?.let(::add)
+                addAll(
+                    resolveLinkedAssetPaths(
+                        videoPath = videoPath,
+                        parsedIdentity = parsedIdentity,
+                        fileName = fileName,
+                        avLibraryRepository = avLibraryRepository,
+                    )
+                )
+            }.distinct()
+            if (favoritePaths.size == 1) {
+                db.favoriteVideoDao().updateThumbnailAndTitleByPath(
+                    filePath = favoritePaths.first(),
+                    path = thumbnailPath,
+                    title = resolvedTitle,
+                )
+            } else if (favoritePaths.isNotEmpty()) {
+                db.favoriteVideoDao().updateThumbnailAndTitleByPaths(
+                    filePaths = favoritePaths,
+                    path = thumbnailPath,
+                    title = resolvedTitle,
+                )
+            }
 
             if (parsedIdentity != null) {
                 val existingDisplaySettings =
@@ -415,6 +467,22 @@ class VideoThumbnailFetcher(
         } catch (e: Exception) {
             Log.e(tag, "Failed to update DB thumbnail path/title for path=$videoPath", e)
         }
+    }
+
+    private suspend fun resolveLinkedAssetPaths(
+        videoPath: String,
+        parsedIdentity: ParsedVideoIdentity?,
+        fileName: String,
+        avLibraryRepository: AvLibraryRepository,
+    ): List<String> {
+        val sourceScope = parsedIdentity?.let(::buildSourceScope) ?: return emptyList()
+        val normalizedCode = extractNormalizedCodeFromFileName(fileName)
+        val asset = avLibraryRepository.findAssetForPathOrCode(
+            filePath = parsedIdentity.filePath,
+            sourceScope = sourceScope,
+            normalizedCode = normalizedCode,
+        ) ?: return emptyList()
+        return avLibraryRepository.getLinkedPathsForAsset(asset.assetKey)
     }
 
     private fun resolveLocalPosterFile(posterUrl: String): java.io.File? {
