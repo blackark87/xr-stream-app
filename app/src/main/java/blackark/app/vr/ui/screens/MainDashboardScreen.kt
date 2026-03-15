@@ -167,6 +167,7 @@ import blackark.app.vr.ui.viewmodel.FileBrowserViewMode
 import blackark.app.vr.ui.viewmodel.MainDashboardViewModel
 import blackark.app.vr.ui.viewmodel.PlaybackPreviewMode
 import blackark.app.vr.utils.buildSourceScope
+import blackark.app.vr.utils.ImageCacheVersionStore
 import blackark.app.vr.utils.JvrCastMetadata
 import blackark.app.vr.utils.JvrLibraryMetadataProvider
 import blackark.app.vr.utils.JvrMovieMetadata
@@ -227,7 +228,8 @@ private enum class DisconnectedDashboardTab {
 }
 
 private enum class SettingsAction {
-    ClearArtworkCache,
+    ClearArtwork,
+    ClearThumbnails,
     ClearRecentHistory,
     ClearFavorites,
 }
@@ -1013,22 +1015,33 @@ private fun deleteTrackedThumbnailFiles(directory: File) {
     }
 }
 
+private suspend fun resetArtworkState(context: Context) =
+    withContext(Dispatchers.IO) {
+        val appContext = context.applicationContext
+        val thumbnailImageLoader = ThumbnailImageLoaderProvider.get(appContext)
+
+        thumbnailImageLoader.memoryCache?.clear()
+        deleteTrackedThumbnailFiles(File(appContext.filesDir, "group_posters"))
+        ImageCacheVersionStore.bumpArtworkGeneration(appContext)
+
+        val database = blackark.app.vr.data.database.AppDatabase.getDatabase(appContext)
+        database.virtualGroupMetadataDao().clearAll()
+        JvrLibraryMetadataProvider.clearMemoryCaches()
+    }
+
 private suspend fun resetThumbnailState(context: Context) =
     withContext(Dispatchers.IO) {
         val appContext = context.applicationContext
         val thumbnailImageLoader = ThumbnailImageLoaderProvider.get(appContext)
 
         thumbnailImageLoader.memoryCache?.clear()
-        thumbnailImageLoader.diskCache?.clear()
 
         deleteTrackedThumbnailFiles(File(appContext.filesDir, "thumbnails"))
-        deleteTrackedThumbnailFiles(File(appContext.filesDir, "group_posters"))
+        ImageCacheVersionStore.bumpThumbnailGeneration(appContext)
 
         val database = blackark.app.vr.data.database.AppDatabase.getDatabase(appContext)
         database.videoDao().clearAllThumbnailPaths()
         database.favoriteVideoDao().clearAllThumbnailPaths()
-        database.virtualGroupMetadataDao().clearAll()
-        JvrLibraryMetadataProvider.clearMemoryCaches()
     }
 
 @Composable
@@ -1208,7 +1221,8 @@ private fun SettingsPanel(
     onPlaybackPreviewModeChange: (PlaybackPreviewMode) -> Unit,
     activeAction: SettingsAction?,
     onAvBackgroundIndexingChange: (Boolean) -> Unit,
-    onClearArtworkCache: () -> Unit,
+    onClearArtwork: () -> Unit,
+    onClearThumbnails: () -> Unit,
     onClearRecentHistory: () -> Unit,
     onClearFavorites: () -> Unit,
     modifier: Modifier = Modifier,
@@ -1254,15 +1268,26 @@ private fun SettingsPanel(
                 onCheckedChange = onAvBackgroundIndexingChange,
             )
             SettingsActionRow(
-                title = stringResource(R.string.clear_thumbnails_posters),
-                description = stringResource(R.string.clear_thumbnails_posters_description),
-                buttonLabel = if (activeAction == SettingsAction.ClearArtworkCache) {
+                title = stringResource(R.string.clear_artwork),
+                description = stringResource(R.string.clear_artwork_description),
+                buttonLabel = if (activeAction == SettingsAction.ClearArtwork) {
                     stringResource(R.string.settings_action_clearing)
                 } else {
                     stringResource(R.string.settings_action_clear)
                 },
                 enabled = activeAction == null,
-                onClick = onClearArtworkCache,
+                onClick = onClearArtwork,
+            )
+            SettingsActionRow(
+                title = stringResource(R.string.clear_thumbnails),
+                description = stringResource(R.string.clear_thumbnails_description),
+                buttonLabel = if (activeAction == SettingsAction.ClearThumbnails) {
+                    stringResource(R.string.settings_action_clearing)
+                } else {
+                    stringResource(R.string.settings_action_clear)
+                },
+                enabled = activeAction == null,
+                onClick = onClearThumbnails,
             )
             SettingsActionRow(
                 title = stringResource(R.string.clear_recent_history),
@@ -1562,9 +1587,14 @@ fun MainDashboardScreen(
         dashboardScope.launch {
             runCatching {
                 when (action) {
-                    SettingsAction.ClearArtworkCache -> {
-                        resetThumbnailState(context)
+                    SettingsAction.ClearArtwork -> {
+                        resetArtworkState(context)
                         viewModel.clearAvMetadataLinks()
+                        dashboardPreviewItem = null
+                    }
+
+                    SettingsAction.ClearThumbnails -> {
+                        resetThumbnailState(context)
                         dashboardPreviewItem = null
                     }
 
@@ -1722,8 +1752,11 @@ fun MainDashboardScreen(
                                 },
                                 activeAction = activeSettingsAction,
                                 onAvBackgroundIndexingChange = viewModel::setAvBackgroundIndexingEnabled,
-                                onClearArtworkCache = {
-                                    pendingSettingsAction = SettingsAction.ClearArtworkCache
+                                onClearArtwork = {
+                                    pendingSettingsAction = SettingsAction.ClearArtwork
+                                },
+                                onClearThumbnails = {
+                                    pendingSettingsAction = SettingsAction.ClearThumbnails
                                 },
                                 onClearRecentHistory = {
                                     pendingSettingsAction = SettingsAction.ClearRecentHistory
@@ -1778,8 +1811,11 @@ fun MainDashboardScreen(
                                     },
                                     activeAction = activeSettingsAction,
                                     onAvBackgroundIndexingChange = viewModel::setAvBackgroundIndexingEnabled,
-                                    onClearArtworkCache = {
-                                        pendingSettingsAction = SettingsAction.ClearArtworkCache
+                                    onClearArtwork = {
+                                        pendingSettingsAction = SettingsAction.ClearArtwork
+                                    },
+                                    onClearThumbnails = {
+                                        pendingSettingsAction = SettingsAction.ClearThumbnails
                                     },
                                     onClearRecentHistory = {
                                         pendingSettingsAction = SettingsAction.ClearRecentHistory
@@ -2105,12 +2141,14 @@ fun MainDashboardScreen(
 
     pendingSettingsAction?.let { action ->
         val titleRes = when (action) {
-            SettingsAction.ClearArtworkCache -> R.string.clear_thumbnails_posters_confirm_title
+            SettingsAction.ClearArtwork -> R.string.clear_artwork_confirm_title
+            SettingsAction.ClearThumbnails -> R.string.clear_thumbnails_confirm_title
             SettingsAction.ClearRecentHistory -> R.string.clear_recent_history_confirm_title
             SettingsAction.ClearFavorites -> R.string.clear_favorites_confirm_title
         }
         val messageRes = when (action) {
-            SettingsAction.ClearArtworkCache -> R.string.clear_thumbnails_posters_confirm_message
+            SettingsAction.ClearArtwork -> R.string.clear_artwork_confirm_message
+            SettingsAction.ClearThumbnails -> R.string.clear_thumbnails_confirm_message
             SettingsAction.ClearRecentHistory -> R.string.clear_recent_history_confirm_message
             SettingsAction.ClearFavorites -> R.string.clear_favorites_confirm_message
         }
@@ -2146,7 +2184,8 @@ fun MainDashboardScreen(
     settingsFeedback?.let { feedback ->
         val message = if (feedback.detail == null) {
             when (feedback.action) {
-                SettingsAction.ClearArtworkCache -> stringResource(R.string.clear_thumbnails_posters_complete_message)
+                SettingsAction.ClearArtwork -> stringResource(R.string.clear_artwork_complete_message)
+                SettingsAction.ClearThumbnails -> stringResource(R.string.clear_thumbnails_complete_message)
                 SettingsAction.ClearRecentHistory -> stringResource(R.string.clear_recent_history_complete_message)
                 SettingsAction.ClearFavorites -> stringResource(R.string.clear_favorites_complete_message)
             }
@@ -5025,11 +5064,13 @@ private fun AddServerDialog(
 }
 
 private fun buildGroupPosterCacheKey(groupKey: String, posterUrl: String): String {
-    return "group-poster:$groupKey:${posterUrl.hashCode()}"
+    val generation = ImageCacheVersionStore.artworkGeneration()
+    return "group-poster:$generation:$groupKey:${posterUrl.hashCode()}"
 }
 
 private fun buildFilePosterCacheKey(fileName: String, posterUrl: String): String {
-    return "file-poster:${fileName.hashCode()}:${posterUrl.hashCode()}"
+    val generation = ImageCacheVersionStore.artworkGeneration()
+    return "file-poster:$generation:${fileName.hashCode()}:${posterUrl.hashCode()}"
 }
 
 private val multipartVideoPattern = Regex("""^(.+)-(\d{1,2})$""")
