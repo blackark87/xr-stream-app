@@ -3,6 +3,7 @@ package blackark.app.vr.ui.screens
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -22,16 +23,20 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.MovieCreation
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
@@ -47,6 +52,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -62,6 +68,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -81,12 +88,15 @@ import blackark.app.vr.ui.theme.TextTertiary
 import blackark.app.vr.ui.viewmodel.AvFilterFamily
 import blackark.app.vr.ui.viewmodel.AvLibraryState
 import coil3.compose.AsyncImage
+import blackark.app.vr.utils.JvrCastMetadata
+import blackark.app.vr.utils.JvrMovieMetadata
 import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.YearMonth
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun AvLibraryPanel(
     avLibrary: AvLibraryState,
@@ -100,12 +110,23 @@ fun AvLibraryPanel(
     onPreviousMonth: () -> Unit,
     onNextMonth: () -> Unit,
     onWorkSelected: (String?) -> Unit,
+    onMergeCast: (String, String) -> Unit,
+    onAddCastAlias: (String, String?, String?) -> Unit,
+    onSaveWorkMetadata: (String, JvrMovieMetadata) -> Unit,
     onPlayPart: (String, String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val selectedWork = remember(avLibrary.selectedAssetKey, avLibrary.snapshot.works) {
         avLibrary.selectedAssetKey?.let { key ->
             avLibrary.snapshot.works.firstOrNull { it.assetKey == key }
+        }
+    }
+    var mergeTargetCastId by remember { mutableStateOf<String?>(null) }
+    var aliasDialogCast by remember { mutableStateOf<AvCastFilterOption?>(null) }
+    var editMetadataWork by remember { mutableStateOf<AvLibraryWork?>(null) }
+    val mergeTargetCast = remember(mergeTargetCastId, avLibrary.castOptions) {
+        mergeTargetCastId?.let { performerId ->
+            avLibrary.castOptions.firstOrNull { it.performerId == performerId }
         }
     }
 
@@ -184,6 +205,16 @@ fun AvLibraryPanel(
                         onClearFilters = onClearFilters,
                         onPreviousMonth = onPreviousMonth,
                         onNextMonth = onNextMonth,
+                        mergeTargetCast = mergeTargetCast,
+                        onSetMergeTarget = { cast ->
+                            mergeTargetCastId = cast.performerId
+                        },
+                        onMergeWithTarget = { sourceCast, targetCast ->
+                            onMergeCast(sourceCast.performerId, targetCast.performerId)
+                            mergeTargetCastId = null
+                        },
+                        onClearMergeTarget = { mergeTargetCastId = null },
+                        onAddCastAliasRequested = { cast -> aliasDialogCast = cast },
                     )
 
                     Spacer(modifier = Modifier.height(12.dp))
@@ -226,6 +257,7 @@ fun AvLibraryPanel(
                                         work = work,
                                         isSelected = avLibrary.selectedAssetKey == work.assetKey,
                                         onClick = { onWorkSelected(work.assetKey) },
+                                        onEditMetadata = { editMetadataWork = work },
                                     )
                                 }
                             }
@@ -243,6 +275,28 @@ fun AvLibraryPanel(
             onPlayPart = onPlayPart,
         )
     }
+
+    aliasDialogCast?.let { cast ->
+        AddPerformerAliasDialog(
+            cast = cast,
+            onDismiss = { aliasDialogCast = null },
+            onSave = { englishName, japaneseName ->
+                onAddCastAlias(cast.performerId, englishName, japaneseName)
+                aliasDialogCast = null
+            },
+        )
+    }
+
+    editMetadataWork?.let { work ->
+        EditAvMetadataDialog(
+            work = work,
+            onDismiss = { editMetadataWork = null },
+            onSave = { metadata ->
+                onSaveWorkMetadata(work.assetKey, metadata)
+                editMetadataWork = null
+            },
+        )
+    }
 }
 
 @Composable
@@ -255,6 +309,11 @@ private fun AvFilterSection(
     onClearFilters: () -> Unit,
     onPreviousMonth: () -> Unit,
     onNextMonth: () -> Unit,
+    mergeTargetCast: AvCastFilterOption?,
+    onSetMergeTarget: (AvCastFilterOption) -> Unit,
+    onMergeWithTarget: (AvCastFilterOption, AvCastFilterOption) -> Unit,
+    onClearMergeTarget: () -> Unit,
+    onAddCastAliasRequested: (AvCastFilterOption) -> Unit,
 ) {
     val filters = avLibrary.filters
 
@@ -326,10 +385,23 @@ private fun AvFilterSection(
 
         AvFilterFamily.Casts -> {
             Spacer(modifier = Modifier.height(12.dp))
+            mergeTargetCast?.let { target ->
+                Text(
+                    text = "Merge target: ${buildCastLabel(target.japaneseName, target.englishName)}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = NetflixRed,
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+            }
             CastFilterGrid(
                 castOptions = avLibrary.castOptions,
                 selectedCastIds = filters.selectedCastIds,
                 onCastToggled = onCastToggled,
+                mergeTargetCast = mergeTargetCast,
+                onSetMergeTarget = onSetMergeTarget,
+                onMergeWithTarget = onMergeWithTarget,
+                onClearMergeTarget = onClearMergeTarget,
+                onAddCastAliasRequested = onAddCastAliasRequested,
             )
         }
 
@@ -442,6 +514,11 @@ private fun CastFilterGrid(
     castOptions: List<AvCastFilterOption>,
     selectedCastIds: Set<String>,
     onCastToggled: (String) -> Unit,
+    mergeTargetCast: AvCastFilterOption?,
+    onSetMergeTarget: (AvCastFilterOption) -> Unit,
+    onMergeWithTarget: (AvCastFilterOption, AvCastFilterOption) -> Unit,
+    onClearMergeTarget: () -> Unit,
+    onAddCastAliasRequested: (AvCastFilterOption) -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -460,6 +537,11 @@ private fun CastFilterGrid(
                         cast = cast,
                         isSelected = cast.performerId in selectedCastIds,
                         onClick = { onCastToggled(cast.performerId) },
+                        mergeTargetCast = mergeTargetCast,
+                        onSetMergeTarget = { onSetMergeTarget(cast) },
+                        onMergeWithTarget = { target -> onMergeWithTarget(cast, target) },
+                        onClearMergeTarget = onClearMergeTarget,
+                        onAddCastAliasRequested = { onAddCastAliasRequested(cast) },
                         modifier = Modifier.weight(1f),
                     )
                 }
@@ -688,7 +770,9 @@ private fun AvWorkCard(
     work: AvLibraryWork,
     isSelected: Boolean,
     onClick: () -> Unit,
+    onEditMetadata: () -> Unit,
 ) {
+    var menuExpanded by remember(work.assetKey) { mutableStateOf(false) }
     Surface(
         modifier = Modifier
             .fillMaxWidth()
@@ -706,8 +790,10 @@ private fun AvWorkCard(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            val castSummary = buildWorkCastSummary(work.casts)
             PosterThumbnail(
                 posterUrl = work.displayPosterUrl,
+                showVrBadge = shouldShowVrBadge(work),
                 modifier = Modifier.size(width = 108.dp, height = 144.dp),
             )
 
@@ -741,20 +827,83 @@ private fun AvWorkCard(
                         color = TextSecondary,
                     )
                 }
-                Text(
-                    text = "${work.parts.size} part${if (work.parts.size == 1) "" else "s"}",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = NetflixRed,
-                    fontWeight = FontWeight.SemiBold,
-                )
+                castSummary?.let { summary ->
+                    Text(
+                        text = summary,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = TextSecondary,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                if (work.parts.size > 1) {
+                    Text(
+                        text = "${work.parts.size} parts",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = NetflixRed,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
             }
 
             if (isSelected) {
-                Icon(
-                    imageVector = Icons.Filled.CheckCircle,
-                    contentDescription = null,
-                    tint = NetflixRed,
-                )
+                Column(
+                    horizontalAlignment = Alignment.End,
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Box {
+                        IconButton(onClick = { menuExpanded = true }) {
+                            Icon(
+                                imageVector = Icons.Filled.MoreVert,
+                                contentDescription = "More",
+                                tint = TextSecondary,
+                            )
+                        }
+                        DropdownMenu(
+                            expanded = menuExpanded,
+                            onDismissRequest = { menuExpanded = false },
+                            containerColor = CardBackgroundHover,
+                            shape = RoundedCornerShape(14.dp),
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Edit metadata") },
+                                onClick = {
+                                    menuExpanded = false
+                                    onEditMetadata()
+                                },
+                            )
+                        }
+                    }
+                    Icon(
+                        imageVector = Icons.Filled.CheckCircle,
+                        contentDescription = null,
+                        tint = NetflixRed,
+                    )
+                }
+            } else {
+                Box {
+                    IconButton(onClick = { menuExpanded = true }) {
+                        Icon(
+                            imageVector = Icons.Filled.MoreVert,
+                            contentDescription = "More",
+                            tint = TextSecondary,
+                        )
+                    }
+                    DropdownMenu(
+                        expanded = menuExpanded,
+                        onDismissRequest = { menuExpanded = false },
+                        containerColor = CardBackgroundHover,
+                        shape = RoundedCornerShape(14.dp),
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Edit metadata") },
+                            onClick = {
+                                menuExpanded = false
+                                onEditMetadata()
+                            },
+                        )
+                    }
+                }
             }
         }
     }
@@ -889,51 +1038,387 @@ private fun AvWorkDetailDialog(
 }
 
 @Composable
+private fun AddPerformerAliasDialog(
+    cast: AvCastFilterOption,
+    onDismiss: () -> Unit,
+    onSave: (String?, String?) -> Unit,
+) {
+    var englishName by remember(cast.performerId) { mutableStateOf(cast.englishName) }
+    var japaneseName by remember(cast.performerId) { mutableStateOf(cast.japaneseName.orEmpty()) }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Card(
+            modifier = Modifier
+                .widthIn(max = 460.dp)
+                .padding(12.dp),
+            colors = CardDefaults.cardColors(containerColor = CardBackground),
+            shape = RoundedCornerShape(22.dp),
+            border = BorderStroke(1.dp, DividerGray.copy(alpha = 0.8f)),
+            elevation = CardDefaults.cardElevation(defaultElevation = 12.dp),
+        ) {
+            Column(
+                modifier = Modifier.padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                Text(
+                    text = "Add Alias",
+                    style = MaterialTheme.typography.titleLarge,
+                    color = TextPrimary,
+                )
+                Text(
+                    text = buildCastLabel(cast.japaneseName, cast.englishName),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextTertiary,
+                )
+                OutlinedTextField(
+                    value = japaneseName,
+                    onValueChange = { japaneseName = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Japanese name") },
+                    singleLine = true,
+                )
+                OutlinedTextField(
+                    value = englishName,
+                    onValueChange = { englishName = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("English name") },
+                    singleLine = true,
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                ) {
+                    TextButton(onClick = onDismiss) {
+                        Text("Cancel")
+                    }
+                    Button(
+                        onClick = {
+                            onSave(
+                                englishName.trim().takeIf { it.isNotBlank() },
+                                japaneseName.trim().takeIf { it.isNotBlank() },
+                            )
+                        },
+                        enabled = englishName.isNotBlank() || japaneseName.isNotBlank(),
+                    ) {
+                        Text("Save")
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun EditAvMetadataDialog(
+    work: AvLibraryWork,
+    onDismiss: () -> Unit,
+    onSave: (JvrMovieMetadata) -> Unit,
+) {
+    var title by remember(work.assetKey) { mutableStateOf(work.displayTitle) }
+    var studio by remember(work.assetKey) { mutableStateOf(work.studio.orEmpty()) }
+    var releaseDateText by remember(work.assetKey) {
+        mutableStateOf(work.releaseDate?.toString().orEmpty())
+    }
+    var editableCasts by remember(work.assetKey) { mutableStateOf(work.casts) }
+    var newCastJapanese by remember(work.assetKey) { mutableStateOf("") }
+    var newCastEnglish by remember(work.assetKey) { mutableStateOf("") }
+    var releaseDateError by remember(work.assetKey) { mutableStateOf<String?>(null) }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Card(
+            modifier = Modifier
+                .widthIn(max = 720.dp)
+                .padding(12.dp),
+            colors = CardDefaults.cardColors(containerColor = CardBackground),
+            shape = RoundedCornerShape(24.dp),
+            border = BorderStroke(1.dp, DividerGray.copy(alpha = 0.8f)),
+            elevation = CardDefaults.cardElevation(defaultElevation = 18.dp),
+        ) {
+            Column(
+                modifier = Modifier
+                    .padding(20.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                Text(
+                    text = "Edit Metadata",
+                    style = MaterialTheme.typography.headlineSmall,
+                    color = TextPrimary,
+                )
+                Text(
+                    text = work.asset.normalizedCode,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextTertiary,
+                )
+
+                OutlinedTextField(
+                    value = title,
+                    onValueChange = { title = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Title") },
+                )
+                OutlinedTextField(
+                    value = studio,
+                    onValueChange = { studio = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Studio") },
+                    singleLine = true,
+                )
+                OutlinedTextField(
+                    value = releaseDateText,
+                    onValueChange = {
+                        releaseDateText = it
+                        releaseDateError = null
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Release date (YYYY-MM-DD)") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
+                    isError = releaseDateError != null,
+                )
+                releaseDateError?.let { message ->
+                    Text(
+                        text = message,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = NetflixRed,
+                    )
+                }
+
+                Text(
+                    text = "Casts",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = TextPrimary,
+                )
+                if (editableCasts.isEmpty()) {
+                    Text(
+                        text = "No casts added yet",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = TextTertiary,
+                    )
+                } else {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        editableCasts.forEach { cast ->
+                            Surface(
+                                shape = RoundedCornerShape(14.dp),
+                                border = BorderStroke(1.dp, DividerGray.copy(alpha = 0.7f)),
+                                color = Color.Transparent,
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(
+                                        text = buildCastLabel(cast.japaneseName, cast.englishName),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = TextPrimary,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                    IconButton(
+                                        onClick = {
+                                            editableCasts = editableCasts.filterNot {
+                                                it.performerId == cast.performerId
+                                            }
+                                        }
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Filled.Close,
+                                            contentDescription = "Remove cast",
+                                            tint = TextSecondary,
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Text(
+                    text = "Add Cast",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = TextPrimary,
+                )
+                OutlinedTextField(
+                    value = newCastJapanese,
+                    onValueChange = { newCastJapanese = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Japanese name") },
+                    singleLine = true,
+                )
+                OutlinedTextField(
+                    value = newCastEnglish,
+                    onValueChange = { newCastEnglish = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("English name") },
+                    singleLine = true,
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                ) {
+                    TextButton(
+                        onClick = {
+                            val trimmedJapanese = newCastJapanese.trim().takeIf { it.isNotBlank() }
+                            val trimmedEnglish = newCastEnglish.trim().takeIf { it.isNotBlank() }
+                            if (trimmedJapanese != null || trimmedEnglish != null) {
+                                val fallback = trimmedJapanese ?: trimmedEnglish ?: "manual-cast"
+                                editableCasts = (editableCasts + JvrCastMetadata(
+                                    performerId = "manual:${fallback.lowercase()}",
+                                    englishName = trimmedEnglish ?: trimmedJapanese.orEmpty(),
+                                    japaneseName = trimmedJapanese,
+                                )).distinctBy { buildCastLabel(it.japaneseName, it.englishName) }
+                                newCastJapanese = ""
+                                newCastEnglish = ""
+                            }
+                        },
+                    ) {
+                        Text("Add")
+                    }
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                ) {
+                    TextButton(onClick = onDismiss) {
+                        Text("Cancel")
+                    }
+                    Button(
+                        onClick = {
+                            val parsedReleaseDate = when {
+                                releaseDateText.isBlank() -> null
+                                else -> runCatching { LocalDate.parse(releaseDateText.trim()) }
+                                    .getOrElse {
+                                        releaseDateError = "Use YYYY-MM-DD"
+                                        return@Button
+                                    }
+                            }
+
+                            onSave(
+                                JvrMovieMetadata(
+                                    code = work.metadata?.code ?: work.asset.normalizedCode,
+                                    title = title.trim().ifBlank { work.asset.normalizedCode },
+                                    posterUrl = work.metadata?.posterUrl ?: work.displayPosterUrl,
+                                    releaseDate = parsedReleaseDate,
+                                    studio = studio.trim().takeIf { it.isNotBlank() },
+                                    genres = work.metadata?.genres.orEmpty(),
+                                    casts = editableCasts,
+                                )
+                            )
+                        },
+                    ) {
+                        Text("Save")
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun CastFilterCell(
     cast: AvCastFilterOption,
     isSelected: Boolean,
     onClick: () -> Unit,
+    mergeTargetCast: AvCastFilterOption?,
+    onSetMergeTarget: () -> Unit,
+    onMergeWithTarget: (AvCastFilterOption) -> Unit,
+    onClearMergeTarget: () -> Unit,
+    onAddCastAliasRequested: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Surface(
-        modifier = modifier
-            .clip(RoundedCornerShape(14.dp))
-            .clickable(onClick = onClick),
-        color = if (isSelected) {
-            NetflixRed.copy(alpha = 0.16f)
-        } else {
-            Color.Transparent
-        },
-        shape = RoundedCornerShape(14.dp),
-        border = BorderStroke(
-            1.dp,
-            if (isSelected) NetflixRed else DividerGray.copy(alpha = 0.7f),
-        ),
-    ) {
-        Column(
-            modifier = Modifier.padding(8.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(6.dp),
+    var menuExpanded by remember(cast.performerId) { mutableStateOf(false) }
+    Box(modifier = modifier) {
+        Surface(
+            modifier = Modifier
+                .clip(RoundedCornerShape(14.dp))
+                .combinedClickable(
+                    onClick = onClick,
+                    onLongClick = { menuExpanded = true },
+                ),
+            color = if (isSelected) {
+                NetflixRed.copy(alpha = 0.16f)
+            } else {
+                Color.Transparent
+            },
+            shape = RoundedCornerShape(14.dp),
+            border = BorderStroke(
+                1.dp,
+                if (isSelected) NetflixRed else DividerGray.copy(alpha = 0.7f),
+            ),
         ) {
-            CastAvatar(
-                imageUrl = cast.profileImageUrl,
-                placeholderText = if (
-                    cast.englishName.isBlank() &&
-                    cast.japaneseName.isNullOrBlank()
-                ) "?" else "\uD83D\uDC69",
-            )
-            Text(
-                text = buildCastLabel(cast.japaneseName, cast.englishName),
-                style = MaterialTheme.typography.labelSmall,
-                color = TextPrimary,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                textAlign = TextAlign.Center,
-            )
-            Text(
-                text = cast.itemCount.toString(),
-                style = MaterialTheme.typography.labelSmall,
-                color = TextTertiary,
+            Column(
+                modifier = Modifier.padding(8.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                CastAvatar(
+                    imageUrl = cast.profileImageUrl,
+                    placeholderText = if (
+                        cast.englishName.isBlank() &&
+                        cast.japaneseName.isNullOrBlank()
+                    ) "?" else "\uD83D\uDC64",
+                )
+                Text(
+                    text = buildCastLabel(cast.japaneseName, cast.englishName),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = TextPrimary,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Center,
+                )
+                Text(
+                    text = cast.itemCount.toString(),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = TextTertiary,
+                )
+            }
+        }
+
+        DropdownMenu(
+            expanded = menuExpanded,
+            onDismissRequest = { menuExpanded = false },
+            containerColor = CardBackgroundHover,
+            shape = RoundedCornerShape(14.dp),
+        ) {
+            if (mergeTargetCast?.performerId == cast.performerId) {
+                DropdownMenuItem(
+                    text = { Text("Clear merge target") },
+                    onClick = {
+                        menuExpanded = false
+                        onClearMergeTarget()
+                    },
+                )
+            } else {
+                DropdownMenuItem(
+                    text = { Text("Set merge target") },
+                    onClick = {
+                        menuExpanded = false
+                        onSetMergeTarget()
+                    },
+                )
+
+                mergeTargetCast?.let { target ->
+                    DropdownMenuItem(
+                        text = {
+                            Text("Merge into ${buildCastLabel(target.japaneseName, target.englishName)}")
+                        },
+                        onClick = {
+                            menuExpanded = false
+                            onMergeWithTarget(target)
+                        },
+                    )
+                }
+            }
+
+            DropdownMenuItem(
+                text = { Text("Add alias") },
+                onClick = {
+                    menuExpanded = false
+                    onAddCastAliasRequested()
+                },
             )
         }
     }
@@ -956,7 +1441,7 @@ private fun CastDisplayCell(
             placeholderText = if (
                 englishName.isBlank() &&
                 japaneseName.isNullOrBlank()
-            ) "?" else "\uD83D\uDC69",
+            ) "?" else "\uD83D\uDC64",
         )
         Text(
             text = buildCastLabel(japaneseName, englishName),
@@ -1019,6 +1504,7 @@ private fun AvPartRow(
 @Composable
 private fun PosterThumbnail(
     posterUrl: String?,
+    showVrBadge: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     Box(
@@ -1041,6 +1527,25 @@ private fun PosterThumbnail(
                 tint = TextSecondary,
                 modifier = Modifier.size(36.dp),
             )
+        }
+
+        if (showVrBadge) {
+            Surface(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(8.dp),
+                shape = RoundedCornerShape(999.dp),
+                color = Color.Black.copy(alpha = 0.72f),
+                border = BorderStroke(1.dp, NetflixRed.copy(alpha = 0.55f)),
+            ) {
+                Text(
+                    text = "VR",
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = TextPrimary,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
         }
     }
 }
@@ -1086,4 +1591,41 @@ private fun buildCastLabel(japaneseName: String?, englishName: String): String {
         english != null -> english
         else -> "?"
     }
+}
+
+private fun buildWorkCastSummary(casts: List<blackark.app.vr.utils.JvrCastMetadata>): String? {
+    if (casts.isEmpty()) return null
+
+    val visibleLabels = casts
+        .map { buildCastLabel(it.japaneseName, it.englishName) }
+        .filter { it.isNotBlank() && it != "?" }
+        .distinct()
+        .take(3)
+
+    if (visibleLabels.isEmpty()) return null
+
+    val remainingCount = casts
+        .map { it.performerId }
+        .distinct()
+        .size - visibleLabels.size
+
+    return buildString {
+        append(visibleLabels.joinToString("  •  "))
+        if (remainingCount > 0) {
+            append("  •  +")
+            append(remainingCount)
+        }
+    }
+}
+
+private fun shouldShowVrBadge(work: AvLibraryWork): Boolean {
+    val representativePath = work.representativePath.orEmpty().replace('\\', '/')
+    val representativeFileName = work.representativeFileName.orEmpty()
+    val stereoPattern = Regex(
+        "(?i)(?:\\bVR\\b|\\b8KVR\\b|\\bVR8K\\b|(?:^|[ _.\\-])SBS(?:$|[ _.\\-])|(?:^|[ _.\\-])TB(?:$|[ _.\\-]))"
+    )
+
+    return work.asset.metadataSource.equals("jvr", ignoreCase = true) ||
+        Regex("(^|/)av/vr(/|$)", RegexOption.IGNORE_CASE).containsMatchIn(representativePath) ||
+        stereoPattern.containsMatchIn(representativeFileName)
 }
