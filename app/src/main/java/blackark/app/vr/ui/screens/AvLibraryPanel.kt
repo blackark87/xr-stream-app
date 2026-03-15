@@ -71,6 +71,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import blackark.app.vr.R
@@ -124,6 +125,7 @@ fun AvLibraryPanel(
     var mergeTargetCastId by remember { mutableStateOf<String?>(null) }
     var aliasDialogCast by remember { mutableStateOf<AvCastFilterOption?>(null) }
     var editMetadataWork by remember { mutableStateOf<AvLibraryWork?>(null) }
+    var pendingMergeSourceCast by remember { mutableStateOf<AvCastFilterOption?>(null) }
     val mergeTargetCast = remember(mergeTargetCastId, avLibrary.castOptions) {
         mergeTargetCastId?.let { performerId ->
             avLibrary.castOptions.firstOrNull { it.performerId == performerId }
@@ -206,14 +208,30 @@ fun AvLibraryPanel(
                         onPreviousMonth = onPreviousMonth,
                         onNextMonth = onNextMonth,
                         mergeTargetCast = mergeTargetCast,
+                        pendingMergeSourceCast = pendingMergeSourceCast,
                         onSetMergeTarget = { cast ->
                             mergeTargetCastId = cast.performerId
+                            pendingMergeSourceCast = null
                         },
-                        onMergeWithTarget = { sourceCast, targetCast ->
-                            onMergeCast(sourceCast.performerId, targetCast.performerId)
+                        onMergeCandidateSelected = { cast ->
+                            pendingMergeSourceCast = if (
+                                pendingMergeSourceCast?.performerId == cast.performerId
+                            ) null else cast
+                        },
+                        onConfirmMerge = {
+                            val source = pendingMergeSourceCast
+                            val target = mergeTargetCast
+                            if (source != null && target != null) {
+                                onMergeCast(source.performerId, target.performerId)
+                                pendingMergeSourceCast = null
+                                mergeTargetCastId = null
+                            }
+                        },
+                        onClearMergeTarget = {
                             mergeTargetCastId = null
+                            pendingMergeSourceCast = null
                         },
-                        onClearMergeTarget = { mergeTargetCastId = null },
+                        onClearMergeCandidate = { pendingMergeSourceCast = null },
                         onAddCastAliasRequested = { cast -> aliasDialogCast = cast },
                     )
 
@@ -297,6 +315,7 @@ fun AvLibraryPanel(
             },
         )
     }
+
 }
 
 @Composable
@@ -310,9 +329,12 @@ private fun AvFilterSection(
     onPreviousMonth: () -> Unit,
     onNextMonth: () -> Unit,
     mergeTargetCast: AvCastFilterOption?,
+    pendingMergeSourceCast: AvCastFilterOption?,
     onSetMergeTarget: (AvCastFilterOption) -> Unit,
-    onMergeWithTarget: (AvCastFilterOption, AvCastFilterOption) -> Unit,
+    onMergeCandidateSelected: (AvCastFilterOption) -> Unit,
+    onConfirmMerge: () -> Unit,
     onClearMergeTarget: () -> Unit,
+    onClearMergeCandidate: () -> Unit,
     onAddCastAliasRequested: (AvCastFilterOption) -> Unit,
 ) {
     val filters = avLibrary.filters
@@ -410,6 +432,44 @@ private fun AvFilterSection(
                     }
                 }
                 Spacer(modifier = Modifier.height(8.dp))
+                pendingMergeSourceCast?.let { source ->
+                    Surface(
+                        shape = RoundedCornerShape(14.dp),
+                        color = CardBackgroundHover,
+                        border = BorderStroke(1.dp, DividerGray.copy(alpha = 0.8f)),
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Text(
+                                text = "Ready to merge ${buildCastLabel(source.japaneseName, source.englishName)} into ${buildCastLabel(target.japaneseName, target.englishName)}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextPrimary,
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.End,
+                            ) {
+                                TextButton(onClick = onClearMergeCandidate) {
+                                    Text("Back")
+                                }
+                                Button(onClick = onConfirmMerge) {
+                                    Text("Merge")
+                                }
+                            }
+                        }
+                    }
+                } ?: run {
+                    Text(
+                        text = "Tap another cast card to select it for merge, then press Merge.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = TextTertiary,
+                    )
+                }
+                Spacer(modifier = Modifier.height(8.dp))
             }
             if (mergeTargetCast == null) {
                 Text(
@@ -424,8 +484,9 @@ private fun AvFilterSection(
                 selectedCastIds = filters.selectedCastIds,
                 onCastToggled = onCastToggled,
                 mergeTargetCast = mergeTargetCast,
+                pendingMergeSourceCast = pendingMergeSourceCast,
                 onSetMergeTarget = onSetMergeTarget,
-                onMergeWithTarget = onMergeWithTarget,
+                onMergeCandidateSelected = onMergeCandidateSelected,
                 onClearMergeTarget = onClearMergeTarget,
                 onAddCastAliasRequested = onAddCastAliasRequested,
             )
@@ -541,8 +602,9 @@ private fun CastFilterGrid(
     selectedCastIds: Set<String>,
     onCastToggled: (String) -> Unit,
     mergeTargetCast: AvCastFilterOption?,
+    pendingMergeSourceCast: AvCastFilterOption?,
     onSetMergeTarget: (AvCastFilterOption) -> Unit,
-    onMergeWithTarget: (AvCastFilterOption, AvCastFilterOption) -> Unit,
+    onMergeCandidateSelected: (AvCastFilterOption) -> Unit,
     onClearMergeTarget: () -> Unit,
     onAddCastAliasRequested: (AvCastFilterOption) -> Unit,
 ) {
@@ -562,10 +624,18 @@ private fun CastFilterGrid(
                     CastFilterCell(
                         cast = cast,
                         isSelected = cast.performerId in selectedCastIds,
-                        onClick = { onCastToggled(cast.performerId) },
+                        isMergeTarget = mergeTargetCast?.performerId == cast.performerId,
+                        isPendingMergeSource = pendingMergeSourceCast?.performerId == cast.performerId,
+                        onClick = {
+                            when {
+                                mergeTargetCast == null -> onCastToggled(cast.performerId)
+                                mergeTargetCast.performerId != cast.performerId -> {
+                                    onMergeCandidateSelected(cast)
+                                }
+                            }
+                        },
                         mergeTargetCast = mergeTargetCast,
                         onSetMergeTarget = { onSetMergeTarget(cast) },
-                        onMergeWithTarget = { target -> onMergeWithTarget(cast, target) },
                         onClearMergeTarget = onClearMergeTarget,
                         onAddCastAliasRequested = { onAddCastAliasRequested(cast) },
                         modifier = Modifier.weight(1f),
@@ -1347,10 +1417,11 @@ private fun EditAvMetadataDialog(
 private fun CastFilterCell(
     cast: AvCastFilterOption,
     isSelected: Boolean,
+    isMergeTarget: Boolean,
+    isPendingMergeSource: Boolean,
     onClick: () -> Unit,
     mergeTargetCast: AvCastFilterOption?,
     onSetMergeTarget: () -> Unit,
-    onMergeWithTarget: (AvCastFilterOption) -> Unit,
     onClearMergeTarget: () -> Unit,
     onAddCastAliasRequested: () -> Unit,
     modifier: Modifier = Modifier,
@@ -1360,7 +1431,7 @@ private fun CastFilterCell(
         Surface(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(170.dp)
+                .height(132.dp)
                 .clip(RoundedCornerShape(14.dp))
                 .combinedClickable(
                     onClick = onClick,
@@ -1374,22 +1445,43 @@ private fun CastFilterCell(
             shape = RoundedCornerShape(14.dp),
             border = BorderStroke(
                 1.dp,
-                if (isSelected) NetflixRed else DividerGray.copy(alpha = 0.7f),
+                when {
+                    isMergeTarget -> NetflixRed
+                    isPendingMergeSource -> TextSecondary
+                    isSelected -> NetflixRed
+                    else -> DividerGray.copy(alpha = 0.7f)
+                },
             ),
         ) {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(horizontal = 8.dp, vertical = 10.dp),
+                    .padding(horizontal = 8.dp, vertical = 6.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterVertically),
+                verticalArrangement = Arrangement.spacedBy(3.dp, Alignment.CenterVertically),
             ) {
+                if (isMergeTarget) {
+                    Text(
+                        text = "TARGET",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = NetflixRed,
+                        fontWeight = FontWeight.Bold,
+                    )
+                } else if (isPendingMergeSource) {
+                    Text(
+                        text = "SOURCE",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = TextSecondary,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
                 CastAvatar(
                     imageUrl = cast.profileImageUrl,
                     placeholderText = if (
                         cast.englishName.isBlank() &&
                         cast.japaneseName.isNullOrBlank()
                     ) "?" else "\uD83D\uDC64",
+                    size = 50.dp,
                 )
                 Text(
                     text = buildCastLabel(cast.japaneseName, cast.englishName),
@@ -1429,18 +1521,6 @@ private fun CastFilterCell(
                         onSetMergeTarget()
                     },
                 )
-
-                mergeTargetCast?.let { target ->
-                    DropdownMenuItem(
-                        text = {
-                            Text("Merge into ${buildCastLabel(target.japaneseName, target.englishName)}")
-                        },
-                        onClick = {
-                            menuExpanded = false
-                            onMergeWithTarget(target)
-                        },
-                    )
-                }
             }
 
             DropdownMenuItem(
@@ -1584,10 +1664,11 @@ private fun PosterThumbnail(
 private fun CastAvatar(
     imageUrl: String?,
     placeholderText: String,
+    size: Dp = 58.dp,
 ) {
     Box(
         modifier = Modifier
-            .size(58.dp)
+            .size(size)
             .clip(CircleShape)
             .background(DividerGray.copy(alpha = 0.35f)),
         contentAlignment = Alignment.Center,
