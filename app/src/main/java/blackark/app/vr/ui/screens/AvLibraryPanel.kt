@@ -62,6 +62,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -312,6 +313,7 @@ fun AvLibraryPanel(
     editMetadataWork?.let { work ->
         EditAvMetadataDialog(
             work = work,
+            availableCastOptions = avLibrary.castOptions.filterNot { it.isNoneOption },
             onDismiss = { editMetadataWork = null },
             onSave = { metadata ->
                 onSaveWorkMetadata(work.assetKey, metadata)
@@ -1164,7 +1166,7 @@ private fun AddPerformerAliasDialog(
                 verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
                 Text(
-                    text = "Add Alias",
+                    text = stringResource(R.string.av_add_alias_title),
                     style = MaterialTheme.typography.titleLarge,
                     color = TextPrimary,
                 )
@@ -1177,14 +1179,14 @@ private fun AddPerformerAliasDialog(
                     value = japaneseName,
                     onValueChange = { japaneseName = it },
                     modifier = Modifier.fillMaxWidth(),
-                    label = { Text("Japanese name") },
+                    label = { Text(stringResource(R.string.av_japanese_name)) },
                     singleLine = true,
                 )
                 OutlinedTextField(
                     value = englishName,
                     onValueChange = { englishName = it },
                     modifier = Modifier.fillMaxWidth(),
-                    label = { Text("English name") },
+                    label = { Text(stringResource(R.string.av_english_name)) },
                     singleLine = true,
                 )
                 Row(
@@ -1192,7 +1194,7 @@ private fun AddPerformerAliasDialog(
                     horizontalArrangement = Arrangement.End,
                 ) {
                     TextButton(onClick = onDismiss) {
-                        Text("Cancel")
+                        Text(stringResource(R.string.cancel))
                     }
                     Button(
                         onClick = {
@@ -1203,7 +1205,7 @@ private fun AddPerformerAliasDialog(
                         },
                         enabled = englishName.isNotBlank() || japaneseName.isNotBlank(),
                     ) {
-                        Text("Save")
+                        Text(stringResource(R.string.save))
                     }
                 }
             }
@@ -1214,6 +1216,7 @@ private fun AddPerformerAliasDialog(
 @Composable
 private fun EditAvMetadataDialog(
     work: AvLibraryWork,
+    availableCastOptions: List<AvCastFilterOption>,
     onDismiss: () -> Unit,
     onSave: (JvrMovieMetadata) -> Unit,
 ) {
@@ -1226,6 +1229,8 @@ private fun EditAvMetadataDialog(
     var newCastJapanese by remember(work.assetKey) { mutableStateOf("") }
     var newCastEnglish by remember(work.assetKey) { mutableStateOf("") }
     var releaseDateError by remember(work.assetKey) { mutableStateOf<String?>(null) }
+    var existingCastMenuExpanded by remember(work.assetKey) { mutableStateOf(false) }
+    val releaseDateErrorMessage = stringResource(R.string.av_release_date_error)
 
     Dialog(onDismissRequest = onDismiss) {
         Card(
@@ -1244,7 +1249,7 @@ private fun EditAvMetadataDialog(
                 verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
                 Text(
-                    text = "Edit Metadata",
+                    text = stringResource(R.string.av_edit_metadata_title),
                     style = MaterialTheme.typography.headlineSmall,
                     color = TextPrimary,
                 )
@@ -1258,13 +1263,13 @@ private fun EditAvMetadataDialog(
                     value = title,
                     onValueChange = { title = it },
                     modifier = Modifier.fillMaxWidth(),
-                    label = { Text("Title") },
+                    label = { Text(stringResource(R.string.av_title)) },
                 )
                 OutlinedTextField(
                     value = studio,
                     onValueChange = { studio = it },
                     modifier = Modifier.fillMaxWidth(),
-                    label = { Text("Studio") },
+                    label = { Text(stringResource(R.string.av_studio)) },
                     singleLine = true,
                 )
                 OutlinedTextField(
@@ -1274,7 +1279,7 @@ private fun EditAvMetadataDialog(
                         releaseDateError = null
                     },
                     modifier = Modifier.fillMaxWidth(),
-                    label = { Text("Release date (YYYY-MM-DD)") },
+                    label = { Text(stringResource(R.string.av_release_date_hint)) },
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
                     isError = releaseDateError != null,
@@ -1288,13 +1293,104 @@ private fun EditAvMetadataDialog(
                 }
 
                 Text(
-                    text = "Casts",
+                    text = stringResource(R.string.av_casts),
                     style = MaterialTheme.typography.titleMedium,
                     color = TextPrimary,
                 )
+                if (availableCastOptions.isNotEmpty()) {
+                    Text(
+                        text = stringResource(R.string.av_existing_casts),
+                        style = MaterialTheme.typography.titleSmall,
+                        color = TextPrimary,
+                    )
+                    Box {
+                        OutlinedButton(
+                            onClick = { existingCastMenuExpanded = true },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    text = stringResource(R.string.av_select_existing_casts),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                Icon(
+                                    imageVector = Icons.Filled.KeyboardArrowDown,
+                                    contentDescription = null,
+                                    tint = TextSecondary,
+                                )
+                            }
+                        }
+                        DropdownMenu(
+                            expanded = existingCastMenuExpanded,
+                            onDismissRequest = { existingCastMenuExpanded = false },
+                            containerColor = CardBackgroundHover,
+                            shape = RoundedCornerShape(14.dp),
+                            modifier = Modifier
+                                .background(CardBackgroundHover)
+                                .widthIn(min = 260.dp, max = 360.dp),
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .heightIn(max = 320.dp)
+                                    .verticalScroll(rememberScrollState()),
+                            ) {
+                                availableCastOptions.forEach { option ->
+                                    val isSelected = editableCasts.any {
+                                        it.performerId == option.performerId
+                                    }
+                                    DropdownMenuItem(
+                                        text = {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically,
+                                            ) {
+                                                Text(
+                                                    text = buildCastLabel(
+                                                        option.japaneseName,
+                                                        option.englishName,
+                                                    ),
+                                                    modifier = Modifier.weight(1f),
+                                                    maxLines = 2,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                )
+                                                if (isSelected) {
+                                                    Icon(
+                                                        imageVector = Icons.Filled.CheckCircle,
+                                                        contentDescription = null,
+                                                        tint = NetflixRed,
+                                                    )
+                                                }
+                                            }
+                                        },
+                                        onClick = {
+                                            editableCasts = if (isSelected) {
+                                                editableCasts.filterNot {
+                                                    it.performerId == option.performerId
+                                                }
+                                            } else {
+                                                editableCasts + JvrCastMetadata(
+                                                    performerId = option.performerId,
+                                                    englishName = option.englishName,
+                                                    japaneseName = option.japaneseName,
+                                                    profileImageUrl = option.profileImageUrl,
+                                                )
+                                            }
+                                        },
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
                 if (editableCasts.isEmpty()) {
                     Text(
-                        text = "No casts added yet",
+                        text = stringResource(R.string.av_no_casts_added_yet),
                         style = MaterialTheme.typography.bodySmall,
                         color = TextTertiary,
                     )
@@ -1328,7 +1424,7 @@ private fun EditAvMetadataDialog(
                                     ) {
                                         Icon(
                                             imageVector = Icons.Filled.Close,
-                                            contentDescription = "Remove cast",
+                                            contentDescription = stringResource(R.string.av_remove_cast),
                                             tint = TextSecondary,
                                         )
                                     }
@@ -1339,7 +1435,7 @@ private fun EditAvMetadataDialog(
                 }
 
                 Text(
-                    text = "Add Cast",
+                    text = stringResource(R.string.av_manual_cast),
                     style = MaterialTheme.typography.titleSmall,
                     color = TextPrimary,
                 )
@@ -1347,14 +1443,14 @@ private fun EditAvMetadataDialog(
                     value = newCastJapanese,
                     onValueChange = { newCastJapanese = it },
                     modifier = Modifier.fillMaxWidth(),
-                    label = { Text("Japanese name") },
+                    label = { Text(stringResource(R.string.av_japanese_name)) },
                     singleLine = true,
                 )
                 OutlinedTextField(
                     value = newCastEnglish,
                     onValueChange = { newCastEnglish = it },
                     modifier = Modifier.fillMaxWidth(),
-                    label = { Text("English name") },
+                    label = { Text(stringResource(R.string.av_english_name)) },
                     singleLine = true,
                 )
                 Row(
@@ -1377,7 +1473,7 @@ private fun EditAvMetadataDialog(
                             }
                         },
                     ) {
-                        Text("Add")
+                        Text(stringResource(R.string.av_add_manual_cast))
                     }
                 }
 
@@ -1386,7 +1482,7 @@ private fun EditAvMetadataDialog(
                     horizontalArrangement = Arrangement.End,
                 ) {
                     TextButton(onClick = onDismiss) {
-                        Text("Cancel")
+                        Text(stringResource(R.string.cancel))
                     }
                     Button(
                         onClick = {
@@ -1394,7 +1490,7 @@ private fun EditAvMetadataDialog(
                                 releaseDateText.isBlank() -> null
                                 else -> runCatching { LocalDate.parse(releaseDateText.trim()) }
                                     .getOrElse {
-                                        releaseDateError = "Use YYYY-MM-DD"
+                                        releaseDateError = releaseDateErrorMessage
                                         return@Button
                                     }
                             }
@@ -1412,7 +1508,7 @@ private fun EditAvMetadataDialog(
                             )
                         },
                     ) {
-                        Text("Save")
+                        Text(stringResource(R.string.save))
                     }
                 }
             }
