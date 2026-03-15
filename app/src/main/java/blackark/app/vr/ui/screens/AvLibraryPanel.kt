@@ -5,7 +5,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -20,8 +19,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -456,57 +453,28 @@ private fun CastFilterGrid(
     selectedCastIds: Set<String>,
     onCastToggled: (String) -> Unit,
 ) {
-    LazyVerticalGrid(
-        columns = GridCells.Adaptive(minSize = 92.dp),
+    Column(
         modifier = Modifier
             .fillMaxWidth()
-            .heightIn(max = 320.dp),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+            .heightIn(max = 320.dp)
+            .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        items(castOptions, key = { it.performerId }) { cast ->
-            val isSelected = cast.performerId in selectedCastIds
-            Surface(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(14.dp))
-                    .clickable { onCastToggled(cast.performerId) },
-                color = if (isSelected) {
-                    NetflixRed.copy(alpha = 0.16f)
-                } else {
-                    Color.Transparent
-                },
-                shape = RoundedCornerShape(14.dp),
-                border = BorderStroke(
-                    1.dp,
-                    if (isSelected) NetflixRed else DividerGray.copy(alpha = 0.7f),
-                ),
+        castOptions.chunked(4).forEach { row ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                Column(
-                    modifier = Modifier.padding(8.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    CastAvatar(
-                        imageUrl = cast.profileImageUrl,
-                        placeholderText = if (
-                            cast.englishName.isBlank() &&
-                            cast.japaneseName.isNullOrBlank()
-                        ) "?" else "\uD83D\uDC69",
+                row.forEach { cast ->
+                    CastFilterCell(
+                        cast = cast,
+                        isSelected = cast.performerId in selectedCastIds,
+                        onClick = { onCastToggled(cast.performerId) },
+                        modifier = Modifier.weight(1f),
                     )
-                    Text(
-                        text = buildCastLabel(cast.japaneseName, cast.englishName),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = TextPrimary,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                        textAlign = TextAlign.Center,
-                    )
-                    Text(
-                        text = cast.itemCount.toString(),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = TextTertiary,
-                    )
+                }
+                repeat((4 - row.size).coerceAtLeast(0)) {
+                    Spacer(modifier = Modifier.weight(1f))
                 }
             }
         }
@@ -603,12 +571,12 @@ private fun ReleaseDateCalendar(
         }
     }
 
-    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
-        val calendarWidth = minOf(maxWidth, 360.dp)
-        Column(
-            modifier = Modifier.width(calendarWidth),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .widthIn(max = 360.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -722,7 +690,6 @@ private fun ReleaseDateCalendar(
                     }
                 }
             }
-        }
     }
 }
 
@@ -864,32 +831,28 @@ private fun AvWorkDetailDialog(
                         style = MaterialTheme.typography.titleSmall,
                         color = TextPrimary,
                     )
-                    LazyVerticalGrid(
-                        columns = GridCells.Adaptive(minSize = 92.dp),
-                        modifier = Modifier.heightIn(max = 220.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    Column(
+                        modifier = Modifier
+                            .heightIn(max = 220.dp)
+                            .verticalScroll(rememberScrollState()),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        items(work.casts, key = { it.performerId }) { cast ->
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.spacedBy(4.dp),
+                        work.casts.chunked(3).forEach { row ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
                             ) {
-                                CastAvatar(
-                                    imageUrl = cast.profileImageUrl ?: cast.remoteProfileImageUrl,
-                                    placeholderText = if (
-                                        cast.englishName.isBlank() &&
-                                        cast.japaneseName.isNullOrBlank()
-                                    ) "?" else "\uD83D\uDC69",
-                                )
-                                Text(
-                                    text = buildCastLabel(cast.japaneseName, cast.englishName),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = TextPrimary,
-                                    maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis,
-                                    textAlign = TextAlign.Center,
-                                )
+                                row.forEach { cast ->
+                                    CastDisplayCell(
+                                        imageUrl = cast.profileImageUrl ?: cast.remoteProfileImageUrl,
+                                        japaneseName = cast.japaneseName,
+                                        englishName = cast.englishName,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                }
+                                repeat((3 - row.size).coerceAtLeast(0)) {
+                                    Spacer(modifier = Modifier.weight(1f))
+                                }
                             }
                         }
                     }
@@ -913,6 +876,87 @@ private fun AvWorkDetailDialog(
             }
         },
     )
+}
+
+@Composable
+private fun CastFilterCell(
+    cast: AvCastFilterOption,
+    isSelected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier
+            .clip(RoundedCornerShape(14.dp))
+            .clickable(onClick = onClick),
+        color = if (isSelected) {
+            NetflixRed.copy(alpha = 0.16f)
+        } else {
+            Color.Transparent
+        },
+        shape = RoundedCornerShape(14.dp),
+        border = BorderStroke(
+            1.dp,
+            if (isSelected) NetflixRed else DividerGray.copy(alpha = 0.7f),
+        ),
+    ) {
+        Column(
+            modifier = Modifier.padding(8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            CastAvatar(
+                imageUrl = cast.profileImageUrl,
+                placeholderText = if (
+                    cast.englishName.isBlank() &&
+                    cast.japaneseName.isNullOrBlank()
+                ) "?" else "\uD83D\uDC69",
+            )
+            Text(
+                text = buildCastLabel(cast.japaneseName, cast.englishName),
+                style = MaterialTheme.typography.labelSmall,
+                color = TextPrimary,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center,
+            )
+            Text(
+                text = cast.itemCount.toString(),
+                style = MaterialTheme.typography.labelSmall,
+                color = TextTertiary,
+            )
+        }
+    }
+}
+
+@Composable
+private fun CastDisplayCell(
+    imageUrl: String?,
+    japaneseName: String?,
+    englishName: String,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier,
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        CastAvatar(
+            imageUrl = imageUrl,
+            placeholderText = if (
+                englishName.isBlank() &&
+                japaneseName.isNullOrBlank()
+            ) "?" else "\uD83D\uDC69",
+        )
+        Text(
+            text = buildCastLabel(japaneseName, englishName),
+            style = MaterialTheme.typography.labelSmall,
+            color = TextPrimary,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center,
+        )
+    }
 }
 
 @Composable
