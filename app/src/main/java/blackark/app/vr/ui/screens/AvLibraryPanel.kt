@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -37,13 +38,12 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -256,65 +256,72 @@ private fun AvFilterSection(
     onNextMonth: () -> Unit,
 ) {
     val filters = avLibrary.filters
+    var showReleaseDatePicker by remember { mutableStateOf(false) }
 
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        FilterChip(
-            selected = filters.activeFamily == AvFilterFamily.Studio,
-            onClick = { onSetFilterFamily(AvFilterFamily.Studio) },
-            label = { Text("Studio") },
-            colors = FilterChipDefaults.filterChipColors(
-                selectedContainerColor = NetflixRed.copy(alpha = 0.18f),
-                selectedLabelColor = TextPrimary,
-            ),
+        StudioFilterTrigger(
+            studios = avLibrary.studioOptions.map { it.studio },
+            selectedStudio = filters.selectedStudio,
+            onStudioSelected = onStudioSelected,
+            modifier = Modifier.widthIn(min = 152.dp),
         )
-        FilterChip(
-            selected = filters.activeFamily == AvFilterFamily.Casts,
-            onClick = { onSetFilterFamily(AvFilterFamily.Casts) },
-            label = { Text("Casts") },
-            colors = FilterChipDefaults.filterChipColors(
-                selectedContainerColor = NetflixRed.copy(alpha = 0.18f),
-                selectedLabelColor = TextPrimary,
-            ),
+        FilterTriggerButton(
+            label = if (filters.selectedCastIds.isEmpty()) {
+                "Casts"
+            } else {
+                "Casts (${filters.selectedCastIds.size})"
+            },
+            selected = filters.activeFamily == AvFilterFamily.Casts || filters.selectedCastIds.isNotEmpty(),
+            onClick = {
+                if (filters.activeFamily == AvFilterFamily.Casts && filters.selectedCastIds.isEmpty()) {
+                    onSetFilterFamily(AvFilterFamily.None)
+                } else {
+                    onSetFilterFamily(AvFilterFamily.Casts)
+                }
+            },
+            modifier = Modifier.widthIn(min = 132.dp),
         )
-        FilterChip(
-            selected = filters.activeFamily == AvFilterFamily.ReleaseDate,
-            onClick = { onSetFilterFamily(AvFilterFamily.ReleaseDate) },
-            label = { Text("Release Date") },
-            colors = FilterChipDefaults.filterChipColors(
-                selectedContainerColor = NetflixRed.copy(alpha = 0.18f),
-                selectedLabelColor = TextPrimary,
-            ),
+        FilterTriggerButton(
+            label = filters.selectedReleaseDate?.toString() ?: "Release date",
+            selected = filters.selectedReleaseDate != null,
+            onClick = { showReleaseDatePicker = true },
+            modifier = Modifier.widthIn(min = 164.dp),
         )
         Spacer(modifier = Modifier.weight(1f))
-        TextButton(onClick = onClearFilters) {
-            Text("Clear")
+        if (
+            filters.selectedStudio != null ||
+            filters.selectedCastIds.isNotEmpty() ||
+            filters.selectedReleaseDate != null
+        ) {
+            TextButton(onClick = onClearFilters) {
+                Text("Clear")
+            }
         }
     }
 
-    Spacer(modifier = Modifier.height(12.dp))
-
     when (filters.activeFamily) {
         AvFilterFamily.None -> {
-            Text(
-                text = "Choose one filter family at a time. Studio, casts, and release date stay independent.",
-                style = MaterialTheme.typography.bodySmall,
-                color = TextTertiary,
-            )
+            if (filters.selectedStudio != null || filters.selectedReleaseDate != null) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = buildFilterSummary(
+                        studio = filters.selectedStudio,
+                        releaseDate = filters.selectedReleaseDate,
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextTertiary,
+                )
+            }
         }
 
-        AvFilterFamily.Studio -> {
-            StudioFilterSelector(
-                studios = avLibrary.studioOptions.map { it.studio },
-                selectedStudio = filters.selectedStudio,
-                onStudioSelected = onStudioSelected,
-            )
-        }
+        AvFilterFamily.Studio -> Unit
 
         AvFilterFamily.Casts -> {
+            Spacer(modifier = Modifier.height(12.dp))
             CastFilterGrid(
                 castOptions = avLibrary.castOptions,
                 selectedCastIds = filters.selectedCastIds,
@@ -322,31 +329,45 @@ private fun AvFilterSection(
             )
         }
 
-        AvFilterFamily.ReleaseDate -> {
-            ReleaseDateCalendar(
-                month = filters.visibleMonth,
-                selectedDate = filters.selectedReleaseDate,
-                counts = avLibrary.releaseDateCounts.associate { it.date to it.itemCount },
-                onPreviousMonth = onPreviousMonth,
-                onNextMonth = onNextMonth,
-                onDateSelected = onReleaseDateSelected,
-            )
-        }
+        AvFilterFamily.ReleaseDate -> Unit
+    }
+
+    if (showReleaseDatePicker) {
+        ReleaseDatePickerDialog(
+            month = filters.visibleMonth,
+            selectedDate = filters.selectedReleaseDate,
+            counts = avLibrary.releaseDateCounts.associate { it.date to it.itemCount },
+            onDismiss = { showReleaseDatePicker = false },
+            onPreviousMonth = onPreviousMonth,
+            onNextMonth = onNextMonth,
+            onDateSelected = { date ->
+                onReleaseDateSelected(date)
+                showReleaseDatePicker = false
+            },
+            onClear = {
+                onReleaseDateSelected(null)
+                showReleaseDatePicker = false
+            },
+        )
     }
 }
 
 @Composable
-private fun StudioFilterSelector(
+private fun StudioFilterTrigger(
     studios: List<String>,
     selectedStudio: String?,
     onStudioSelected: (String?) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     var expanded by remember { mutableStateOf(false) }
 
-    Box {
-        OutlinedButton(onClick = { expanded = true }) {
-            Text(selectedStudio ?: "Choose studio")
-        }
+    Box(modifier = modifier) {
+        FilterTriggerButton(
+            label = selectedStudio ?: "Studio",
+            selected = selectedStudio != null,
+            onClick = { expanded = true },
+            modifier = Modifier.fillMaxWidth(),
+        )
         DropdownMenu(
             expanded = expanded,
             onDismissRequest = { expanded = false },
@@ -369,6 +390,44 @@ private fun StudioFilterSelector(
             }
         }
     }
+}
+
+@Composable
+private fun FilterTriggerButton(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    OutlinedButton(
+        onClick = onClick,
+        modifier = modifier,
+        border = BorderStroke(
+            1.dp,
+            if (selected) NetflixRed else DividerGray.copy(alpha = 0.7f),
+        ),
+        colors = ButtonDefaults.outlinedButtonColors(
+            containerColor = if (selected) NetflixRed.copy(alpha = 0.14f) else Color.Transparent,
+            contentColor = TextPrimary,
+        ),
+    ) {
+        Text(
+            text = label,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+private fun buildFilterSummary(
+    studio: String?,
+    releaseDate: LocalDate?,
+): String {
+    val parts = buildList {
+        if (!studio.isNullOrBlank()) add("Studio: $studio")
+        if (releaseDate != null) add("Release date: $releaseDate")
+    }
+    return parts.joinToString("  •  ")
 }
 
 @Composable
@@ -432,6 +491,53 @@ private fun CastFilterGrid(
             }
         }
     }
+}
+
+@Composable
+private fun ReleaseDatePickerDialog(
+    month: YearMonth,
+    selectedDate: LocalDate?,
+    counts: Map<LocalDate, Int>,
+    onDismiss: () -> Unit,
+    onPreviousMonth: () -> Unit,
+    onNextMonth: () -> Unit,
+    onDateSelected: (LocalDate?) -> Unit,
+    onClear: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {},
+        dismissButton = {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                if (selectedDate != null) {
+                    TextButton(onClick = onClear) {
+                        Text("Clear")
+                    }
+                }
+                TextButton(onClick = onDismiss) {
+                    Text("Close")
+                }
+            }
+        },
+        title = {
+            Text(
+                text = "Release date",
+                color = TextPrimary,
+            )
+        },
+        text = {
+            ReleaseDateCalendar(
+                month = month,
+                selectedDate = selectedDate,
+                counts = counts,
+                onPreviousMonth = onPreviousMonth,
+                onNextMonth = onNextMonth,
+                onDateSelected = onDateSelected,
+            )
+        },
+    )
 }
 
 @Composable

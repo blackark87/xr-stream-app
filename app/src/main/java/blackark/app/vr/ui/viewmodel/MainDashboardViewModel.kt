@@ -56,6 +56,7 @@ data class MainDashboardState(
     val fileViewMode: FileBrowserViewMode = FileBrowserViewMode.Thumbnail,
     val avLibrary: AvLibraryState = AvLibraryState(),
     val isAvBackgroundIndexingEnabled: Boolean = false,
+    val fileMetadataRefreshToken: Long = 0L,
 )
 
 enum class FileBrowserViewMode {
@@ -129,6 +130,7 @@ class MainDashboardViewModel(
     private var smbClient: SMBClient? = null
     private var localClient: LocalFileClient? = null
     private var avScanJob: Job? = null
+    private var avVisibleSyncJob: Job? = null
 
     private fun filterAndSortBrowsableFiles(fileList: List<SMBFileItem>): List<SMBFileItem> {
         return fileList
@@ -196,6 +198,7 @@ class MainDashboardViewModel(
                 localClient?.disconnect()
                 localClient = null
                 avScanJob?.cancel()
+                avVisibleSyncJob?.cancel()
                 AppState.clear()
 
                 val result = if (server.isLocalStorage) {
@@ -263,6 +266,8 @@ class MainDashboardViewModel(
     fun disconnect() {
         avScanJob?.cancel()
         avScanJob = null
+        avVisibleSyncJob?.cancel()
+        avVisibleSyncJob = null
         smbClient?.disconnect()
         smbClient = null
         localClient?.disconnect()
@@ -310,6 +315,7 @@ class MainDashboardViewModel(
                         currentPath = path,
                         errorMessage = null
                     )
+                    syncCurrentListingForAv(sortedFiles)
                 } else {
                     _uiState.value = _uiState.value.copy(
                         isLoadingFiles = false,
@@ -663,6 +669,36 @@ class MainDashboardViewModel(
         )
     }
 
+    private fun syncCurrentListingForAv(files: List<SMBFileItem>) {
+        val sourceScope = currentSourceScope() ?: return
+        val visibleVideos = files.filter { !it.isDirectory && SMBClient.isVideoFile(it.name) }
+
+        avVisibleSyncJob?.cancel()
+        if (visibleVideos.isEmpty()) {
+            return
+        }
+
+        avVisibleSyncJob = viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val syncedAt = System.currentTimeMillis()
+                visibleVideos.forEach { file ->
+                    processScannedVideo(
+                        sourceScope = sourceScope,
+                        file = file,
+                        scanStartedAt = syncedAt,
+                        allowFingerprint = false,
+                    )
+                }
+                refreshAvSnapshot(sourceScope)
+                bumpFileMetadataRefreshToken()
+            } catch (_: CancellationException) {
+                // Folder navigation cancels any in-flight visible listing sync.
+            } catch (e: Exception) {
+                Log.w("MainDashboardViewModel", "Visible AV sync failed: ${e.message}")
+            }
+        }
+    }
+
     private fun stopAvLibraryIndexing() {
         avScanJob?.cancel()
         avScanJob = null
@@ -789,6 +825,7 @@ class MainDashboardViewModel(
         sourceScope: String,
         file: SMBFileItem,
         scanStartedAt: Long,
+        allowFingerprint: Boolean = true,
     ) {
         val existingLocation = avLibraryRepository.getLocationByPath(file.path)
         var asset = existingLocation?.let { avLibraryRepository.getAssetByKey(it.assetKey) }
@@ -799,7 +836,7 @@ class MainDashboardViewModel(
             asset = avLibraryRepository.getAssetBySourceAndCode(sourceScope, normalizedCode)
         }
 
-        if (asset == null && file.size > 0L) {
+        if (allowFingerprint && asset == null && file.size > 0L) {
             val fingerprintMatch = findFingerprintMatch(sourceScope, file)
             if (fingerprintMatch != null) {
                 asset = avLibraryRepository.getAssetByKey(fingerprintMatch.first)
@@ -825,7 +862,7 @@ class MainDashboardViewModel(
             asset?.representativeFolderPath ?: extractFolderPath(file.path)
         }
 
-        if (contentFingerprint == null && file.size > 0L) {
+        if (allowFingerprint && contentFingerprint == null && file.size > 0L) {
             contentFingerprint = computeContentFingerprint(file.path, file.size)
         }
 
@@ -1058,6 +1095,12 @@ class MainDashboardViewModel(
             avLibrary = _uiState.value.avLibrary.copy(
                 scan = scanState,
             )
+        )
+    }
+
+    private fun bumpFileMetadataRefreshToken() {
+        _uiState.value = _uiState.value.copy(
+            fileMetadataRefreshToken = _uiState.value.fileMetadataRefreshToken + 1L,
         )
     }
 
