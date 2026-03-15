@@ -25,6 +25,11 @@ data class AvLibraryWork(
     val displayPosterUrl: String?
         get() = metadata?.posterUrl ?: asset.cachedPosterUrl
 
+    val fallbackThumbnailPath: String?
+        get() = representativePath?.takeIf {
+            displayPosterUrl.isNullOrBlank() && parts.size > 1
+        }
+
     val studio: String?
         get() = metadata?.studio ?: asset.cachedStudio
 

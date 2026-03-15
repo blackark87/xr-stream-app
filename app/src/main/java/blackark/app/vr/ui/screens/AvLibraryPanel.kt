@@ -61,6 +61,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -89,8 +90,11 @@ import blackark.app.vr.ui.theme.TextTertiary
 import blackark.app.vr.ui.viewmodel.AvFilterFamily
 import blackark.app.vr.ui.viewmodel.AvLibraryState
 import coil3.compose.AsyncImage
+import coil3.request.CachePolicy
+import coil3.request.ImageRequest
 import blackark.app.vr.utils.JvrCastMetadata
 import blackark.app.vr.utils.JvrMovieMetadata
+import blackark.app.vr.utils.VideoThumbnailFetcher
 import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.YearMonth
@@ -890,6 +894,7 @@ private fun AvWorkCard(
             val castSummary = buildWorkCastSummary(work.casts)
             PosterThumbnail(
                 posterUrl = work.displayPosterUrl,
+                fallbackThumbnailPath = work.fallbackThumbnailPath,
                 showVrBadge = shouldShowVrBadge(work),
                 modifier = Modifier.size(width = 108.dp, height = 144.dp),
             )
@@ -1062,6 +1067,7 @@ private fun AvWorkDetailDialog(
 
                 PosterThumbnail(
                     posterUrl = work.displayPosterUrl,
+                    fallbackThumbnailPath = work.fallbackThumbnailPath,
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(220.dp),
@@ -1624,18 +1630,45 @@ private fun AvPartRow(
 @Composable
 private fun PosterThumbnail(
     posterUrl: String?,
+    fallbackThumbnailPath: String? = null,
     showVrBadge: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
+    val context = LocalContext.current
+    val thumbnailModel = remember(posterUrl, fallbackThumbnailPath, context) {
+        when {
+            !posterUrl.isNullOrBlank() -> posterUrl
+            !fallbackThumbnailPath.isNullOrBlank() -> {
+                ImageRequest.Builder(context)
+                    .data(
+                        VideoThumbnailFetcher.Model(
+                            fallbackThumbnailPath,
+                            allowMetadataPoster = false,
+                        )
+                    )
+                    .diskCacheKey(
+                        VideoThumbnailFetcher.diskCacheKey(
+                            fallbackThumbnailPath,
+                            allowMetadataPoster = false,
+                        )
+                    )
+                    .diskCachePolicy(CachePolicy.ENABLED)
+                    .memoryCachePolicy(CachePolicy.ENABLED)
+                    .build()
+            }
+
+            else -> null
+        }
+    }
     Box(
         modifier = modifier
             .clip(RoundedCornerShape(12.dp))
             .background(DividerGray.copy(alpha = 0.4f)),
         contentAlignment = Alignment.Center,
     ) {
-        if (!posterUrl.isNullOrBlank()) {
+        if (thumbnailModel != null) {
             AsyncImage(
-                model = posterUrl,
+                model = thumbnailModel,
                 contentDescription = null,
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop,
@@ -1654,13 +1687,13 @@ private fun PosterThumbnail(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
                     .padding(8.dp),
-                shape = RoundedCornerShape(999.dp),
-                color = Color.Black.copy(alpha = 0.72f),
-                border = BorderStroke(1.dp, NetflixRed.copy(alpha = 0.55f)),
+                shape = RoundedCornerShape(10.dp),
+                color = CardBackgroundHover.copy(alpha = 0.96f),
+                border = BorderStroke(1.dp, NetflixRed.copy(alpha = 0.7f)),
             ) {
                 Text(
                     text = "VR",
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
                     style = MaterialTheme.typography.labelMedium,
                     color = TextPrimary,
                     fontWeight = FontWeight.SemiBold,
