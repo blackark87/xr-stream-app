@@ -1210,14 +1210,7 @@ private fun SettingsPanel(
             SettingsChoiceRow(
                 title = stringResource(R.string.seek_preview_mode_title),
                 description = stringResource(R.string.seek_preview_mode_description),
-                value =
-                    when (playbackPreviewMode) {
-                        PlaybackPreviewMode.PlayerFrame ->
-                            stringResource(R.string.seek_preview_mode_player_frame)
-
-                        PlaybackPreviewMode.ThumbnailOverlay ->
-                            stringResource(R.string.seek_preview_mode_thumbnail_overlay)
-                    },
+                selectedMode = playbackPreviewMode,
                 options =
                     listOf(
                         PlaybackPreviewMode.PlayerFrame to
@@ -1334,58 +1327,47 @@ private fun SettingsActionRow(
 private fun SettingsChoiceRow(
     title: String,
     description: String,
-    value: String,
+    selectedMode: PlaybackPreviewMode,
     options: List<Pair<PlaybackPreviewMode, String>>,
     onOptionSelected: (PlaybackPreviewMode) -> Unit,
 ) {
-    var expanded by remember { mutableStateOf(false) }
-
     Column(
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleMedium,
+            color = TextPrimary,
+        )
+
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.titleMedium,
-                color = TextPrimary,
-                modifier = Modifier.weight(1f),
-            )
-            Spacer(modifier = Modifier.width(16.dp))
-            Box {
-                Button(
-                    onClick = { expanded = true },
-                    colors = ButtonDefaults.buttonColors(containerColor = DividerGray),
-                    border = BorderStroke(1.dp, DividerGray.copy(alpha = 0.82f)),
+            options.forEach { (mode, label) ->
+                val selected = selectedMode == mode
+                Surface(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable { onOptionSelected(mode) },
+                    color =
+                        if (selected) {
+                            NetflixRed.copy(alpha = 0.18f)
+                        } else {
+                            CardBackgroundHover.copy(alpha = 0.72f)
+                        },
+                    shape = RoundedCornerShape(14.dp),
+                    border = BorderStroke(1.dp, if (selected) NetflixRed else DividerGray),
                 ) {
                     Text(
-                        text = value,
-                        color = TextPrimary,
+                        text = label,
+                        style = MaterialTheme.typography.labelLarge,
+                        color = if (selected) TextPrimary else TextSecondary,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 12.dp),
                     )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Icon(
-                        imageVector = Icons.Filled.KeyboardArrowDown,
-                        contentDescription = null,
-                        tint = TextPrimary,
-                    )
-                }
-
-                DropdownMenu(
-                    expanded = expanded,
-                    onDismissRequest = { expanded = false },
-                ) {
-                    options.forEach { (mode, label) ->
-                        DropdownMenuItem(
-                            text = { Text(label) },
-                            onClick = {
-                                expanded = false
-                                onOptionSelected(mode)
-                            },
-                        )
-                    }
                 }
             }
         }
