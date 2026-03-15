@@ -7,6 +7,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -33,6 +35,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.MovieCreation
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
@@ -72,6 +75,7 @@ import blackark.app.vr.data.model.AvCastFilterOption
 import blackark.app.vr.data.model.AvLibraryWork
 import blackark.app.vr.ui.components.EmptyState
 import blackark.app.vr.ui.theme.CardBackground
+import blackark.app.vr.ui.theme.CardBackgroundHover
 import blackark.app.vr.ui.theme.DividerGray
 import blackark.app.vr.ui.theme.NetflixRed
 import blackark.app.vr.ui.theme.TextPrimary
@@ -244,6 +248,7 @@ fun AvLibraryPanel(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun AvFilterSection(
     avLibrary: AvLibraryState,
@@ -256,18 +261,17 @@ private fun AvFilterSection(
     onNextMonth: () -> Unit,
 ) {
     val filters = avLibrary.filters
-    var showReleaseDatePicker by remember { mutableStateOf(false) }
 
-    Row(
+    FlowRow(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.CenterVertically,
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         StudioFilterTrigger(
             studios = avLibrary.studioOptions.map { it.studio },
             selectedStudio = filters.selectedStudio,
             onStudioSelected = onStudioSelected,
-            modifier = Modifier.widthIn(min = 152.dp),
+            modifier = Modifier.widthIn(min = 152.dp, max = 280.dp),
         )
         FilterTriggerButton(
             label = if (filters.selectedCastIds.isEmpty()) {
@@ -283,21 +287,26 @@ private fun AvFilterSection(
                     onSetFilterFamily(AvFilterFamily.Casts)
                 }
             },
-            modifier = Modifier.widthIn(min = 132.dp),
+            modifier = Modifier.widthIn(min = 132.dp, max = 220.dp),
         )
-        FilterTriggerButton(
-            label = filters.selectedReleaseDate?.toString() ?: "Release date",
-            selected = filters.selectedReleaseDate != null,
-            onClick = { showReleaseDatePicker = true },
-            modifier = Modifier.widthIn(min = 164.dp),
+        ReleaseDateFilterTrigger(
+            month = filters.visibleMonth,
+            selectedDate = filters.selectedReleaseDate,
+            counts = avLibrary.releaseDateCounts.associate { it.date to it.itemCount },
+            onPreviousMonth = onPreviousMonth,
+            onNextMonth = onNextMonth,
+            onDateSelected = onReleaseDateSelected,
+            modifier = Modifier.widthIn(min = 164.dp, max = 240.dp),
         )
-        Spacer(modifier = Modifier.weight(1f))
         if (
             filters.selectedStudio != null ||
             filters.selectedCastIds.isNotEmpty() ||
             filters.selectedReleaseDate != null
         ) {
-            TextButton(onClick = onClearFilters) {
+            TextButton(
+                onClick = onClearFilters,
+                modifier = Modifier.align(Alignment.CenterVertically),
+            ) {
                 Text("Clear")
             }
         }
@@ -332,24 +341,6 @@ private fun AvFilterSection(
         AvFilterFamily.ReleaseDate -> Unit
     }
 
-    if (showReleaseDatePicker) {
-        ReleaseDatePickerDialog(
-            month = filters.visibleMonth,
-            selectedDate = filters.selectedReleaseDate,
-            counts = avLibrary.releaseDateCounts.associate { it.date to it.itemCount },
-            onDismiss = { showReleaseDatePicker = false },
-            onPreviousMonth = onPreviousMonth,
-            onNextMonth = onNextMonth,
-            onDateSelected = { date ->
-                onReleaseDateSelected(date)
-                showReleaseDatePicker = false
-            },
-            onClear = {
-                onReleaseDateSelected(null)
-                showReleaseDatePicker = false
-            },
-        )
-    }
 }
 
 @Composable
@@ -371,6 +362,11 @@ private fun StudioFilterTrigger(
         DropdownMenu(
             expanded = expanded,
             onDismissRequest = { expanded = false },
+            containerColor = CardBackgroundHover,
+            shape = RoundedCornerShape(16.dp),
+            modifier = Modifier
+                .background(CardBackgroundHover)
+                .widthIn(min = 220.dp, max = 320.dp),
         ) {
             DropdownMenuItem(
                 text = { Text("All studios") },
@@ -411,11 +407,23 @@ private fun FilterTriggerButton(
             contentColor = TextPrimary,
         ),
     ) {
-        Text(
-            text = label,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = label,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Icon(
+                imageVector = Icons.Filled.KeyboardArrowDown,
+                contentDescription = null,
+                tint = if (selected) NetflixRed else TextSecondary,
+            )
+        }
     }
 }
 
@@ -494,50 +502,67 @@ private fun CastFilterGrid(
 }
 
 @Composable
-private fun ReleaseDatePickerDialog(
+private fun ReleaseDateFilterTrigger(
     month: YearMonth,
     selectedDate: LocalDate?,
     counts: Map<LocalDate, Int>,
-    onDismiss: () -> Unit,
     onPreviousMonth: () -> Unit,
     onNextMonth: () -> Unit,
     onDateSelected: (LocalDate?) -> Unit,
-    onClear: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        confirmButton = {},
-        dismissButton = {
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+    var expanded by remember { mutableStateOf(false) }
+
+    Box(modifier = modifier) {
+        FilterTriggerButton(
+            label = selectedDate?.toString() ?: "Release date",
+            selected = selectedDate != null,
+            onClick = { expanded = true },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            containerColor = CardBackgroundHover,
+            shape = RoundedCornerShape(18.dp),
+            modifier = Modifier
+                .background(CardBackgroundHover)
+                .widthIn(min = 300.dp, max = 420.dp),
+        ) {
+            Column(
+                modifier = Modifier.padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
+                ReleaseDateCalendar(
+                    month = month,
+                    selectedDate = selectedDate,
+                    counts = counts,
+                    onPreviousMonth = onPreviousMonth,
+                    onNextMonth = onNextMonth,
+                    onDateSelected = { date ->
+                        onDateSelected(date)
+                        expanded = false
+                    },
+                )
+
                 if (selectedDate != null) {
-                    TextButton(onClick = onClear) {
-                        Text("Clear")
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
+                    ) {
+                        TextButton(
+                            onClick = {
+                                onDateSelected(null)
+                                expanded = false
+                            },
+                        ) {
+                            Text("Clear")
+                        }
                     }
                 }
-                TextButton(onClick = onDismiss) {
-                    Text("Close")
-                }
             }
-        },
-        title = {
-            Text(
-                text = "Release date",
-                color = TextPrimary,
-            )
-        },
-        text = {
-            ReleaseDateCalendar(
-                month = month,
-                selectedDate = selectedDate,
-                counts = counts,
-                onPreviousMonth = onPreviousMonth,
-                onNextMonth = onNextMonth,
-                onDateSelected = onDateSelected,
-            )
-        },
-    )
+        }
+    }
 }
 
 @Composable
@@ -567,7 +592,7 @@ private fun ReleaseDateCalendar(
     }
 
     BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
-        val calendarWidth = minOf(maxWidth, 392.dp)
+        val calendarWidth = minOf(maxWidth, 360.dp)
         Column(
             modifier = Modifier.width(calendarWidth),
             verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -634,7 +659,7 @@ private fun ReleaseDateCalendar(
                                 Spacer(
                                     modifier = Modifier
                                         .weight(1f)
-                                        .aspectRatio(1.35f)
+                                        .aspectRatio(1.2f)
                                 )
                             } else {
                                 val isSelected = selectedDate == date
@@ -642,18 +667,18 @@ private fun ReleaseDateCalendar(
                                 Surface(
                                     modifier = Modifier
                                         .weight(1f)
-                                        .aspectRatio(1.35f)
+                                        .aspectRatio(1.2f)
                                         .clip(RoundedCornerShape(10.dp))
                                         .clickable { onDateSelected(if (isSelected) null else date) },
                                     color = if (isSelected) {
                                         NetflixRed.copy(alpha = 0.16f)
                                     } else {
-                                        Color.Transparent
+                                        CardBackground
                                     },
                                     shape = RoundedCornerShape(10.dp),
                                     border = BorderStroke(
                                         1.dp,
-                                        if (isSelected) NetflixRed else DividerGray.copy(alpha = 0.6f),
+                                        if (isSelected) NetflixRed else DividerGray.copy(alpha = 0.7f),
                                     ),
                                 ) {
                                     Column(
@@ -675,11 +700,11 @@ private fun ReleaseDateCalendar(
                                 }
                             }
                         }
-                        repeat((7 - week.size).coerceAtLeast(0)) { trailingIndex ->
+                        repeat((7 - week.size).coerceAtLeast(0)) {
                             Spacer(
                                 modifier = Modifier
                                     .weight(1f)
-                                    .aspectRatio(1.35f)
+                                    .aspectRatio(1.2f)
                             )
                         }
                     }
