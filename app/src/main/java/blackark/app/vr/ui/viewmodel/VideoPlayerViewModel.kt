@@ -25,6 +25,7 @@ import blackark.app.vr.network.SMBConfig
 import blackark.app.vr.network.SMBFileItem
 import blackark.app.vr.player.SMBDataSource
 import blackark.app.vr.utils.InferredDisplayProfile
+import blackark.app.vr.utils.VideoFramePreviewExtractor
 import blackark.app.vr.utils.inferDisplayProfileFromFrame
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
@@ -45,6 +46,11 @@ sealed class PlayerEvent {
     object NavigateBack : PlayerEvent()
 }
 
+enum class PlaybackPreviewMode {
+    PlayerFrame,
+    ThumbnailOverlay,
+}
+
 data class VideoPlayerState(
     val isPlaying: Boolean = false,
     val currentPosition: Long = 0,
@@ -61,7 +67,12 @@ data class VideoPlayerState(
     val zoomLevel: Float = 1.0f,
     val playlist: List<SMBFileItem> = emptyList(),
     val currentPlaylistIndex: Int = -1,
-    val showControls: Boolean = false
+    val showControls: Boolean = false,
+    val controlsInputLocked: Boolean = false,
+    val seekPreviewActive: Boolean = false,
+    val seekPreviewTargetPositionMs: Long = 0,
+    val seekPreviewMode: PlaybackPreviewMode = PlaybackPreviewMode.PlayerFrame,
+    val seekPreviewThumbnailPath: String? = null,
 )
 
 enum class PlaybackMenu {
@@ -87,6 +98,7 @@ enum class StereoMode {
 class VideoPlayerViewModel(
     private val videoRepository: VideoRepository,
     private val videoDisplaySettingsRepository: VideoDisplaySettingsRepository,
+    private val initialSeekPreviewMode: PlaybackPreviewMode,
 ) : ViewModel() {
     private enum class ControllerAxisMode {
         None,
@@ -94,7 +106,9 @@ class VideoPlayerViewModel(
         Vertical,
     }
 
-    private val _state = MutableStateFlow(VideoPlayerState())
+    private val _state = MutableStateFlow(
+        VideoPlayerState(seekPreviewMode = initialSeekPreviewMode),
+    )
     val state: StateFlow<VideoPlayerState> = _state.asStateFlow()
 
     private val _playerFlow = MutableStateFlow<ExoPlayer?>(null)
@@ -125,7 +139,12 @@ class VideoPlayerViewModel(
     private var volumeDirection = 0
     private var seekRepeatJob: Job? = null
     private var volumeRepeatJob: Job? = null
+    private var thumbnailPreviewJob: Job? = null
     private var autoDisplayInferencePending = false
+    private var controlsInputLockCount = 0
+    private var seekPreviewResumePlayback = false
+    private var seekPreviewShowControls = false
+    private var pendingThumbnailPreviewPositionMs: Long? = null
 
     private val controllerAxisEngageThreshold = 0.45f
     private val controllerAxisReleaseThreshold = 0.25f
@@ -172,8 +191,15 @@ class VideoPlayerViewModel(
     }
 
     fun setVideoFormat(format: VideoFormat) {
-        _state.value = _state.value.copy(videoFormat = format)
+        val nextStereoMode = if (format == VideoFormat.Format2D) StereoMode.Mono else _state.value.stereoMode
+        _state.value = _state.value.copy(
+            videoFormat = format,
+            stereoMode = nextStereoMode,
+        )
         pendingVideoFormatToPersist = format
+        if (format == VideoFormat.Format2D) {
+            pendingStereoModeToPersist = StereoMode.Mono
+        }
 
         autoDisplayInferencePending = false
         scheduleDisplaySettingsPersistence()
@@ -211,6 +237,38 @@ class VideoPlayerViewModel(
         scheduleControlsAutoHideIfNeeded()
     }
 
+    fun beginControlsInputLock() {
+        finishSeekPreviewSession(commit = true, restorePlayback = false)
+        controlsInputLockCount += 1
+        cancelControlsAutoHide()
+
+        val currentState = _state.value
+        if (currentState.controlsInputLocked && currentState.showControls) {
+            return
+        }
+
+        _state.value = currentState.copy(
+            showControls = true,
+            controlsInputLocked = true,
+        )
+    }
+
+    fun endControlsInputLock() {
+        controlsInputLockCount = (controlsInputLockCount - 1).coerceAtLeast(0)
+        val stillLocked = controlsInputLockCount > 0
+        if (_state.value.controlsInputLocked == stillLocked) {
+            if (!stillLocked) {
+                scheduleControlsAutoHideIfNeeded()
+            }
+            return
+        }
+
+        _state.value = _state.value.copy(controlsInputLocked = stillLocked)
+        if (!stillLocked) {
+            scheduleControlsAutoHideIfNeeded()
+        }
+    }
+
     private suspend fun persistPendingDisplaySettings() {
         if (pendingVideoFormatToPersist == null && pendingStereoModeToPersist == null) {
             return
@@ -244,6 +302,9 @@ class VideoPlayerViewModel(
 
     fun toggleControls() {
         val currentState = _state.value
+        if (currentState.controlsInputLocked || currentState.seekPreviewActive) {
+            return
+        }
         val nextVisible = !currentState.showControls
         _state.value = currentState.copy(
             showControls = nextVisible,
@@ -258,6 +319,9 @@ class VideoPlayerViewModel(
 
     fun setControlsVisibility(visible: Boolean) {
         val currentState = _state.value
+        if (!visible && (currentState.controlsInputLocked || currentState.seekPreviewActive)) {
+            return
+        }
         _state.value = currentState.copy(
             showControls = visible,
             activePlaybackMenu = if (visible) currentState.activePlaybackMenu else PlaybackMenu.None,
@@ -269,8 +333,180 @@ class VideoPlayerViewModel(
         }
     }
 
+    private fun resetControlsInputLock() {
+        controlsInputLockCount = 0
+        if (_state.value.controlsInputLocked) {
+            _state.value = _state.value.copy(controlsInputLocked = false)
+        }
+    }
+
+    private fun clampSeekPosition(positionMs: Long): Long {
+        val player = exoPlayer
+        val duration = player?.duration ?: 0L
+        val upperBound = if (duration > 0L) duration else Long.MAX_VALUE
+        return positionMs.coerceIn(0L, upperBound)
+    }
+
+    private fun beginSeekPreviewSessionIfNeeded() {
+        val player = exoPlayer ?: return
+        val currentState = _state.value
+        if (currentState.seekPreviewActive) {
+            return
+        }
+
+        seekPreviewResumePlayback = currentState.isPlaying
+        seekPreviewShowControls = currentState.showControls
+        player.pause()
+
+        val startPosition = clampSeekPosition(player.currentPosition.coerceAtLeast(0L))
+        _state.value = currentState.copy(
+            showControls =
+                if (currentState.seekPreviewMode == PlaybackPreviewMode.ThumbnailOverlay) {
+                    true
+                } else {
+                    currentState.showControls
+                },
+            seekPreviewActive = true,
+            seekPreviewTargetPositionMs = startPosition,
+            seekPreviewThumbnailPath = null,
+        )
+        cancelControlsAutoHide()
+
+        if (currentState.seekPreviewMode == PlaybackPreviewMode.ThumbnailOverlay) {
+            enqueueThumbnailPreview(startPosition)
+        }
+    }
+
+    private fun enqueueThumbnailPreview(targetPositionMs: Long) {
+        val context = appContext ?: return
+        val videoPath = _state.value.videoFile?.path ?: return
+
+        pendingThumbnailPreviewPositionMs = targetPositionMs
+        if (thumbnailPreviewJob?.isActive == true) {
+            return
+        }
+
+        thumbnailPreviewJob = viewModelScope.launch {
+            while (isActive) {
+                val nextTarget = pendingThumbnailPreviewPositionMs ?: break
+                pendingThumbnailPreviewPositionMs = null
+
+                val previewPath =
+                    VideoFramePreviewExtractor.extractPreviewFrame(
+                        context = context,
+                        videoPath = videoPath,
+                        targetPositionMs = nextTarget,
+                    )
+
+                if (!isActive) {
+                    break
+                }
+
+                val latestState = _state.value
+                if (
+                    !latestState.seekPreviewActive ||
+                    latestState.seekPreviewMode != PlaybackPreviewMode.ThumbnailOverlay
+                ) {
+                    break
+                }
+
+                if (previewPath != null) {
+                    _state.value = latestState.copy(seekPreviewThumbnailPath = previewPath)
+                }
+            }
+        }.also { job ->
+            job.invokeOnCompletion {
+                if (thumbnailPreviewJob === job) {
+                    thumbnailPreviewJob = null
+                }
+            }
+        }
+    }
+
+    private fun cancelThumbnailPreview() {
+        pendingThumbnailPreviewPositionMs = null
+        thumbnailPreviewJob?.cancel()
+        thumbnailPreviewJob = null
+    }
+
+    private fun updateSeekPreviewTarget(direction: Int) {
+        beginSeekPreviewSessionIfNeeded()
+        val currentState = _state.value
+        if (!currentState.seekPreviewActive) {
+            return
+        }
+
+        val delta = if (direction > 0) controllerSeekStepMs else -controllerSeekStepMs
+        val newTarget = clampSeekPosition(currentState.seekPreviewTargetPositionMs + delta)
+        if (newTarget == currentState.seekPreviewTargetPositionMs) {
+            return
+        }
+
+        _state.value = currentState.copy(
+            seekPreviewTargetPositionMs = newTarget,
+            showControls =
+                if (currentState.seekPreviewMode == PlaybackPreviewMode.ThumbnailOverlay) {
+                    true
+                } else {
+                    currentState.showControls
+                },
+        )
+
+        when (currentState.seekPreviewMode) {
+            PlaybackPreviewMode.PlayerFrame -> exoPlayer?.seekTo(newTarget)
+            PlaybackPreviewMode.ThumbnailOverlay -> enqueueThumbnailPreview(newTarget)
+        }
+        cancelControlsAutoHide()
+    }
+
+    private fun finishSeekPreviewSession(
+        commit: Boolean,
+        restorePlayback: Boolean,
+    ): Boolean? {
+        val currentState = _state.value
+        if (!currentState.seekPreviewActive) {
+            return null
+        }
+
+        val player = exoPlayer
+        val targetPosition = clampSeekPosition(currentState.seekPreviewTargetPositionMs)
+        val resumePlayback = seekPreviewResumePlayback
+
+        cancelSeekRepeat()
+        cancelThumbnailPreview()
+
+        if (commit && player != null) {
+            player.seekTo(targetPosition)
+        }
+
+        if (restorePlayback && player != null) {
+            if (resumePlayback) {
+                player.play()
+            } else {
+                player.pause()
+            }
+        }
+
+        _state.value = currentState.copy(
+            showControls = seekPreviewShowControls,
+            seekPreviewActive = false,
+            seekPreviewTargetPositionMs = 0L,
+            seekPreviewThumbnailPath = null,
+        )
+        seekPreviewResumePlayback = false
+        seekPreviewShowControls = false
+
+        scheduleControlsAutoHideIfNeeded()
+        return resumePlayback
+    }
+
     fun handlePlaybackHorizontalScroll(delta: Float) {
-        if (exoPlayer == null || abs(delta) < playbackScrollMagnitudeThreshold) {
+        if (
+            exoPlayer == null ||
+            abs(delta) < playbackScrollMagnitudeThreshold ||
+            _state.value.controlsInputLocked ||
+            _state.value.seekPreviewActive
+        ) {
             return
         }
 
@@ -290,6 +526,9 @@ class VideoPlayerViewModel(
     }
 
     fun handlePlaybackVerticalScroll(delta: Float) {
+        if (_state.value.controlsInputLocked || _state.value.seekPreviewActive) {
+            return
+        }
         handlePlaybackScrollDelta(
             delta = delta,
             repeatWindowMs = controllerVolumeRepeatMs,
@@ -311,6 +550,7 @@ class VideoPlayerViewModel(
         if (hasDispatchedNavigateBack) {
             return
         }
+        finishSeekPreviewSession(commit = false, restorePlayback = false)
         hasDispatchedNavigateBack = true
         viewModelScope.launch {
             _playerEvents.send(PlayerEvent.NavigateBack)
@@ -385,6 +625,7 @@ class VideoPlayerViewModel(
             return
         }
 
+        val previousAxisMode = controllerAxisMode
         val x = event.x.coerceIn(-1f, 1f)
         val y = event.y.coerceIn(-1f, 1f)
 
@@ -412,12 +653,18 @@ class VideoPlayerViewModel(
             }
 
             ControllerAxisMode.Vertical -> {
+                if (previousAxisMode == ControllerAxisMode.Horizontal) {
+                    finishSeekPreviewSession(commit = true, restorePlayback = true)
+                }
                 cancelSeekRepeat()
                 seekDirection = 0
                 handleVolumeFromAxis(y)
             }
 
             ControllerAxisMode.None -> {
+                if (previousAxisMode == ControllerAxisMode.Horizontal) {
+                    finishSeekPreviewSession(commit = true, restorePlayback = true)
+                }
                 resetControllerAxisState()
             }
         }
@@ -434,7 +681,12 @@ class VideoPlayerViewModel(
         if (desiredDirection == 0) {
             seekDirection = 0
             cancelSeekRepeat()
+            finishSeekPreviewSession(commit = true, restorePlayback = true)
             return
+        }
+
+        if (seekDirection != 0 && desiredDirection != seekDirection) {
+            finishSeekPreviewSession(commit = true, restorePlayback = false)
         }
 
         if (desiredDirection != seekDirection) {
@@ -450,11 +702,7 @@ class VideoPlayerViewModel(
     }
 
     private fun applySeekStep(direction: Int) {
-        if (direction > 0) {
-            skipForward(controllerSeekStepMs)
-        } else {
-            skipBackward(controllerSeekStepMs)
-        }
+        updateSeekPreviewTarget(direction)
     }
 
     private fun startSeekRepeat(direction: Int) {
@@ -541,6 +789,7 @@ class VideoPlayerViewModel(
         volumeDirection = 0
         cancelSeekRepeat()
         cancelVolumeRepeat()
+        cancelThumbnailPreview()
     }
 
     private fun revealControlsIfHidden(): Boolean {
@@ -562,7 +811,12 @@ class VideoPlayerViewModel(
         cancelControlsAutoHide()
 
         val currentState = _state.value
-        if (!currentState.showControls || currentState.activePlaybackMenu != PlaybackMenu.None) {
+        if (
+            !currentState.showControls ||
+            currentState.activePlaybackMenu != PlaybackMenu.None ||
+            currentState.controlsInputLocked ||
+            currentState.seekPreviewActive
+        ) {
             return
         }
 
@@ -744,6 +998,10 @@ class VideoPlayerViewModel(
                     videoFormat = initialVideoFormat,
                     activePlaybackMenu = PlaybackMenu.None,
                     showControls = false,
+                    controlsInputLocked = false,
+                    seekPreviewActive = false,
+                    seekPreviewTargetPositionMs = 0L,
+                    seekPreviewThumbnailPath = null,
                 )
 
                 // Save to recent videos immediately to ensure we have an ID for updates.
@@ -807,7 +1065,7 @@ class VideoPlayerViewModel(
                                     return
                                 }
 
-                                var detectedMode = StereoMode.Mono
+                                var detectedTrackStereoMode: StereoMode? = null
                                 var inferredDisplayProfile: InferredDisplayProfile? = null
                                 for (trackGroup in tracks.groups) {
                                     if (trackGroup.type == androidx.media3.common.C.TRACK_TYPE_VIDEO) {
@@ -815,12 +1073,19 @@ class VideoPlayerViewModel(
                                             val format = trackGroup.getTrackFormat(i)
                                             val stereoMode = format.stereoMode
 
-                                            if (stereoMode == androidx.media3.common.C.STEREO_MODE_LEFT_RIGHT ||
-                                                stereoMode == androidx.media3.common.C.STEREO_MODE_STEREO_MESH
-                                            ) {
-                                                detectedMode = StereoMode.SideBySide
-                                            } else if (stereoMode == androidx.media3.common.C.STEREO_MODE_TOP_BOTTOM) {
-                                                detectedMode = StereoMode.TopBottom
+                                            when (stereoMode) {
+                                                androidx.media3.common.C.STEREO_MODE_LEFT_RIGHT,
+                                                androidx.media3.common.C.STEREO_MODE_STEREO_MESH -> {
+                                                    detectedTrackStereoMode = StereoMode.SideBySide
+                                                }
+
+                                                androidx.media3.common.C.STEREO_MODE_TOP_BOTTOM -> {
+                                                    detectedTrackStereoMode = StereoMode.TopBottom
+                                                }
+
+                                                androidx.media3.common.C.STEREO_MODE_MONO -> {
+                                                    detectedTrackStereoMode = StereoMode.Mono
+                                                }
                                             }
 
                                             if (inferredDisplayProfile == null) {
@@ -831,14 +1096,14 @@ class VideoPlayerViewModel(
                                                     )
                                             }
 
-                                            if (detectedMode != StereoMode.Mono &&
+                                            if (detectedTrackStereoMode != null &&
                                                 inferredDisplayProfile != null
                                             ) {
                                                 break
                                             }
                                         }
                                     }
-                                    if (detectedMode != StereoMode.Mono &&
+                                    if (detectedTrackStereoMode != null &&
                                         inferredDisplayProfile != null
                                     ) {
                                         break
@@ -858,17 +1123,17 @@ class VideoPlayerViewModel(
                                         }
                                     }
 
-                                inferredDisplayProfile?.toStereoModeOrNull()
-                                    ?.let { inferredStereoMode ->
-                                        if (nextVideoFormat == VideoFormat.Format180 &&
-                                            nextStereoMode == StereoMode.Mono
-                                        ) {
-                                            nextStereoMode = inferredStereoMode
+                                if (detectedTrackStereoMode != null) {
+                                    nextStereoMode = detectedTrackStereoMode
+                                } else {
+                                    inferredDisplayProfile?.toStereoModeOrNull()
+                                        ?.let { inferredStereoMode ->
+                                            if (nextVideoFormat == VideoFormat.Format180 &&
+                                                nextStereoMode == StereoMode.Mono
+                                            ) {
+                                                nextStereoMode = inferredStereoMode
+                                            }
                                         }
-                                    }
-
-                                if (detectedMode != StereoMode.Mono && nextStereoMode == StereoMode.Mono) {
-                                    nextStereoMode = detectedMode
                                 }
 
                                 if (nextVideoFormat != currentState.videoFormat ||
@@ -1203,17 +1468,25 @@ class VideoPlayerViewModel(
     fun getExoPlayer(): ExoPlayer? = exoPlayer
 
     fun play() {
+        finishSeekPreviewSession(commit = false, restorePlayback = false)
         exoPlayer?.play()
         scheduleControlsAutoHideIfNeeded()
     }
 
     fun pause() {
+        finishSeekPreviewSession(commit = false, restorePlayback = false)
         exoPlayer?.pause()
         scheduleControlsAutoHideIfNeeded()
     }
 
     fun seekTo(positionMs: Long) {
+        val resumePlayback = finishSeekPreviewSession(commit = false, restorePlayback = false)
         exoPlayer?.seekTo(positionMs)
+        when (resumePlayback) {
+            true -> exoPlayer?.play()
+            false -> exoPlayer?.pause()
+            null -> Unit
+        }
         scheduleControlsAutoHideIfNeeded()
     }
 
@@ -1265,6 +1538,7 @@ class VideoPlayerViewModel(
     }
 
     fun skipForward(ms: Long = 10000) {
+        val resumePlayback = finishSeekPreviewSession(commit = false, restorePlayback = false)
         exoPlayer?.let { player ->
             val duration = player.duration
             val upperBound = if (duration > 0) duration else Long.MAX_VALUE
@@ -1272,14 +1546,25 @@ class VideoPlayerViewModel(
             val newPosition = (currentPosition + ms).coerceAtMost(upperBound)
             player.seekTo(newPosition)
         }
+        when (resumePlayback) {
+            true -> exoPlayer?.play()
+            false -> exoPlayer?.pause()
+            null -> Unit
+        }
         scheduleControlsAutoHideIfNeeded()
     }
 
     fun skipBackward(ms: Long = 10000) {
+        val resumePlayback = finishSeekPreviewSession(commit = false, restorePlayback = false)
         exoPlayer?.let { player ->
             val currentPosition = player.currentPosition.coerceAtLeast(0L)
             val newPosition = (currentPosition - ms).coerceAtLeast(0L)
             player.seekTo(newPosition)
+        }
+        when (resumePlayback) {
+            true -> exoPlayer?.play()
+            false -> exoPlayer?.pause()
+            null -> Unit
         }
         scheduleControlsAutoHideIfNeeded()
     }
@@ -1299,6 +1584,7 @@ class VideoPlayerViewModel(
         pendingInitializationPath = null
         positionTrackingJob?.cancel()
         positionTrackingJob = null
+        finishSeekPreviewSession(commit = false, restorePlayback = false)
 
         // Wait for any pending format/stereo mode saves before releasing.
         pendingSaveJob?.join()
@@ -1325,19 +1611,23 @@ class VideoPlayerViewModel(
         cancelSeekRepeat()
         cancelVolumeRepeat()
         cancelPlaybackHorizontalRepeat()
+        cancelThumbnailPreview()
         cancelControlsAutoHide()
+        resetControlsInputLock()
         lastPlaybackHorizontalDirection = 0
         lastPlaybackHorizontalScrollAtMs = 0L
 
         if (resetUiState) {
             unregisterVolumeObserver()
             audioManager = null
-            _state.value = VideoPlayerState()
+            _state.value = VideoPlayerState(seekPreviewMode = initialSeekPreviewMode)
             currentVideoId = null
             pendingVideoFormatToPersist = null
             pendingStereoModeToPersist = null
             autoDisplayInferencePending = false
             hasDispatchedNavigateBack = false
+            seekPreviewResumePlayback = false
+            seekPreviewShowControls = false
             resetControllerAxisState()
         }
     }

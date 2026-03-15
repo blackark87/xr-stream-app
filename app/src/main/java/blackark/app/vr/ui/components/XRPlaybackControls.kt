@@ -37,6 +37,7 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -49,16 +50,23 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.media3.common.util.UnstableApi
+import blackark.app.vr.ui.viewmodel.PlaybackPreviewMode
 import blackark.app.vr.ui.viewmodel.PlaybackMenu
 import blackark.app.vr.ui.viewmodel.StereoMode
 import blackark.app.vr.ui.viewmodel.VideoFormat
 import blackark.app.vr.ui.viewmodel.VideoPlayerState
 import blackark.app.vr.ui.viewmodel.VideoPlayerViewModel
+import blackark.app.vr.utils.ThumbnailImageLoaderProvider
+import coil3.compose.AsyncImage
+import coil3.request.CachePolicy
+import coil3.request.ImageRequest
 import kotlin.math.roundToInt
 
 @OptIn(UnstableApi::class)
@@ -70,7 +78,9 @@ fun XRPlaybackControls(
 ) {
     // Scrubbing state.
     var isScrubbing by remember { mutableStateOf(false) }
+    var isVolumeScrubbing by remember { mutableStateOf(false) }
     var sliderPosition by remember { mutableFloatStateOf(0f) }
+    val context = LocalContext.current
 
     val colors = MaterialTheme.colorScheme
     val accentStrong = colors.primary
@@ -89,6 +99,17 @@ fun XRPlaybackControls(
     LaunchedEffect(playerState.currentPosition, playerState.duration) {
         if (!isScrubbing && playerState.duration > 0) {
             sliderPosition = playerState.currentPosition.toFloat() / playerState.duration.toFloat()
+        }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            if (isScrubbing) {
+                videoPlayerViewModel.endControlsInputLock()
+            }
+            if (isVolumeScrubbing) {
+                videoPlayerViewModel.endControlsInputLock()
+            }
         }
     }
 
@@ -176,6 +197,9 @@ fun XRPlaybackControls(
                 Slider(
                     value = sliderPosition,
                     onValueChange = { newProgress ->
+                        if (!isScrubbing) {
+                            videoPlayerViewModel.beginControlsInputLock()
+                        }
                         isScrubbing = true
                         sliderPosition = newProgress
                     },
@@ -183,6 +207,7 @@ fun XRPlaybackControls(
                         val newPosition = (sliderPosition * playerState.duration).toLong()
                         videoPlayerViewModel.seekTo(newPosition)
                         isScrubbing = false
+                        videoPlayerViewModel.endControlsInputLock()
                     },
                     colors = SliderDefaults.colors(
                         thumbColor = accentStrong,
@@ -216,6 +241,21 @@ fun XRPlaybackControls(
                         color = textMuted,
                     )
                 }
+            }
+
+            if (
+                playerState.seekPreviewActive &&
+                playerState.seekPreviewMode == PlaybackPreviewMode.ThumbnailOverlay
+            ) {
+                PlaybackSeekPreviewCard(
+                    targetPositionMs = playerState.seekPreviewTargetPositionMs,
+                    previewPath = playerState.seekPreviewThumbnailPath,
+                    containerColor = sectionSurface,
+                    borderColor = sectionBorder,
+                    textColor = textStrong,
+                    secondaryTextColor = textMuted,
+                    context = context,
+                )
             }
 
             // Main controls.
@@ -382,7 +422,12 @@ fun XRPlaybackControls(
             if (playerState.activePlaybackMenu == PlaybackMenu.Display) {
                 PlaybackMenuCard(
                     title = "Video Format",
-                    subtitle = "Switch the projection and stereo mode",
+                    subtitle =
+                        if (playerState.videoFormat == VideoFormat.Format2D) {
+                            "Switch the projection"
+                        } else {
+                            "Switch the projection and stereo mode"
+                        },
                     containerColor = panelBottom,
                     borderColor = sectionBorder,
                 ) {
@@ -407,33 +452,35 @@ fun XRPlaybackControls(
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(10.dp))
+                    if (playerState.videoFormat != VideoFormat.Format2D) {
+                        Spacer(modifier = Modifier.height(10.dp))
 
-                    Text(
-                        text = "Stereo Mode",
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.SemiBold,
-                        color = textMuted,
-                    )
+                        Text(
+                            text = "Stereo Mode",
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.SemiBold,
+                            color = textMuted,
+                        )
 
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        StereoMode.entries.forEach { mode ->
-                            PlaybackOptionButton(
-                                text = prettyStereoMode(mode),
-                                selected = playerState.stereoMode == mode,
-                                onClick = {
-                                    videoPlayerViewModel.setStereoMode(mode)
-                                },
-                                modifier = Modifier.weight(1f),
-                                selectedContainerColor = accentStrong,
-                                selectedContentColor = onAccent,
-                                idleContainerColor = chipIdle,
-                                idleContentColor = textStrong,
-                                borderColor = sectionBorder,
-                            )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            StereoMode.entries.forEach { mode ->
+                                PlaybackOptionButton(
+                                    text = prettyStereoMode(mode),
+                                    selected = playerState.stereoMode == mode,
+                                    onClick = {
+                                        videoPlayerViewModel.setStereoMode(mode)
+                                    },
+                                    modifier = Modifier.weight(1f),
+                                    selectedContainerColor = accentStrong,
+                                    selectedContentColor = onAccent,
+                                    idleContainerColor = chipIdle,
+                                    idleContentColor = textStrong,
+                                    borderColor = sectionBorder,
+                                )
+                            }
                         }
                     }
                 }
@@ -469,7 +516,15 @@ fun XRPlaybackControls(
                     Slider(
                         value = playerState.volume,
                         onValueChange = {
+                            if (!isVolumeScrubbing) {
+                                videoPlayerViewModel.beginControlsInputLock()
+                            }
+                            isVolumeScrubbing = true
                             videoPlayerViewModel.setVolume(it)
+                        },
+                        onValueChangeFinished = {
+                            isVolumeScrubbing = false
+                            videoPlayerViewModel.endControlsInputLock()
                         },
                         colors = SliderDefaults.colors(
                             thumbColor = accentStrong,
@@ -587,6 +642,70 @@ private fun PlaybackMenuCard(
             color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f),
         )
         content()
+    }
+}
+
+@Composable
+private fun PlaybackSeekPreviewCard(
+    targetPositionMs: Long,
+    previewPath: String?,
+    containerColor: Color,
+    borderColor: Color,
+    textColor: Color,
+    secondaryTextColor: Color,
+    context: android.content.Context,
+) {
+    val imageLoader = remember(context) { ThumbnailImageLoaderProvider.get(context) }
+    val previewRequest = remember(previewPath, targetPositionMs, context) {
+        previewPath?.let { path ->
+            ImageRequest.Builder(context)
+                .data(path)
+                .memoryCachePolicy(CachePolicy.DISABLED)
+                .diskCachePolicy(CachePolicy.DISABLED)
+                .build()
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(containerColor)
+            .border(1.dp, borderColor, RoundedCornerShape(18.dp))
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text(
+            text = formatTime(targetPositionMs),
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = textColor,
+        )
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(164.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.82f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (previewRequest != null) {
+                AsyncImage(
+                    model = previewRequest,
+                    imageLoader = imageLoader,
+                    contentDescription = null,
+                    modifier = Modifier.fillMaxWidth(),
+                    contentScale = ContentScale.Fit,
+                )
+            } else {
+                Text(
+                    text = formatTime(targetPositionMs),
+                    color = secondaryTextColor,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+        }
     }
 }
 

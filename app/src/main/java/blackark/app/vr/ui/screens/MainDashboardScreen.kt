@@ -160,9 +160,11 @@ import blackark.app.vr.ui.theme.TextSecondary
 import blackark.app.vr.ui.theme.TextTertiary
 import blackark.app.vr.ui.viewmodel.FileBrowserViewMode
 import blackark.app.vr.ui.viewmodel.MainDashboardViewModel
+import blackark.app.vr.ui.viewmodel.PlaybackPreviewMode
 import blackark.app.vr.utils.JvrCastMetadata
 import blackark.app.vr.utils.JvrLibraryMetadataProvider
 import blackark.app.vr.utils.JvrMovieMetadata
+import blackark.app.vr.utils.PlaybackPreviewModeStore
 import blackark.app.vr.utils.ServerCredentialAutofillStore
 import blackark.app.vr.utils.ThumbnailImageLoaderProvider
 import blackark.app.vr.utils.VideoThumbnailFetcher
@@ -1172,6 +1174,8 @@ private fun SourceSwitcherButton(
 @Composable
 private fun SettingsPanel(
     versionLabel: String,
+    playbackPreviewMode: PlaybackPreviewMode,
+    onPlaybackPreviewModeChange: (PlaybackPreviewMode) -> Unit,
     activeAction: SettingsAction?,
     onClearArtworkCache: () -> Unit,
     onClearRecentHistory: () -> Unit,
@@ -1202,6 +1206,26 @@ private fun SettingsPanel(
             SettingsValueRow(
                 title = stringResource(R.string.version),
                 value = versionLabel,
+            )
+            SettingsChoiceRow(
+                title = stringResource(R.string.seek_preview_mode_title),
+                description = stringResource(R.string.seek_preview_mode_description),
+                value =
+                    when (playbackPreviewMode) {
+                        PlaybackPreviewMode.PlayerFrame ->
+                            stringResource(R.string.seek_preview_mode_player_frame)
+
+                        PlaybackPreviewMode.ThumbnailOverlay ->
+                            stringResource(R.string.seek_preview_mode_thumbnail_overlay)
+                    },
+                options =
+                    listOf(
+                        PlaybackPreviewMode.PlayerFrame to
+                                stringResource(R.string.seek_preview_mode_player_frame),
+                        PlaybackPreviewMode.ThumbnailOverlay to
+                                stringResource(R.string.seek_preview_mode_thumbnail_overlay),
+                    ),
+                onOptionSelected = onPlaybackPreviewModeChange,
             )
             SettingsActionRow(
                 title = stringResource(R.string.clear_thumbnails_posters),
@@ -1306,6 +1330,74 @@ private fun SettingsActionRow(
     }
 }
 
+@Composable
+private fun SettingsChoiceRow(
+    title: String,
+    description: String,
+    value: String,
+    options: List<Pair<PlaybackPreviewMode, String>>,
+    onOptionSelected: (PlaybackPreviewMode) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+
+    Column(
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleMedium,
+                color = TextPrimary,
+                modifier = Modifier.weight(1f),
+            )
+            Spacer(modifier = Modifier.width(16.dp))
+            Box {
+                Button(
+                    onClick = { expanded = true },
+                    colors = ButtonDefaults.buttonColors(containerColor = DividerGray),
+                    border = BorderStroke(1.dp, DividerGray.copy(alpha = 0.82f)),
+                ) {
+                    Text(
+                        text = value,
+                        color = TextPrimary,
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Icon(
+                        imageVector = Icons.Filled.KeyboardArrowDown,
+                        contentDescription = null,
+                        tint = TextPrimary,
+                    )
+                }
+
+                DropdownMenu(
+                    expanded = expanded,
+                    onDismissRequest = { expanded = false },
+                ) {
+                    options.forEach { (mode, label) ->
+                        DropdownMenuItem(
+                            text = { Text(label) },
+                            onClick = {
+                                expanded = false
+                                onOptionSelected(mode)
+                            },
+                        )
+                    }
+                }
+            }
+        }
+
+        Text(
+            text = description,
+            style = MaterialTheme.typography.bodySmall,
+            color = TextTertiary,
+        )
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainDashboardScreen(
@@ -1320,6 +1412,9 @@ fun MainDashboardScreen(
     val favorites by viewModel.favorites.collectAsStateWithLifecycle()
     val recentVideos by viewModel.recentVideos.collectAsStateWithLifecycle()
     val favoritePaths = remember(favorites) { favorites.mapTo(linkedSetOf()) { it.filePath } }
+    var playbackPreviewMode by remember(context) {
+        mutableStateOf(PlaybackPreviewModeStore.load(context))
+    }
 
     var showAddServerDialog by remember { mutableStateOf(false) }
     var serverToEdit by remember { mutableStateOf<SavedServer?>(null) }
@@ -1511,6 +1606,11 @@ fun MainDashboardScreen(
                         } else {
                             SettingsPanel(
                                 versionLabel = appVersionLabel,
+                                playbackPreviewMode = playbackPreviewMode,
+                                onPlaybackPreviewModeChange = { mode ->
+                                    playbackPreviewMode = mode
+                                    PlaybackPreviewModeStore.save(context, mode)
+                                },
                                 activeAction = activeSettingsAction,
                                 onClearArtworkCache = {
                                     pendingSettingsAction = SettingsAction.ClearArtworkCache
@@ -1560,6 +1660,11 @@ fun MainDashboardScreen(
                             if (compactConnectedTab == ConnectedDashboardTab.Settings) {
                                 SettingsPanel(
                                     versionLabel = appVersionLabel,
+                                    playbackPreviewMode = playbackPreviewMode,
+                                    onPlaybackPreviewModeChange = { mode ->
+                                        playbackPreviewMode = mode
+                                        PlaybackPreviewModeStore.save(context, mode)
+                                    },
                                     activeAction = activeSettingsAction,
                                     onClearArtworkCache = {
                                         pendingSettingsAction = SettingsAction.ClearArtworkCache

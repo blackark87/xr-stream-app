@@ -94,9 +94,11 @@ import blackark.app.vr.ui.viewmodel.VideoFormat
 import blackark.app.vr.ui.viewmodel.VideoPlayerState
 import blackark.app.vr.ui.viewmodel.VideoPlayerViewModel
 import blackark.app.vr.ui.viewmodel.VideoPlayerViewModelFactory
+import blackark.app.vr.utils.PlaybackPreviewModeStore
 import kotlinx.coroutines.delay
 
 private const val TAG = "VideoPlayerScreen"
+private val IMMERSIVE_STEREO_CONTROLS_LIFT = 160.dp
 
 private tailrec fun Context.findActivity(): Activity? =
     when (this) {
@@ -129,6 +131,8 @@ private fun rememberPlaybackScrollState(
 @Composable
 private fun PlaybackScrollInputOverlay(
     showControls: Boolean,
+    controlsInputLocked: Boolean,
+    seekPreviewActive: Boolean,
     onToggleControls: () -> Unit,
     onKeyUp: ((android.view.KeyEvent) -> Boolean)? = null,
     onHorizontalScrollDelta: (Float) -> Unit = {},
@@ -138,6 +142,7 @@ private fun PlaybackScrollInputOverlay(
     controlsModifier: Modifier = Modifier,
     controlsContent: @Composable (() -> Unit)? = null,
 ) {
+    val inputLocked = controlsInputLocked || seekPreviewActive
     val verticalScrollState = rememberPlaybackScrollState(onDelta = onVerticalScrollDelta)
     val horizontalScrollState = rememberPlaybackScrollState(onDelta = onHorizontalScrollDelta)
     val focusRequester = remember { FocusRequester() }
@@ -180,12 +185,15 @@ private fun PlaybackScrollInputOverlay(
             .scrollable(
                 state = verticalScrollState,
                 orientation = Orientation.Vertical,
+                enabled = !inputLocked,
             )
             .scrollable(
                 state = horizontalScrollState,
                 orientation = Orientation.Horizontal,
+                enabled = !inputLocked,
             )
             .clickable(
+                enabled = !inputLocked,
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
             ) {
@@ -242,11 +250,14 @@ fun VideoPlayerScreen(
     }
     val videoDisplaySettingsRepository =
         remember { VideoDisplaySettingsRepository(database.videoDisplaySettingsDao()) }
+    val initialSeekPreviewMode =
+        remember(context.applicationContext) { PlaybackPreviewModeStore.load(context) }
 
     val videoPlayerViewModel: VideoPlayerViewModel = viewModel(
         factory = VideoPlayerViewModelFactory(
             videoRepository,
             videoDisplaySettingsRepository,
+            initialSeekPreviewMode,
         ),
     )
 
@@ -437,7 +448,12 @@ fun SpatialVideoPlayerContent(
     }
 
     val toggleInteractionPolicy =
-        if (isSurfaceReady && !showControls) {
+        if (
+            isSurfaceReady &&
+            !showControls &&
+            !playerState.seekPreviewActive &&
+            !playerState.controlsInputLocked
+        ) {
             clickInteractionPolicy {
                 videoPlayerViewModel.toggleControls()
             }
@@ -493,12 +509,18 @@ fun SpatialVideoPlayerContent(
                     onKeyUp = { event ->
                         videoPlayerViewModel.dispatchPlaybackKeyEvent(event)
                     },
+                    controlsInputLocked = playerState.controlsInputLocked,
+                    seekPreviewActive = playerState.seekPreviewActive,
                     controlsAlignment = Alignment.BottomCenter,
                     controlsPadding =
                         if (playerState.stereoMode == blackark.app.vr.ui.viewmodel.StereoMode.Mono) {
                             PaddingValues(start = 24.dp, end = 24.dp, bottom = 36.dp)
                         } else {
-                            PaddingValues(start = 24.dp, end = 24.dp, bottom = 64.dp)
+                            PaddingValues(
+                                start = 24.dp,
+                                end = 24.dp,
+                                bottom = 64.dp + IMMERSIVE_STEREO_CONTROLS_LIFT,
+                            )
                         },
                     controlsModifier = immersiveControlsSizeModifier,
                     onToggleControls = { videoPlayerViewModel.toggleControls() },
@@ -642,6 +664,8 @@ private fun Standard2DPlayer(
                     ) {
                         PlaybackScrollInputOverlay(
                             showControls = showControls,
+                            controlsInputLocked = playerState.controlsInputLocked,
+                            seekPreviewActive = playerState.seekPreviewActive,
                             onKeyUp = { event ->
                                 videoPlayerViewModel.dispatchPlaybackKeyEvent(event)
                             },

@@ -65,6 +65,10 @@
     <string name="share_name_optional">Share Name (Optional)</string>
     <string name="share_name_example">e.g., Videos</string>
     <string name="save">Save</string>
+    <string name="seek_preview_mode_description">Choose how thumb stick seek preview behaves. Changes apply the next time playback starts.</string>
+    <string name="seek_preview_mode_player_frame">Player frame</string>
+    <string name="seek_preview_mode_thumbnail_overlay">Thumbnail overlay</string>
+    <string name="seek_preview_mode_title">Seek preview mode</string>
     <string name="settings">Settings</string>
     <string name="settings_action_clear">Clear</string>
     <string name="settings_action_clearing">Clearing...</string>

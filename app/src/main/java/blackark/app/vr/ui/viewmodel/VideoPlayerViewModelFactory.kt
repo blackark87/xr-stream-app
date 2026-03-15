@@ -8,6 +8,7 @@ import blackark.app.vr.data.repository.VideoRepository
 class VideoPlayerViewModelFactory(
     private val videoRepository: VideoRepository,
     private val videoDisplaySettingsRepository: VideoDisplaySettingsRepository,
+    private val initialSeekPreviewMode: PlaybackPreviewMode,
 ) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(VideoPlayerViewModel::class.java)) {
@@ -15,6 +16,7 @@ class VideoPlayerViewModelFactory(
             return VideoPlayerViewModel(
                 videoRepository,
                 videoDisplaySettingsRepository,
+                initialSeekPreviewMode,
             ) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")
