@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -41,6 +42,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -50,11 +52,15 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.media3.common.util.UnstableApi
 import blackark.app.vr.ui.viewmodel.PlaybackMenu
@@ -80,7 +86,13 @@ fun XRPlaybackControls(
     var isScrubbing by remember { mutableStateOf(false) }
     var isVolumeScrubbing by remember { mutableStateOf(false) }
     var sliderPosition by remember { mutableFloatStateOf(0f) }
+    var controlsRootLeftPx by remember { mutableFloatStateOf(0f) }
+    var controlsRootTopPx by remember { mutableFloatStateOf(0f) }
+    var progressSectionLeftPx by remember { mutableIntStateOf(0) }
+    var progressSectionTopPx by remember { mutableIntStateOf(0) }
+    var progressSectionWidthPx by remember { mutableIntStateOf(0) }
     val context = LocalContext.current
+    val density = LocalDensity.current
 
     val colors = MaterialTheme.colorScheme
     val accentStrong = colors.primary
@@ -116,8 +128,57 @@ fun XRPlaybackControls(
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 22.dp, vertical = 20.dp),
+            .padding(horizontal = 22.dp, vertical = 20.dp)
+            .onGloballyPositioned { coordinates ->
+                val position = coordinates.positionInRoot()
+                controlsRootLeftPx = position.x
+                controlsRootTopPx = position.y
+            },
     ) {
+        val previewCardWidthPx = with(density) { SeekPreviewOverlayWidth.roundToPx() }
+        val previewCardHeightPx = with(density) { SeekPreviewOverlayEstimatedHeight.roundToPx() }
+        val previewCardGapPx = with(density) { SeekPreviewOverlayGap.roundToPx() }
+        val previewTrackInsetPx = with(density) { 14.dp.roundToPx() }
+        val previewFraction =
+            if (playerState.duration > 0L) {
+                (playerState.seekPreviewTargetPositionMs.toFloat() / playerState.duration.toFloat())
+                    .coerceIn(0f, 1f)
+            } else {
+                0f
+            }
+        val previewTrackWidthPx =
+            (progressSectionWidthPx - (previewTrackInsetPx * 2)).coerceAtLeast(0)
+        val previewThumbCenterPx =
+            progressSectionLeftPx + previewTrackInsetPx +
+                (previewTrackWidthPx * previewFraction).roundToInt()
+        val previewMinX = progressSectionLeftPx
+        val previewMaxX = (progressSectionLeftPx + progressSectionWidthPx - previewCardWidthPx)
+            .coerceAtLeast(previewMinX)
+        val previewOffsetX =
+            (previewThumbCenterPx - (previewCardWidthPx / 2)).coerceIn(previewMinX, previewMaxX)
+        val previewOffsetY =
+            (progressSectionTopPx - previewCardHeightPx - previewCardGapPx).coerceAtLeast(0)
+
+        if (
+            playerState.seekPreviewActive &&
+            playerState.seekPreviewMode == PlaybackPreviewMode.ThumbnailOverlay
+        ) {
+            PlaybackSeekPreviewCard(
+                targetPositionMs = playerState.seekPreviewTargetPositionMs,
+                previewPath = playerState.seekPreviewThumbnailPath,
+                containerColor = sectionSurface,
+                borderColor = sectionBorder,
+                textColor = textStrong,
+                secondaryTextColor = textMuted,
+                context = context,
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .offset {
+                        IntOffset(previewOffsetX, previewOffsetY)
+                    },
+            )
+        }
+
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -186,76 +247,75 @@ fun XRPlaybackControls(
             }
 
             // Progress bar.
-            Column(
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(18.dp))
-                    .background(sectionSurface)
-                    .border(1.dp, sectionBorder.copy(alpha = 0.7f), RoundedCornerShape(18.dp))
-                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                    .onGloballyPositioned { coordinates ->
+                        val position = coordinates.positionInRoot()
+                        progressSectionLeftPx = (position.x - controlsRootLeftPx).roundToInt()
+                        progressSectionTopPx = (position.y - controlsRootTopPx).roundToInt()
+                        progressSectionWidthPx = coordinates.size.width
+                    },
             ) {
-                Slider(
-                    value = sliderPosition,
-                    onValueChange = { newProgress ->
-                        if (!isScrubbing) {
-                            videoPlayerViewModel.beginControlsInputLock()
-                        }
-                        isScrubbing = true
-                        sliderPosition = newProgress
-                    },
-                    onValueChangeFinished = {
-                        val newPosition = (sliderPosition * playerState.duration).toLong()
-                        videoPlayerViewModel.seekTo(newPosition)
-                        isScrubbing = false
-                        videoPlayerViewModel.endControlsInputLock()
-                    },
-                    colors = SliderDefaults.colors(
-                        thumbColor = accentStrong,
-                        activeTrackColor = accentStrong,
-                        inactiveTrackColor = accentSoft,
-                    ),
-                    modifier = Modifier.fillMaxWidth(),
-                )
-
-                Row(
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 2.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(sectionSurface)
+                        .border(1.dp, sectionBorder.copy(alpha = 0.7f), RoundedCornerShape(18.dp))
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
                 ) {
-                    Text(
-                        text = formatTime(
-                            if (isScrubbing) {
-                                (sliderPosition * playerState.duration).toLong()
-                            } else {
-                                playerState.currentPosition
-                            },
+                    Slider(
+                        value = sliderPosition,
+                        onValueChange = { newProgress ->
+                            if (!isScrubbing) {
+                                videoPlayerViewModel.beginControlsInputLock()
+                                videoPlayerViewModel.beginSeekPreview()
+                            }
+                            isScrubbing = true
+                            sliderPosition = newProgress
+                            val newPosition = (newProgress * playerState.duration).toLong()
+                            videoPlayerViewModel.updateSeekPreviewPosition(newPosition)
+                        },
+                        onValueChangeFinished = {
+                            val newPosition = (sliderPosition * playerState.duration).toLong()
+                            videoPlayerViewModel.commitSeekPreview(newPosition)
+                            isScrubbing = false
+                            videoPlayerViewModel.endControlsInputLock()
+                        },
+                        colors = SliderDefaults.colors(
+                            thumbColor = accentStrong,
+                            activeTrackColor = accentStrong,
+                            inactiveTrackColor = accentSoft,
                         ),
-                        style = MaterialTheme.typography.labelLarge,
-                        color = textStrong,
-                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.fillMaxWidth(),
                     )
-                    Text(
-                        text = formatTime(playerState.duration),
-                        style = MaterialTheme.typography.labelLarge,
-                        color = textMuted,
-                    )
-                }
-            }
 
-            if (
-                playerState.seekPreviewActive &&
-                playerState.seekPreviewMode == PlaybackPreviewMode.ThumbnailOverlay
-            ) {
-                PlaybackSeekPreviewCard(
-                    targetPositionMs = playerState.seekPreviewTargetPositionMs,
-                    previewPath = playerState.seekPreviewThumbnailPath,
-                    containerColor = sectionSurface,
-                    borderColor = sectionBorder,
-                    textColor = textStrong,
-                    secondaryTextColor = textMuted,
-                    context = context,
-                )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 2.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Text(
+                            text = formatTime(
+                                if (isScrubbing) {
+                                    (sliderPosition * playerState.duration).toLong()
+                                } else {
+                                    playerState.currentPosition
+                                },
+                            ),
+                            style = MaterialTheme.typography.labelLarge,
+                            color = textStrong,
+                            fontWeight = FontWeight.Medium,
+                        )
+                        Text(
+                            text = formatTime(playerState.duration),
+                            style = MaterialTheme.typography.labelLarge,
+                            color = textMuted,
+                        )
+                    }
+                }
             }
 
             // Main controls.
@@ -654,6 +714,7 @@ private fun PlaybackSeekPreviewCard(
     textColor: Color,
     secondaryTextColor: Color,
     context: android.content.Context,
+    modifier: Modifier = Modifier,
 ) {
     val imageLoader = remember(context) { ThumbnailImageLoaderProvider.get(context) }
     val previewRequest = remember(previewPath, targetPositionMs, context) {
@@ -667,17 +728,17 @@ private fun PlaybackSeekPreviewCard(
     }
 
     Column(
-        modifier = Modifier
-            .fillMaxWidth()
+        modifier = modifier
+            .width(SeekPreviewOverlayWidth)
             .clip(RoundedCornerShape(18.dp))
             .background(containerColor)
             .border(1.dp, borderColor, RoundedCornerShape(18.dp))
-            .padding(14.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Text(
             text = formatTime(targetPositionMs),
-            style = MaterialTheme.typography.titleMedium,
+            style = MaterialTheme.typography.labelLarge,
             fontWeight = FontWeight.SemiBold,
             color = textColor,
         )
@@ -685,7 +746,7 @@ private fun PlaybackSeekPreviewCard(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(164.dp)
+                .height(SeekPreviewOverlayThumbnailHeight)
                 .clip(RoundedCornerShape(14.dp))
                 .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.82f)),
             contentAlignment = Alignment.Center,
@@ -696,7 +757,7 @@ private fun PlaybackSeekPreviewCard(
                     imageLoader = imageLoader,
                     contentDescription = null,
                     modifier = Modifier.fillMaxWidth(),
-                    contentScale = ContentScale.Fit,
+                    contentScale = ContentScale.Crop,
                 )
             } else {
                 Text(
@@ -708,6 +769,11 @@ private fun PlaybackSeekPreviewCard(
         }
     }
 }
+
+private val SeekPreviewOverlayWidth = 228.dp
+private val SeekPreviewOverlayThumbnailHeight = 128.dp
+private val SeekPreviewOverlayEstimatedHeight = 184.dp
+private val SeekPreviewOverlayGap = 12.dp
 
 @Composable
 private fun PlaybackOptionButton(

@@ -430,7 +430,7 @@ class VideoPlayerViewModel(
         thumbnailPreviewJob = null
     }
 
-    private fun updateSeekPreviewTarget(direction: Int) {
+    private fun updateSeekPreviewTargetByStep(direction: Int) {
         beginSeekPreviewSessionIfNeeded()
         val currentState = _state.value
         if (!currentState.seekPreviewActive) {
@@ -439,6 +439,35 @@ class VideoPlayerViewModel(
 
         val delta = if (direction > 0) controllerSeekStepMs else -controllerSeekStepMs
         val newTarget = clampSeekPosition(currentState.seekPreviewTargetPositionMs + delta)
+        if (newTarget == currentState.seekPreviewTargetPositionMs) {
+            return
+        }
+
+        _state.value = currentState.copy(
+            seekPreviewTargetPositionMs = newTarget,
+            showControls =
+                if (currentState.seekPreviewMode == PlaybackPreviewMode.ThumbnailOverlay) {
+                    true
+                } else {
+                    currentState.showControls
+                },
+        )
+
+        when (currentState.seekPreviewMode) {
+            PlaybackPreviewMode.PlayerFrame -> exoPlayer?.seekTo(newTarget)
+            PlaybackPreviewMode.ThumbnailOverlay -> enqueueThumbnailPreview(newTarget)
+        }
+        cancelControlsAutoHide()
+    }
+
+    private fun updateSeekPreviewTargetPosition(positionMs: Long) {
+        beginSeekPreviewSessionIfNeeded()
+        val currentState = _state.value
+        if (!currentState.seekPreviewActive) {
+            return
+        }
+
+        val newTarget = clampSeekPosition(positionMs)
         if (newTarget == currentState.seekPreviewTargetPositionMs) {
             return
         }
@@ -703,7 +732,20 @@ class VideoPlayerViewModel(
     }
 
     private fun applySeekStep(direction: Int) {
-        updateSeekPreviewTarget(direction)
+        updateSeekPreviewTargetByStep(direction)
+    }
+
+    fun beginSeekPreview() {
+        beginSeekPreviewSessionIfNeeded()
+    }
+
+    fun updateSeekPreviewPosition(positionMs: Long) {
+        updateSeekPreviewTargetPosition(positionMs)
+    }
+
+    fun commitSeekPreview(positionMs: Long? = null) {
+        positionMs?.let { updateSeekPreviewTargetPosition(it) }
+        finishSeekPreviewSession(commit = true, restorePlayback = true)
     }
 
     private fun startSeekRepeat(direction: Int) {
