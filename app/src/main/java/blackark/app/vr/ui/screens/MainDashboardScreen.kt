@@ -1885,6 +1885,7 @@ fun MainDashboardScreen(
                                             onStudioSelected = viewModel::selectAvStudio,
                                             onCastToggled = viewModel::toggleAvCast,
                                             onReleaseDateSelected = viewModel::selectAvReleaseDate,
+                                            onVrFilterSelected = viewModel::selectAvVrFilter,
                                             onClearFilters = viewModel::clearAvFilters,
                                             onPreviousMonth = viewModel::showPreviousAvMonth,
                                             onNextMonth = viewModel::showNextAvMonth,

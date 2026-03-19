@@ -8,6 +8,10 @@ import blackark.app.vr.utils.extractVirtualGroupPart
 import java.time.LocalDate
 
 const val AV_CAST_FILTER_NONE_ID = "__none__"
+private val avVrPathPattern = Regex("(^|/)av/vr(/|$)", RegexOption.IGNORE_CASE)
+private val avVrStereoPattern = Regex(
+    "(?i)(?:\\bVR\\b|\\b8KVR\\b|\\bVR8K\\b|(?:^|[ _.\\-])SBS(?:$|[ _.\\-])|(?:^|[ _.\\-])TB(?:$|[ _.\\-]))"
+)
 
 data class AvLibraryWork(
     val asset: AvLibraryAsset,
@@ -23,12 +27,11 @@ data class AvLibraryWork(
             ?: asset.normalizedCode
 
     val displayPosterUrl: String?
-        get() = metadata?.posterUrl ?: asset.cachedPosterUrl
+        get() = metadata?.posterUrl?.takeIf { it.isNotBlank() }
+            ?: asset.cachedPosterUrl?.takeIf { it.isNotBlank() }
 
     val fallbackThumbnailPath: String?
-        get() = representativePath?.takeIf {
-            displayPosterUrl.isNullOrBlank() && parts.size > 1
-        }
+        get() = representativePath?.takeIf { displayPosterUrl.isNullOrBlank() }
 
     val studio: String?
         get() = metadata?.studio ?: asset.cachedStudio
@@ -55,6 +58,16 @@ data class AvLibraryWork(
 
     val representativeFileName: String?
         get() = representativePart?.fileName ?: asset.representativeFileName
+
+    val isVrContent: Boolean
+        get() {
+            val normalizedRepresentativePath = representativePath.orEmpty().replace('\\', '/')
+            val normalizedRepresentativeFileName = representativeFileName.orEmpty()
+
+            return asset.metadataSource.equals("jvr", ignoreCase = true) ||
+                    avVrPathPattern.containsMatchIn(normalizedRepresentativePath) ||
+                    avVrStereoPattern.containsMatchIn(normalizedRepresentativeFileName)
+        }
 }
 
 data class AvStudioFilterOption(

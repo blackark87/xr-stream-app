@@ -88,6 +88,7 @@ import blackark.app.vr.ui.theme.TextSecondary
 import blackark.app.vr.ui.theme.TextTertiary
 import blackark.app.vr.ui.viewmodel.AvFilterFamily
 import blackark.app.vr.ui.viewmodel.AvLibraryState
+import blackark.app.vr.ui.viewmodel.AvVrFilterOption
 import blackark.app.vr.utils.JvrCastMetadata
 import blackark.app.vr.utils.JvrMovieMetadata
 import blackark.app.vr.utils.VideoThumbnailFetcher
@@ -110,6 +111,7 @@ fun AvLibraryPanel(
     onStudioSelected: (String?) -> Unit,
     onCastToggled: (String) -> Unit,
     onReleaseDateSelected: (LocalDate?) -> Unit,
+    onVrFilterSelected: (AvVrFilterOption) -> Unit,
     onClearFilters: () -> Unit,
     onPreviousMonth: () -> Unit,
     onNextMonth: () -> Unit,
@@ -207,6 +209,7 @@ fun AvLibraryPanel(
                         onStudioSelected = onStudioSelected,
                         onCastToggled = onCastToggled,
                         onReleaseDateSelected = onReleaseDateSelected,
+                        onVrFilterSelected = onVrFilterSelected,
                         onClearFilters = onClearFilters,
                         onPreviousMonth = onPreviousMonth,
                         onNextMonth = onNextMonth,
@@ -329,6 +332,7 @@ private fun AvFilterSection(
     onStudioSelected: (String?) -> Unit,
     onCastToggled: (String) -> Unit,
     onReleaseDateSelected: (LocalDate?) -> Unit,
+    onVrFilterSelected: (AvVrFilterOption) -> Unit,
     onClearFilters: () -> Unit,
     onPreviousMonth: () -> Unit,
     onNextMonth: () -> Unit,
@@ -355,6 +359,11 @@ private fun AvFilterSection(
             selectedStudio = filters.selectedStudio,
             onStudioSelected = onStudioSelected,
             modifier = Modifier.widthIn(min = 136.dp, max = 200.dp),
+        )
+        VrFilterTrigger(
+            selectedVrFilter = filters.selectedVrFilter,
+            onVrFilterSelected = onVrFilterSelected,
+            modifier = Modifier.widthIn(min = 124.dp, max = 164.dp),
         )
         FilterTriggerButton(
             label = if (filters.selectedCastIds.isEmpty()) {
@@ -384,7 +393,8 @@ private fun AvFilterSection(
         if (
             filters.selectedStudio != null ||
             filters.selectedCastIds.isNotEmpty() ||
-            filters.selectedReleaseDate != null
+            filters.selectedReleaseDate != null ||
+            filters.selectedVrFilter != AvVrFilterOption.All
         ) {
             TextButton(onClick = onClearFilters) {
                 Text("Clear")
@@ -394,12 +404,17 @@ private fun AvFilterSection(
 
     when (filters.activeFamily) {
         AvFilterFamily.None -> {
-            if (filters.selectedStudio != null || filters.selectedReleaseDate != null) {
+            if (
+                filters.selectedStudio != null ||
+                filters.selectedReleaseDate != null ||
+                filters.selectedVrFilter != AvVrFilterOption.All
+            ) {
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
                     text = buildFilterSummary(
                         studio = filters.selectedStudio,
                         releaseDate = filters.selectedReleaseDate,
+                        vrFilter = filters.selectedVrFilter,
                     ),
                     style = MaterialTheme.typography.bodySmall,
                     color = TextTertiary,
@@ -512,6 +527,55 @@ private fun AvFilterSection(
 }
 
 @Composable
+private fun VrFilterTrigger(
+    selectedVrFilter: AvVrFilterOption,
+    onVrFilterSelected: (AvVrFilterOption) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var expanded by remember { mutableStateOf(false) }
+
+    Box(modifier = modifier) {
+        FilterTriggerButton(
+            label = buildVrFilterLabel(selectedVrFilter),
+            selected = selectedVrFilter != AvVrFilterOption.All,
+            onClick = { expanded = true },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            containerColor = CardBackgroundHover,
+            shape = RoundedCornerShape(16.dp),
+            modifier = Modifier
+                .background(CardBackgroundHover)
+                .widthIn(min = 180.dp, max = 220.dp),
+        ) {
+            DropdownMenuItem(
+                text = { Text("All content") },
+                onClick = {
+                    expanded = false
+                    onVrFilterSelected(AvVrFilterOption.All)
+                },
+            )
+            DropdownMenuItem(
+                text = { Text("VR only") },
+                onClick = {
+                    expanded = false
+                    onVrFilterSelected(AvVrFilterOption.VrOnly)
+                },
+            )
+            DropdownMenuItem(
+                text = { Text("Non-VR only") },
+                onClick = {
+                    expanded = false
+                    onVrFilterSelected(AvVrFilterOption.NonVrOnly)
+                },
+            )
+        }
+    }
+}
+
+@Composable
 private fun StudioFilterTrigger(
     studios: List<String>,
     selectedStudio: String?,
@@ -602,12 +666,26 @@ private fun buildReleaseDateLabel(selectedDate: LocalDate?): String {
 private fun buildFilterSummary(
     studio: String?,
     releaseDate: LocalDate?,
+    vrFilter: AvVrFilterOption,
 ): String {
     val parts = buildList {
         if (!studio.isNullOrBlank()) add("Studio: $studio")
         if (releaseDate != null) add("Release date: $releaseDate")
+        when (vrFilter) {
+            AvVrFilterOption.All -> Unit
+            AvVrFilterOption.VrOnly -> add("Content: VR")
+            AvVrFilterOption.NonVrOnly -> add("Content: Non-VR")
+        }
     }
     return parts.joinToString("  •  ")
+}
+
+private fun buildVrFilterLabel(selectedVrFilter: AvVrFilterOption): String {
+    return when (selectedVrFilter) {
+        AvVrFilterOption.All -> "VR"
+        AvVrFilterOption.VrOnly -> "VR Only"
+        AvVrFilterOption.NonVrOnly -> "Non-VR"
+    }
 }
 
 @Composable
@@ -905,7 +983,7 @@ private fun AvWorkCard(
             PosterThumbnail(
                 posterUrl = work.displayPosterUrl,
                 fallbackThumbnailPath = work.fallbackThumbnailPath,
-                showVrBadge = shouldShowVrBadge(work),
+                showVrBadge = work.isVrContent,
                 modifier = Modifier.size(width = 108.dp, height = 144.dp),
             )
 
@@ -1508,7 +1586,7 @@ private fun EditAvMetadataDialog(
                                 JvrMovieMetadata(
                                     code = work.metadata?.code ?: work.asset.normalizedCode,
                                     title = title.trim().ifBlank { work.asset.normalizedCode },
-                                    posterUrl = work.metadata?.posterUrl ?: work.displayPosterUrl,
+                                    posterUrl = work.displayPosterUrl,
                                     releaseDate = parsedReleaseDate,
                                     studio = studio.trim().takeIf { it.isNotBlank() },
                                     genres = work.metadata?.genres.orEmpty(),
@@ -1875,16 +1953,4 @@ private fun buildWorkCastSummary(casts: List<JvrCastMetadata>): String? {
             append(remainingCount)
         }
     }
-}
-
-private fun shouldShowVrBadge(work: AvLibraryWork): Boolean {
-    val representativePath = work.representativePath.orEmpty().replace('\\', '/')
-    val representativeFileName = work.representativeFileName.orEmpty()
-    val stereoPattern = Regex(
-        "(?i)(?:\\bVR\\b|\\b8KVR\\b|\\bVR8K\\b|(?:^|[ _.\\-])SBS(?:$|[ _.\\-])|(?:^|[ _.\\-])TB(?:$|[ _.\\-]))"
-    )
-
-    return work.asset.metadataSource.equals("jvr", ignoreCase = true) ||
-            Regex("(^|/)av/vr(/|$)", RegexOption.IGNORE_CASE).containsMatchIn(representativePath) ||
-            stereoPattern.containsMatchIn(representativeFileName)
 }

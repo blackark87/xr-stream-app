@@ -508,6 +508,7 @@ class MainDashboardViewModel(
         updateAvFilters(
             AvFilterState(
                 activeFamily = AvFilterFamily.None,
+                selectedVrFilter = AvVrFilterOption.All,
                 visibleMonth = _uiState.value.avLibrary.filters.visibleMonth,
             )
         )
@@ -576,6 +577,14 @@ class MainDashboardViewModel(
                 selectedReleaseDate = date,
                 visibleMonth = date?.let(java.time.YearMonth::from)
                     ?: _uiState.value.avLibrary.filters.visibleMonth,
+            )
+        )
+    }
+
+    fun selectAvVrFilter(filter: AvVrFilterOption) {
+        updateAvFilters(
+            _uiState.value.avLibrary.filters.copy(
+                selectedVrFilter = filter,
             )
         )
     }

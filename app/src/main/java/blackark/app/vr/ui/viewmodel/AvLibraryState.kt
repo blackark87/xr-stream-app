@@ -16,11 +16,18 @@ enum class AvFilterFamily {
     ReleaseDate,
 }
 
+enum class AvVrFilterOption {
+    All,
+    VrOnly,
+    NonVrOnly,
+}
+
 data class AvFilterState(
     val activeFamily: AvFilterFamily = AvFilterFamily.None,
     val selectedStudio: String? = null,
     val selectedCastIds: Set<String> = emptySet(),
     val selectedReleaseDate: LocalDate? = null,
+    val selectedVrFilter: AvVrFilterOption = AvVrFilterOption.All,
     val visibleMonth: YearMonth = YearMonth.now(),
 )
 
@@ -56,25 +63,31 @@ data class AvLibraryState(
 fun AvLibrarySnapshot.applyFilters(filters: AvFilterState): List<AvLibraryWork> {
     if (works.isEmpty()) return emptyList()
 
+    val vrFiltered = when (filters.selectedVrFilter) {
+        AvVrFilterOption.All -> works
+        AvVrFilterOption.VrOnly -> works.filter(AvLibraryWork::isVrContent)
+        AvVrFilterOption.NonVrOnly -> works.filterNot(AvLibraryWork::isVrContent)
+    }
+
     val filtered = when (filters.activeFamily) {
-        AvFilterFamily.None -> works
+        AvFilterFamily.None -> vrFiltered
 
         AvFilterFamily.Studio -> {
             val selectedStudio = filters.selectedStudio?.trim()?.takeIf { it.isNotBlank() }
             if (selectedStudio == null) {
-                works
+                vrFiltered
             } else {
-                works.filter { work -> work.studio == selectedStudio }
+                vrFiltered.filter { work -> work.studio == selectedStudio }
             }
         }
 
         AvFilterFamily.Casts -> {
             if (filters.selectedCastIds.isEmpty()) {
-                works
+                vrFiltered
             } else {
                 val includeWorksWithoutCasts = AV_CAST_FILTER_NONE_ID in filters.selectedCastIds
                 val selectedPerformerIds = filters.selectedCastIds - AV_CAST_FILTER_NONE_ID
-                works.filter { work ->
+                vrFiltered.filter { work ->
                     val castIds = work.casts.map { it.performerId }.toSet()
                     (includeWorksWithoutCasts && castIds.isEmpty()) ||
                             selectedPerformerIds.any(castIds::contains)
@@ -85,9 +98,9 @@ fun AvLibrarySnapshot.applyFilters(filters: AvFilterState): List<AvLibraryWork> 
         AvFilterFamily.ReleaseDate -> {
             val selectedDate = filters.selectedReleaseDate
             if (selectedDate == null) {
-                works
+                vrFiltered
             } else {
-                works.filter { work -> work.releaseDate == selectedDate }
+                vrFiltered.filter { work -> work.releaseDate == selectedDate }
             }
         }
     }
