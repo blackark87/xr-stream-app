@@ -17,6 +17,8 @@ import java.security.MessageDigest
 object VideoFramePreviewExtractor {
 
     private const val TAG = "VideoFramePreview"
+    private const val PREVIEW_FRAME_WIDTH = 480
+    private const val PREVIEW_FRAME_HEIGHT = 270
 
     suspend fun extractPreviewFrame(
         context: Context,
@@ -29,8 +31,14 @@ object VideoFramePreviewExtractor {
             MessageDigest.getInstance("MD5")
                 .digest(cacheKey)
                 .joinToString("") { "%02x".format(it) }
-        val previewFile = File(previewDir, "seek_preview_$fileHash.jpg")
-        val tempFile = File(previewDir, "seek_preview_$fileHash.tmp")
+        val safeTargetPositionMs = targetPositionMs.coerceAtLeast(0L)
+        val previewFile = File(previewDir, "seek_preview_${fileHash}_$safeTargetPositionMs.jpg")
+        val tempFile = File(previewDir, "seek_preview_${fileHash}_$safeTargetPositionMs.tmp")
+
+        if (previewFile.exists() && previewFile.length() > 0L) {
+            return@withContext previewFile.absolutePath
+        }
+
         val retriever = MediaMetadataRetriever()
 
         try {
@@ -119,8 +127,13 @@ object VideoFramePreviewExtractor {
         for (candidateTimeUs in candidateTimesUs) {
             for (option in extractionOptions) {
                 try {
-                    val bitmap = retriever.getScaledFrameAtTime(candidateTimeUs, option, 640, 360)
-                        ?: retriever.getFrameAtTime(candidateTimeUs, option)
+                    val bitmap =
+                        retriever.getScaledFrameAtTime(
+                            candidateTimeUs,
+                            option,
+                            PREVIEW_FRAME_WIDTH,
+                            PREVIEW_FRAME_HEIGHT,
+                        ) ?: retriever.getFrameAtTime(candidateTimeUs, option)
                     if (bitmap != null) {
                         return normalizePreviewFrame(bitmap)
                     }

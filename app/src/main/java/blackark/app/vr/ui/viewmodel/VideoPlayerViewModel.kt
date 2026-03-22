@@ -145,6 +145,7 @@ class VideoPlayerViewModel(
     private var seekPreviewResumePlayback = false
     private var seekPreviewShowControls = false
     private var pendingThumbnailPreviewPositionMs: Long? = null
+    private var renderedThumbnailPreviewPositionMs: Long? = null
 
     private val controllerAxisEngageThreshold = 0.45f
     private val controllerAxisReleaseThreshold = 0.25f
@@ -159,6 +160,8 @@ class VideoPlayerViewModel(
     private val playbackScrollSeekInitialRepeatMs = 260L
     private val playbackScrollSeekRepeatMs = 140L
     private val playbackScrollHoldTimeoutMs = 240L
+    private val thumbnailPreviewDebounceMs = 120L
+    private val thumbnailPreviewFrameIntervalMs = 2_000L
     private var lastPlaybackHorizontalScrollAtMs = 0L
     private var lastPlaybackVerticalScrollAtMs = 0L
     private var lastPlaybackHorizontalDirection = 0
@@ -357,7 +360,11 @@ class VideoPlayerViewModel(
 
         seekPreviewResumePlayback = currentState.isPlaying
         seekPreviewShowControls = currentState.showControls
-        player.pause()
+        renderedThumbnailPreviewPositionMs = null
+
+        if (currentState.seekPreviewMode == PlaybackPreviewMode.PlayerFrame) {
+            player.pause()
+        }
 
         val startPosition = clampSeekPosition(player.currentPosition.coerceAtLeast(0L))
         _state.value = currentState.copy(
@@ -381,15 +388,27 @@ class VideoPlayerViewModel(
     private fun enqueueThumbnailPreview(targetPositionMs: Long) {
         val context = appContext ?: return
         val videoPath = _state.value.videoFile?.path ?: return
+        val normalizedTargetPositionMs = normalizeThumbnailPreviewPosition(targetPositionMs)
 
-        pendingThumbnailPreviewPositionMs = targetPositionMs
+        if (
+            normalizedTargetPositionMs == renderedThumbnailPreviewPositionMs &&
+            !_state.value.seekPreviewThumbnailPath.isNullOrBlank()
+        ) {
+            return
+        }
+
+        pendingThumbnailPreviewPositionMs = normalizedTargetPositionMs
         if (thumbnailPreviewJob?.isActive == true) {
             return
         }
 
         thumbnailPreviewJob = viewModelScope.launch {
             while (isActive) {
-                val nextTarget = pendingThumbnailPreviewPositionMs ?: break
+                val queuedTarget = pendingThumbnailPreviewPositionMs ?: break
+                pendingThumbnailPreviewPositionMs = null
+                delay(thumbnailPreviewDebounceMs)
+
+                val nextTarget = pendingThumbnailPreviewPositionMs ?: queuedTarget
                 pendingThumbnailPreviewPositionMs = null
 
                 val previewPath =
@@ -412,6 +431,7 @@ class VideoPlayerViewModel(
                 }
 
                 if (previewPath != null) {
+                    renderedThumbnailPreviewPositionMs = nextTarget
                     _state.value = latestState.copy(seekPreviewThumbnailPath = previewPath)
                 }
             }
@@ -426,8 +446,21 @@ class VideoPlayerViewModel(
 
     private fun cancelThumbnailPreview() {
         pendingThumbnailPreviewPositionMs = null
+        renderedThumbnailPreviewPositionMs = null
         thumbnailPreviewJob?.cancel()
         thumbnailPreviewJob = null
+    }
+
+    private fun normalizeThumbnailPreviewPosition(positionMs: Long): Long {
+        val clampedPosition = clampSeekPosition(positionMs)
+        val intervalMs = thumbnailPreviewFrameIntervalMs
+        if (intervalMs <= 0L) {
+            return clampedPosition
+        }
+
+        val roundedPosition =
+            ((clampedPosition + (intervalMs / 2)) / intervalMs) * intervalMs
+        return clampSeekPosition(roundedPosition)
     }
 
     private fun updateSeekPreviewTargetByStep(direction: Int) {

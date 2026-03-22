@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
@@ -57,11 +58,13 @@ import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import androidx.media3.common.util.UnstableApi
 import blackark.app.vr.ui.viewmodel.PlaybackMenu
 import blackark.app.vr.ui.viewmodel.PlaybackPreviewMode
@@ -173,6 +176,7 @@ fun XRPlaybackControls(
                 context = context,
                 modifier = Modifier
                     .align(Alignment.TopStart)
+                    .zIndex(1f)
                     .offset {
                         IntOffset(previewOffsetX, previewOffsetY)
                     },
@@ -730,25 +734,23 @@ private fun PlaybackSeekPreviewCard(
     Column(
         modifier = modifier
             .width(SeekPreviewOverlayWidth)
-            .clip(RoundedCornerShape(18.dp))
-            .background(containerColor)
-            .border(1.dp, borderColor, RoundedCornerShape(18.dp))
-            .padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+            .shadow(
+                elevation = 18.dp,
+                shape = RoundedCornerShape(14.dp),
+                clip = false,
+            )
+            .clip(RoundedCornerShape(14.dp))
+            .background(Color.Black.copy(alpha = 0.82f))
+            .padding(horizontal = 8.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(7.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text(
-            text = formatTime(targetPositionMs),
-            style = MaterialTheme.typography.labelLarge,
-            fontWeight = FontWeight.SemiBold,
-            color = textColor,
-        )
-
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(SeekPreviewOverlayThumbnailHeight)
-                .clip(RoundedCornerShape(14.dp))
-                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.82f)),
+                .clip(RoundedCornerShape(10.dp))
+                .background(Color.Black.copy(alpha = 0.36f)),
             contentAlignment = Alignment.Center,
         ) {
             if (previewRequest != null) {
@@ -756,17 +758,24 @@ private fun PlaybackSeekPreviewCard(
                     model = previewRequest,
                     imageLoader = imageLoader,
                     contentDescription = null,
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.Crop,
                 )
             } else {
                 Text(
-                    text = formatTime(targetPositionMs),
-                    color = secondaryTextColor,
-                    style = MaterialTheme.typography.bodyMedium,
+                    text = "Preview",
+                    color = Color.White.copy(alpha = 0.70f),
+                    style = MaterialTheme.typography.bodySmall,
                 )
             }
         }
+
+        Text(
+            text = formatTime(targetPositionMs),
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.Medium,
+            color = Color.White.copy(alpha = 0.96f),
+        )
     }
 }
 

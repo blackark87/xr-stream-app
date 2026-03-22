@@ -37,6 +37,7 @@ class SMBClient(private val config: SMBConfig) {
                 setProperty("jcifs.smb.client.minVersion", "SMB202")
                 setProperty("jcifs.smb.client.maxVersion", "SMB311")
                 setProperty("jcifs.resolveOrder", "DNS")
+                setProperty("jcifs.smb.client.bufferSize", "1048576")
             }
 
             val baseContext = BaseContext(PropertyConfiguration(props))
