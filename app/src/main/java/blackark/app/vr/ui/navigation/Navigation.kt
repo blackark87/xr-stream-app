@@ -7,6 +7,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.navOptions
 import blackark.app.vr.data.database.AppDatabase
 import blackark.app.vr.data.repository.AvLibraryRepository
 import blackark.app.vr.data.repository.ServerRepository
@@ -96,7 +97,19 @@ fun AppNavigation(navController: NavHostController, context: Context) {
                 videoFilePath = filePath,
                 videoFileName = fileName,
                 onNavigateBack = {
-                    navController.popBackStack()
+                    val poppedToDashboard =
+                        navController.popBackStack(Screen.MainDashboard.route, inclusive = false)
+                    if (!poppedToDashboard) {
+                        navController.navigate(
+                            route = Screen.MainDashboard.route,
+                            navOptions = navOptions {
+                                launchSingleTop = true
+                                popUpTo(Screen.MainDashboard.route) {
+                                    inclusive = false
+                                }
+                            },
+                        )
+                    }
                 }
             )
         }
