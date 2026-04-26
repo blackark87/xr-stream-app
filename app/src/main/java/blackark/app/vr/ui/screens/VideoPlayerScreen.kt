@@ -240,6 +240,7 @@ fun VideoPlayerScreen(
     onNavigateBack: () -> Unit,
 ) {
     val context = LocalContext.current
+    var isNavigatingAway by remember { mutableStateOf(false) }
     val database = remember { AppDatabase.getDatabase(context) }
     val videoRepository = remember {
         VideoRepository(
@@ -305,10 +306,12 @@ fun VideoPlayerScreen(
         videoPlayerViewModel.playerEvents.collect { event ->
             when (event) {
                 PlayerEvent.NavigateBack -> {
-                    // Hide player chrome, pause immediately, and let NavHost tear the screen down.
-                    videoPlayerViewModel.setControlsVisibility(false)
-                    videoPlayerViewModel.pause()
-                    onNavigateBack()
+                    if (!isNavigatingAway) {
+                        isNavigatingAway = true
+                        videoPlayerViewModel.setControlsVisibility(false)
+                        videoPlayerViewModel.releasePlayerBeforeNavigateBack()
+                        onNavigateBack()
+                    }
                 }
             }
         }
@@ -318,6 +321,7 @@ fun VideoPlayerScreen(
             videoPlayerViewModel = videoPlayerViewModel,
             playerState = playerState,
             dashboardPanelPose = dashboardPanelPose,
+            isNavigatingAway = isNavigatingAway,
             onNavigateBack = { videoPlayerViewModel.requestNavigateBack() },
         )
     }
@@ -329,6 +333,7 @@ fun SpatialVideoPlayerContent(
     videoPlayerViewModel: VideoPlayerViewModel,
     playerState: VideoPlayerState,
     dashboardPanelPose: Pose?,
+    isNavigatingAway: Boolean,
     onNavigateBack: () -> Unit,
 ) {
     val exoPlayer by videoPlayerViewModel.playerFlow.collectAsState()
@@ -370,6 +375,10 @@ fun SpatialVideoPlayerContent(
             .height(2.dp)
             .offset(x = 4000.dp, y = 4000.dp),
     )
+
+    if (isNavigatingAway) {
+        return
+    }
 
     val enableHeadFollowIn2D = playerState.videoFormat == VideoFormat.Format2D
     // Disabled for 180 stereo because the custom lock-rotation path can blank hemisphere rendering.

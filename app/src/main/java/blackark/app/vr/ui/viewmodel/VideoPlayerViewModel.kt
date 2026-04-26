@@ -152,8 +152,8 @@ class VideoPlayerViewModel(
     private val playbackScrollSeekInitialRepeatMs = 260L
     private val playbackScrollSeekRepeatMs = 140L
     private val playbackScrollHoldTimeoutMs = 240L
-    private val thumbnailPreviewDebounceMs = 120L
-    private val thumbnailPreviewFrameIntervalMs = 2_000L
+    private val thumbnailPreviewDebounceMs = 60L
+    private val thumbnailPreviewFrameIntervalMs = 1_000L
     private var lastPlaybackHorizontalScrollAtMs = 0L
     private var lastPlaybackVerticalScrollAtMs = 0L
     private var lastPlaybackHorizontalDirection = 0
@@ -1084,6 +1084,12 @@ class VideoPlayerViewModel(
                     seekPreviewTargetPositionMs = 0L,
                     seekPreviewThumbnailPath = null,
                 )
+                viewModelScope.launch {
+                    VideoFramePreviewExtractor.prepareVideo(
+                        context = context.applicationContext,
+                        videoPath = videoFile.path,
+                    )
+                }
 
                 // Save to recent videos immediately to ensure we have an ID for updates.
                 saveToRecentVideos(videoFile, smbConfig, savedVideo)
@@ -1671,6 +1677,7 @@ class VideoPlayerViewModel(
         positionTrackingJob?.cancel()
         positionTrackingJob = null
         finishSeekPreviewSession(commit = false, restorePlayback = false)
+        val previewVideoPath = _state.value.videoFile?.path
 
         // Wait for any pending format/stereo mode saves before releasing.
         pendingSaveJob?.join()
@@ -1700,6 +1707,7 @@ class VideoPlayerViewModel(
         cancelThumbnailPreview()
         cancelControlsAutoHide()
         resetControlsInputLock()
+        VideoFramePreviewExtractor.clearPreparedVideo(previewVideoPath)
         lastPlaybackHorizontalDirection = 0
         lastPlaybackHorizontalScrollAtMs = 0L
 
