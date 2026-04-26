@@ -13,6 +13,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
+import androidx.core.view.KeyEventDispatcher
 import androidx.navigation.compose.rememberNavController
 import blackark.app.vr.ui.navigation.AppNavigation
 import blackark.app.vr.ui.theme.XRStreamTheme
@@ -110,7 +111,12 @@ class MainActivity : ComponentActivity() {
         if (shouldConsumePlaybackBack) {
             return true
         }
-        return super.dispatchKeyEvent(event)
+        val decorView = window.decorView
+        return if (KeyEventDispatcher.dispatchBeforeHierarchy(decorView, event)) {
+            true
+        } else {
+            KeyEventDispatcher.dispatchKeyEvent(this, decorView, this, event)
+        }
     }
 
     override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {
