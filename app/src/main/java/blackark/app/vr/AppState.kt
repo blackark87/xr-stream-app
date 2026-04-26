@@ -15,6 +15,11 @@ data class ControllerAxisEvent(
     val eventTimeMs: Long,
 )
 
+data class DashboardPanelSize(
+    val widthDp: Float = 1920f,
+    val heightDp: Float = 1080f,
+)
+
 object AppState {
     var smbClient: SMBClient? = null
         private set
@@ -40,6 +45,8 @@ object AppState {
 
     private val _dashboardPanelPose = MutableStateFlow<Pose?>(null)
     val dashboardPanelPose: StateFlow<Pose?> = _dashboardPanelPose.asStateFlow()
+    private val _dashboardPanelSize = MutableStateFlow(DashboardPanelSize())
+    val dashboardPanelSize: StateFlow<DashboardPanelSize> = _dashboardPanelSize.asStateFlow()
 
     fun setSMBClient(client: SMBClient, config: SMBConfig) {
         smbClient = client
@@ -49,6 +56,13 @@ object AppState {
     fun updateDashboardPanelPose(pose: Pose) {
         if (_dashboardPanelPose.value != pose) {
             _dashboardPanelPose.value = Pose(pose)
+        }
+    }
+
+    fun updateDashboardPanelSize(widthDp: Float, heightDp: Float) {
+        val nextSize = DashboardPanelSize(widthDp = widthDp, heightDp = heightDp)
+        if (_dashboardPanelSize.value != nextSize) {
+            _dashboardPanelSize.value = nextSize
         }
     }
 

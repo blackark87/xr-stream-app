@@ -1449,8 +1449,13 @@ fun MainDashboardScreen(
             .sortedByDescending { it.lastConnected }
     }
     val density = LocalDensity.current
-    var dashboardPanelWidth by remember { mutableStateOf(1920.dp) }
-    var dashboardPanelHeight by remember { mutableStateOf(1080.dp) }
+    val initialDashboardPanelSize = remember { AppState.dashboardPanelSize.value }
+    var dashboardPanelWidth by remember {
+        mutableStateOf(initialDashboardPanelSize.widthDp.dp)
+    }
+    var dashboardPanelHeight by remember {
+        mutableStateOf(initialDashboardPanelSize.heightDp.dp)
+    }
     val initialDashboardPose = remember { AppState.dashboardPanelPose.value?.let { Pose(it) } }
 
     fun launchSettingsAction(action: SettingsAction) {
@@ -1533,6 +1538,10 @@ fun MainDashboardScreen(
                     if (newSize.width > 0 && newSize.height > 0) {
                         dashboardPanelWidth = with(density) { newSize.width.toDp() }
                         dashboardPanelHeight = with(density) { newSize.height.toDp() }
+                        AppState.updateDashboardPanelSize(
+                            widthDp = dashboardPanelWidth.value,
+                            heightDp = dashboardPanelHeight.value,
+                        )
                     }
                     true
                 }
