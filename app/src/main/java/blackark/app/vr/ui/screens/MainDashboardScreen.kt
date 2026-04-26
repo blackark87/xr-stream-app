@@ -165,12 +165,10 @@ import blackark.app.vr.ui.theme.TextSecondary
 import blackark.app.vr.ui.theme.TextTertiary
 import blackark.app.vr.ui.viewmodel.FileBrowserViewMode
 import blackark.app.vr.ui.viewmodel.MainDashboardViewModel
-import blackark.app.vr.ui.viewmodel.PlaybackPreviewMode
 import blackark.app.vr.utils.ImageCacheVersionStore
 import blackark.app.vr.utils.JvrCastMetadata
 import blackark.app.vr.utils.JvrLibraryMetadataProvider
 import blackark.app.vr.utils.JvrMovieMetadata
-import blackark.app.vr.utils.PlaybackPreviewModeStore
 import blackark.app.vr.utils.ServerCredentialAutofillStore
 import blackark.app.vr.utils.ThumbnailImageLoaderProvider
 import blackark.app.vr.utils.VideoThumbnailFetcher
@@ -1217,8 +1215,6 @@ private fun SourceSwitcherButton(
 private fun SettingsPanel(
     versionLabel: String,
     isAvBackgroundIndexingEnabled: Boolean,
-    playbackPreviewMode: PlaybackPreviewMode,
-    onPlaybackPreviewModeChange: (PlaybackPreviewMode) -> Unit,
     activeAction: SettingsAction?,
     onAvBackgroundIndexingChange: (Boolean) -> Unit,
     onClearArtwork: () -> Unit,
@@ -1248,19 +1244,6 @@ private fun SettingsPanel(
 
             HorizontalDivider(color = DividerGray)
 
-            SettingsChoiceRow(
-                title = stringResource(R.string.seek_preview_mode_title),
-                description = stringResource(R.string.seek_preview_mode_description),
-                selectedMode = playbackPreviewMode,
-                options =
-                    listOf(
-                        PlaybackPreviewMode.PlayerFrame to
-                                stringResource(R.string.seek_preview_mode_player_frame),
-                        PlaybackPreviewMode.ThumbnailOverlay to
-                                stringResource(R.string.seek_preview_mode_thumbnail_overlay),
-                    ),
-                onOptionSelected = onPlaybackPreviewModeChange,
-            )
             SettingsToggleRow(
                 title = stringResource(R.string.av_background_indexing),
                 description = stringResource(R.string.av_background_indexing_description),
@@ -1420,115 +1403,6 @@ private fun SettingsActionRow(
     }
 }
 
-@Composable
-private fun SettingsChoiceRow(
-    title: String,
-    description: String,
-    selectedMode: PlaybackPreviewMode,
-    options: List<Pair<PlaybackPreviewMode, String>>,
-    onOptionSelected: (PlaybackPreviewMode) -> Unit,
-) {
-    var expanded by remember { mutableStateOf(false) }
-    val selectedLabel =
-        options.firstOrNull { it.first == selectedMode }?.second.orEmpty()
-
-    Column(
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleMedium,
-                    color = TextPrimary,
-                )
-                Text(
-                    text = description,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = TextTertiary,
-                )
-            }
-
-            Spacer(modifier = Modifier.width(16.dp))
-
-            Box {
-                Surface(
-                    modifier = Modifier
-                        .widthIn(min = 200.dp, max = 240.dp)
-                        .clickable { expanded = true },
-                    color = CardBackgroundHover.copy(alpha = 0.94f),
-                    shape = RoundedCornerShape(14.dp),
-                    border = BorderStroke(
-                        1.dp,
-                        if (expanded) {
-                            NetflixRed.copy(alpha = 0.85f)
-                        } else {
-                            DividerGray
-                        },
-                    ),
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 14.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            text = selectedLabel,
-                            style = MaterialTheme.typography.labelLarge,
-                            color = TextPrimary,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f),
-                        )
-                        Icon(
-                            imageVector = Icons.Filled.KeyboardArrowDown,
-                            contentDescription = null,
-                            tint = if (expanded) NetflixRed else TextSecondary,
-                            modifier = Modifier.rotate(if (expanded) 180f else 0f),
-                        )
-                    }
-                }
-
-                DropdownMenu(
-                    expanded = expanded,
-                    onDismissRequest = { expanded = false },
-                    modifier = Modifier.widthIn(min = 220.dp, max = 260.dp),
-                    shape = RoundedCornerShape(20.dp),
-                    containerColor = CardBackgroundHover.copy(alpha = 0.98f),
-                    tonalElevation = 8.dp,
-                    shadowElevation = 18.dp,
-                    border = BorderStroke(1.dp, DividerGray.copy(alpha = 0.85f)),
-                ) {
-                    options.forEach { (mode, label) ->
-                        DropdownMenuItem(
-                            text = {
-                                Text(
-                                    text = label,
-                                    color = TextPrimary,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                            },
-                            onClick = {
-                                expanded = false
-                                onOptionSelected(mode)
-                            },
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainDashboardScreen(
@@ -1543,14 +1417,15 @@ fun MainDashboardScreen(
     val favorites by viewModel.favorites.collectAsStateWithLifecycle()
     val recentVideos by viewModel.recentVideos.collectAsStateWithLifecycle()
     val favoritePaths = remember(favorites) { favorites.mapTo(linkedSetOf()) { it.filePath } }
-    var playbackPreviewMode by remember(context) {
-        mutableStateOf(PlaybackPreviewModeStore.load(context))
-    }
 
     var showAddServerDialog by remember { mutableStateOf(false) }
     var serverToEdit by remember { mutableStateOf<SavedServer?>(null) }
-    var disconnectedDashboardTab by remember { mutableStateOf(DisconnectedDashboardTab.Sources) }
-    var compactConnectedTab by remember { mutableStateOf(ConnectedDashboardTab.Files) }
+    var disconnectedDashboardTab by rememberSaveable {
+        mutableStateOf(DisconnectedDashboardTab.Sources)
+    }
+    var compactConnectedTab by rememberSaveable {
+        mutableStateOf(ConnectedDashboardTab.Files)
+    }
     val previewResetKey = when (compactConnectedTab) {
         ConnectedDashboardTab.Files -> "files:${uiState.selectedServer?.id}:${uiState.currentPath}"
         ConnectedDashboardTab.Library -> "library:${uiState.selectedServer?.id}"
@@ -1745,11 +1620,6 @@ fun MainDashboardScreen(
                             SettingsPanel(
                                 versionLabel = appVersionLabel,
                                 isAvBackgroundIndexingEnabled = uiState.isAvBackgroundIndexingEnabled,
-                                playbackPreviewMode = playbackPreviewMode,
-                                onPlaybackPreviewModeChange = { mode ->
-                                    playbackPreviewMode = mode
-                                    PlaybackPreviewModeStore.save(context, mode)
-                                },
                                 activeAction = activeSettingsAction,
                                 onAvBackgroundIndexingChange = viewModel::setAvBackgroundIndexingEnabled,
                                 onClearArtwork = {
@@ -1804,11 +1674,6 @@ fun MainDashboardScreen(
                                 SettingsPanel(
                                     versionLabel = appVersionLabel,
                                     isAvBackgroundIndexingEnabled = uiState.isAvBackgroundIndexingEnabled,
-                                    playbackPreviewMode = playbackPreviewMode,
-                                    onPlaybackPreviewModeChange = { mode ->
-                                        playbackPreviewMode = mode
-                                        PlaybackPreviewModeStore.save(context, mode)
-                                    },
                                     activeAction = activeSettingsAction,
                                     onAvBackgroundIndexingChange = viewModel::setAvBackgroundIndexingEnabled,
                                     onClearArtwork = {
@@ -1973,6 +1838,7 @@ fun MainDashboardScreen(
                                                         favorites = favorites,
                                                         recentVideos = recentVideos,
                                                         isConnected = uiState.isConnected,
+                                                        stateKey = uiState.selectedServer?.id,
                                                         currentPreviewKey = dashboardPreviewItem?.key,
                                                         onFavoriteClick = { video ->
                                                             dashboardPreviewItem = null
@@ -4567,6 +4433,7 @@ private fun FavoritesPanel(
     favorites: List<FavoriteVideo>,
     recentVideos: List<RecentVideo>,
     isConnected: Boolean,
+    stateKey: Long?,
     currentPreviewKey: String?,
     onFavoriteClick: (FavoriteVideo) -> Unit,
     onRecentClick: (RecentVideo) -> Unit,
@@ -4575,7 +4442,7 @@ private fun FavoritesPanel(
     onPreviewFocused: (DashboardPreviewItem?) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var selectedTab by remember { mutableStateOf(LibraryTab.Favorites) }
+    var selectedTab by rememberSaveable(stateKey) { mutableStateOf(LibraryTab.Favorites) }
     val favoritePaths = remember(favorites) { favorites.mapTo(linkedSetOf()) { it.filePath } }
     val recentItems = remember(recentVideos) {
         recentVideos.sortedByDescending { it.lastPlayed }

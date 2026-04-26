@@ -46,11 +46,6 @@ sealed class PlayerEvent {
     object NavigateBack : PlayerEvent()
 }
 
-enum class PlaybackPreviewMode {
-    PlayerFrame,
-    ThumbnailOverlay,
-}
-
 data class VideoPlayerState(
     val isPlaying: Boolean = false,
     val currentPosition: Long = 0,
@@ -71,7 +66,6 @@ data class VideoPlayerState(
     val controlsInputLocked: Boolean = false,
     val seekPreviewActive: Boolean = false,
     val seekPreviewTargetPositionMs: Long = 0,
-    val seekPreviewMode: PlaybackPreviewMode = PlaybackPreviewMode.PlayerFrame,
     val seekPreviewThumbnailPath: String? = null,
 )
 
@@ -98,7 +92,6 @@ enum class StereoMode {
 class VideoPlayerViewModel(
     private val videoRepository: VideoRepository,
     private val videoDisplaySettingsRepository: VideoDisplaySettingsRepository,
-    private val initialSeekPreviewMode: PlaybackPreviewMode,
 ) : ViewModel() {
     private enum class ControllerAxisMode {
         None,
@@ -106,9 +99,7 @@ class VideoPlayerViewModel(
         Vertical,
     }
 
-    private val _state = MutableStateFlow(
-        VideoPlayerState(seekPreviewMode = initialSeekPreviewMode),
-    )
+    private val _state = MutableStateFlow(VideoPlayerState())
     val state: StateFlow<VideoPlayerState> = _state.asStateFlow()
 
     private val _playerFlow = MutableStateFlow<ExoPlayer?>(null)
@@ -146,6 +137,7 @@ class VideoPlayerViewModel(
     private var seekPreviewShowControls = false
     private var pendingThumbnailPreviewPositionMs: Long? = null
     private var renderedThumbnailPreviewPositionMs: Long? = null
+    private var controllerAxisAwaitingNeutralReset = false
 
     private val controllerAxisEngageThreshold = 0.45f
     private val controllerAxisReleaseThreshold = 0.25f
@@ -362,27 +354,17 @@ class VideoPlayerViewModel(
         seekPreviewShowControls = currentState.showControls
         renderedThumbnailPreviewPositionMs = null
 
-        if (currentState.seekPreviewMode == PlaybackPreviewMode.PlayerFrame) {
-            player.pause()
-        }
+        player.pause()
 
         val startPosition = clampSeekPosition(player.currentPosition.coerceAtLeast(0L))
         _state.value = currentState.copy(
-            showControls =
-                if (currentState.seekPreviewMode == PlaybackPreviewMode.ThumbnailOverlay) {
-                    true
-                } else {
-                    currentState.showControls
-                },
+            showControls = true,
             seekPreviewActive = true,
             seekPreviewTargetPositionMs = startPosition,
             seekPreviewThumbnailPath = null,
         )
         cancelControlsAutoHide()
-
-        if (currentState.seekPreviewMode == PlaybackPreviewMode.ThumbnailOverlay) {
-            enqueueThumbnailPreview(startPosition)
-        }
+        enqueueThumbnailPreview(startPosition)
     }
 
     private fun enqueueThumbnailPreview(targetPositionMs: Long) {
@@ -424,8 +406,7 @@ class VideoPlayerViewModel(
 
                 val latestState = _state.value
                 if (
-                    !latestState.seekPreviewActive ||
-                    latestState.seekPreviewMode != PlaybackPreviewMode.ThumbnailOverlay
+                    !latestState.seekPreviewActive
                 ) {
                     break
                 }
@@ -478,18 +459,9 @@ class VideoPlayerViewModel(
 
         _state.value = currentState.copy(
             seekPreviewTargetPositionMs = newTarget,
-            showControls =
-                if (currentState.seekPreviewMode == PlaybackPreviewMode.ThumbnailOverlay) {
-                    true
-                } else {
-                    currentState.showControls
-                },
+            showControls = true,
         )
-
-        when (currentState.seekPreviewMode) {
-            PlaybackPreviewMode.PlayerFrame -> exoPlayer?.seekTo(newTarget)
-            PlaybackPreviewMode.ThumbnailOverlay -> enqueueThumbnailPreview(newTarget)
-        }
+        enqueueThumbnailPreview(newTarget)
         cancelControlsAutoHide()
     }
 
@@ -507,18 +479,9 @@ class VideoPlayerViewModel(
 
         _state.value = currentState.copy(
             seekPreviewTargetPositionMs = newTarget,
-            showControls =
-                if (currentState.seekPreviewMode == PlaybackPreviewMode.ThumbnailOverlay) {
-                    true
-                } else {
-                    currentState.showControls
-                },
+            showControls = true,
         )
-
-        when (currentState.seekPreviewMode) {
-            PlaybackPreviewMode.PlayerFrame -> exoPlayer?.seekTo(newTarget)
-            PlaybackPreviewMode.ThumbnailOverlay -> enqueueThumbnailPreview(newTarget)
-        }
+        enqueueThumbnailPreview(newTarget)
         cancelControlsAutoHide()
     }
 
@@ -573,6 +536,10 @@ class VideoPlayerViewModel(
             return
         }
 
+        if (revealControlsIfHidden()) {
+            return
+        }
+
         val direction = if (delta > 0f) 1 else -1
         lastPlaybackHorizontalScrollAtMs = SystemClock.elapsedRealtime()
 
@@ -590,6 +557,9 @@ class VideoPlayerViewModel(
 
     fun handlePlaybackVerticalScroll(delta: Float) {
         if (_state.value.controlsInputLocked || _state.value.seekPreviewActive) {
+            return
+        }
+        if (revealControlsIfHidden()) {
             return
         }
         handlePlaybackScrollDelta(
@@ -688,12 +658,33 @@ class VideoPlayerViewModel(
             return
         }
 
-        val previousAxisMode = controllerAxisMode
         val x = event.x.coerceIn(-1f, 1f)
         val y = event.y.coerceIn(-1f, 1f)
+        val isNeutral =
+            abs(x) <= controllerAxisReleaseThreshold && abs(y) <= controllerAxisReleaseThreshold
+
+        if (controllerAxisAwaitingNeutralReset) {
+            if (isNeutral) {
+                controllerAxisAwaitingNeutralReset = false
+                resetControllerAxisState()
+            }
+            return
+        }
+
+        if (!_state.value.showControls) {
+            val shouldRevealControls =
+                abs(x) >= controllerAxisEngageThreshold || abs(y) >= controllerAxisEngageThreshold
+            if (shouldRevealControls) {
+                revealControlsIfHidden()
+                resetControllerAxisState()
+                controllerAxisAwaitingNeutralReset = true
+            }
+            return
+        }
 
         val absX = abs(x)
         val absY = abs(y)
+        val previousAxisMode = controllerAxisMode
 
         controllerAxisMode = when {
             absX >= controllerAxisEngageThreshold &&
@@ -863,6 +854,7 @@ class VideoPlayerViewModel(
         controllerAxisMode = ControllerAxisMode.None
         seekDirection = 0
         volumeDirection = 0
+        controllerAxisAwaitingNeutralReset = false
         cancelSeekRepeat()
         cancelVolumeRepeat()
         cancelThumbnailPreview()
@@ -952,38 +944,42 @@ class VideoPlayerViewModel(
 
             android.view.KeyEvent.KEYCODE_DPAD_LEFT,
             android.view.KeyEvent.KEYCODE_SYSTEM_NAVIGATION_LEFT -> {
-                if (!_state.value.showControls) {
-                    _state.value = _state.value.copy(showControls = true)
+                if (revealControlsIfHidden()) {
+                    true
+                } else {
+                    seekBackward()
+                    true
                 }
-                seekBackward()
-                true
             }
 
             android.view.KeyEvent.KEYCODE_DPAD_RIGHT,
             android.view.KeyEvent.KEYCODE_SYSTEM_NAVIGATION_RIGHT -> {
-                if (!_state.value.showControls) {
-                    _state.value = _state.value.copy(showControls = true)
+                if (revealControlsIfHidden()) {
+                    true
+                } else {
+                    seekForward()
+                    true
                 }
-                seekForward()
-                true
             }
 
             android.view.KeyEvent.KEYCODE_DPAD_UP,
             android.view.KeyEvent.KEYCODE_SYSTEM_NAVIGATION_UP -> {
-                if (!_state.value.showControls) {
-                    _state.value = _state.value.copy(showControls = true)
+                if (revealControlsIfHidden()) {
+                    true
+                } else {
+                    stepVolume(direction = 1)
+                    true
                 }
-                stepVolume(direction = 1)
-                true
             }
 
             android.view.KeyEvent.KEYCODE_DPAD_DOWN,
             android.view.KeyEvent.KEYCODE_SYSTEM_NAVIGATION_DOWN -> {
-                if (!_state.value.showControls) {
-                    _state.value = _state.value.copy(showControls = true)
+                if (revealControlsIfHidden()) {
+                    true
+                } else {
+                    stepVolume(direction = -1)
+                    true
                 }
-                stepVolume(direction = -1)
-                true
             }
 
             android.view.KeyEvent.KEYCODE_BUTTON_B,
@@ -1696,7 +1692,7 @@ class VideoPlayerViewModel(
         if (resetUiState) {
             unregisterVolumeObserver()
             audioManager = null
-            _state.value = VideoPlayerState(seekPreviewMode = initialSeekPreviewMode)
+            _state.value = VideoPlayerState()
             currentVideoId = null
             pendingVideoFormatToPersist = null
             pendingStereoModeToPersist = null

@@ -94,7 +94,6 @@ import blackark.app.vr.ui.viewmodel.VideoFormat
 import blackark.app.vr.ui.viewmodel.VideoPlayerState
 import blackark.app.vr.ui.viewmodel.VideoPlayerViewModel
 import blackark.app.vr.ui.viewmodel.VideoPlayerViewModelFactory
-import blackark.app.vr.utils.PlaybackPreviewModeStore
 import kotlinx.coroutines.delay
 
 private const val TAG = "VideoPlayerScreen"
@@ -250,14 +249,11 @@ fun VideoPlayerScreen(
     }
     val videoDisplaySettingsRepository =
         remember { VideoDisplaySettingsRepository(database.videoDisplaySettingsDao()) }
-    val initialSeekPreviewMode =
-        remember(context.applicationContext) { PlaybackPreviewModeStore.load(context) }
 
     val videoPlayerViewModel: VideoPlayerViewModel = viewModel(
         factory = VideoPlayerViewModelFactory(
             videoRepository,
             videoDisplaySettingsRepository,
-            initialSeekPreviewMode,
         ),
     )
 
