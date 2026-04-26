@@ -101,22 +101,25 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+    private fun handleGlobalKeyEvent(event: KeyEvent): Boolean {
         AppState.keyEvents.tryEmit(event)
-        val shouldConsumePlaybackBack =
-            AppState.consumePlaybackBackKeyEvents.value &&
-                    (event.keyCode == KeyEvent.KEYCODE_BUTTON_B ||
-                            event.keyCode == KeyEvent.KEYCODE_BACK)
-        if (shouldConsumePlaybackBack) {
+        return AppState.consumePlaybackBackKeyEvents.value &&
+            (event.keyCode == KeyEvent.KEYCODE_BUTTON_B ||
+                event.keyCode == KeyEvent.KEYCODE_BACK)
+    }
+
+    override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
+        if (handleGlobalKeyEvent(event)) {
             return true
         }
-        onUserInteraction()
-        val activityWindow = window
-        if (activityWindow.superDispatchKeyEvent(event)) {
+        return super.onKeyDown(keyCode, event)
+    }
+
+    override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean {
+        if (handleGlobalKeyEvent(event)) {
             return true
         }
-        val decorView = activityWindow.decorView
-        return event.dispatch(this, decorView.keyDispatcherState, this)
+        return super.onKeyUp(keyCode, event)
     }
 
     override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {

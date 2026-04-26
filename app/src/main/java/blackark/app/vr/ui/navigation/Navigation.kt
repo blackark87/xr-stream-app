@@ -1,13 +1,6 @@
 package blackark.app.vr.ui.navigation
 
 import android.content.Context
-import androidx.compose.animation.EnterTransition
-import androidx.compose.animation.ExitTransition
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.LinearOutSlowInEasing
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -34,10 +27,6 @@ sealed class Screen(val route: String) {
     }
 }
 
-private const val SCREEN_ENTER_DURATION_MS = 180
-private const val SCREEN_ENTER_DELAY_MS = 32
-private const val SCREEN_EXIT_DURATION_MS = 92
-
 @Composable
 fun AppNavigation(navController: NavHostController, context: Context) {
     val appContext = remember(context) { context.applicationContext }
@@ -60,27 +49,16 @@ fun AppNavigation(navController: NavHostController, context: Context) {
         navController = navController,
         startDestination = Screen.MainDashboard.route,
         enterTransition = {
-            fadeIn(
-                animationSpec = tween(
-                    durationMillis = SCREEN_ENTER_DURATION_MS,
-                    delayMillis = SCREEN_ENTER_DELAY_MS,
-                    easing = LinearOutSlowInEasing,
-                ),
-            )
+            androidx.compose.animation.EnterTransition.None
         },
         exitTransition = {
-            fadeOut(
-                animationSpec = tween(
-                    durationMillis = SCREEN_EXIT_DURATION_MS,
-                    easing = LinearEasing,
-                ),
-            )
+            androidx.compose.animation.ExitTransition.None
         },
         popEnterTransition = {
-            EnterTransition.None
+            androidx.compose.animation.EnterTransition.None
         },
         popExitTransition = {
-            ExitTransition.None
+            androidx.compose.animation.ExitTransition.None
         },
     ) {
         composable(Screen.MainDashboard.route) {

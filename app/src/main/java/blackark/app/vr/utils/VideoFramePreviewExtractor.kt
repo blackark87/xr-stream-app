@@ -10,6 +10,8 @@ import jcifs.smb.SmbFile
 import jcifs.smb.SmbRandomAccessFile
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.security.MessageDigest
@@ -19,6 +21,33 @@ object VideoFramePreviewExtractor {
     private const val TAG = "VideoFramePreview"
     private const val PREVIEW_FRAME_WIDTH = 480
     private const val PREVIEW_FRAME_HEIGHT = 270
+    private val sessionMutex = Mutex()
+    private var preparedSession: PreparedSession? = null
+
+    private data class PreparedSession(
+        val videoPath: String,
+        val retriever: MediaMetadataRetriever,
+        val durationMs: Long,
+        val closeDataSource: (() -> Unit)? = null,
+    )
+
+    suspend fun prepareVideo(
+        context: Context,
+        videoPath: String,
+    ): Unit = withContext(Dispatchers.IO) {
+        sessionMutex.withLock {
+            obtainPreparedSessionLocked(context, videoPath)
+        }
+    }
+
+    suspend fun clearPreparedVideo(videoPath: String? = null) = withContext(Dispatchers.IO) {
+        sessionMutex.withLock {
+            val currentSession = preparedSession ?: return@withLock
+            if (videoPath == null || currentSession.videoPath == videoPath) {
+                releasePreparedSessionLocked()
+            }
+        }
+    }
 
     suspend fun extractPreviewFrame(
         context: Context,
@@ -39,15 +68,75 @@ object VideoFramePreviewExtractor {
             return@withContext previewFile.absolutePath
         }
 
+        try {
+            sessionMutex.withLock {
+                val session = obtainPreparedSessionLocked(context, videoPath) ?: return@withContext null
+                val clampedTargetMs =
+                    if (session.durationMs > 0L) {
+                        targetPositionMs.coerceIn(0L, session.durationMs)
+                    } else {
+                        targetPositionMs.coerceAtLeast(0L)
+                    }
+
+                val previewBitmap =
+                    extractPreviewBitmap(
+                        retriever = session.retriever,
+                        durationMs = session.durationMs,
+                        targetPositionMs = clampedTargetMs,
+                    ) ?: return@withContext null
+
+                tempFile.outputStream().use { output ->
+                    previewBitmap.compress(Bitmap.CompressFormat.JPEG, 85, output)
+                }
+                if (tempFile != previewFile) {
+                    if (previewFile.exists()) {
+                        previewFile.delete()
+                    }
+                    tempFile.copyTo(previewFile, overwrite = true)
+                    tempFile.delete()
+                }
+                if (!previewBitmap.isRecycled) {
+                    previewBitmap.recycle()
+                }
+            }
+
+            previewFile.absolutePath
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            Log.w(
+                TAG,
+                "Failed to extract seek preview for path=$videoPath at ${targetPositionMs}ms: ${error.message}",
+                error,
+            )
+            null
+        } finally {
+            if (tempFile.exists()) {
+                tempFile.delete()
+            }
+        }
+    }
+
+    private fun obtainPreparedSessionLocked(
+        context: Context,
+        videoPath: String,
+    ): PreparedSession? {
+        preparedSession?.takeIf { it.videoPath == videoPath }?.let { return it }
+
+        releasePreparedSessionLocked()
+
         val retriever = MediaMetadataRetriever()
+        var closeDataSource: (() -> Unit)? = null
 
         try {
             val uri = videoPath.toUri()
             when (uri.scheme) {
                 "smb" -> {
-                    val smbClient = blackark.app.vr.AppState.smbClient ?: return@withContext null
+                    val smbClient = blackark.app.vr.AppState.smbClient ?: return null
                     val smbFile = smbClient.getSmbFile(videoPath)
-                    retriever.setDataSource(SmbMediaDataSource(smbFile))
+                    val dataSource = SmbMediaDataSource(smbFile)
+                    closeDataSource = { runCatching { dataSource.close() } }
+                    retriever.setDataSource(dataSource)
                 }
 
                 "file" -> {
@@ -64,50 +153,29 @@ object VideoFramePreviewExtractor {
                     ?.toLongOrNull()
                     ?.coerceAtLeast(0L)
                     ?: 0L
-            val clampedTargetMs =
-                if (durationMs > 0L) {
-                    targetPositionMs.coerceIn(0L, durationMs)
-                } else {
-                    targetPositionMs.coerceAtLeast(0L)
-                }
 
-            val previewBitmap =
-                extractPreviewBitmap(
-                    retriever = retriever,
-                    durationMs = durationMs,
-                    targetPositionMs = clampedTargetMs,
-                ) ?: return@withContext null
-
-            tempFile.outputStream().use { output ->
-                previewBitmap.compress(Bitmap.CompressFormat.JPEG, 85, output)
+            return PreparedSession(
+                videoPath = videoPath,
+                retriever = retriever,
+                durationMs = durationMs,
+                closeDataSource = closeDataSource,
+            ).also { session ->
+                preparedSession = session
+                Log.d(TAG, "Prepared reusable preview session for path=$videoPath")
             }
-            if (tempFile != previewFile) {
-                if (previewFile.exists()) {
-                    previewFile.delete()
-                }
-                tempFile.copyTo(previewFile, overwrite = true)
-                tempFile.delete()
-            }
-            if (!previewBitmap.isRecycled) {
-                previewBitmap.recycle()
-            }
-
-            previewFile.absolutePath
-        } catch (cancelled: CancellationException) {
-            throw cancelled
         } catch (error: Exception) {
-            Log.w(
-                TAG,
-                "Failed to extract seek preview for path=$videoPath at ${targetPositionMs}ms: ${error.message}",
-                error,
-            )
-            null
-        } finally {
             runCatching { retriever.release() }
-            if (tempFile.exists()) {
-                tempFile.delete()
-            }
+            closeDataSource?.invoke()
+            Log.w(TAG, "Failed to prepare preview session for path=$videoPath: ${error.message}", error)
+            return null
         }
+    }
+
+    private fun releasePreparedSessionLocked() {
+        val currentSession = preparedSession ?: return
+        runCatching { currentSession.retriever.release() }
+        currentSession.closeDataSource?.invoke()
+        preparedSession = null
     }
 
     private fun extractPreviewBitmap(
