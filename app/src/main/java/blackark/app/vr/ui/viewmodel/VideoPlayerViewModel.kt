@@ -875,12 +875,21 @@ class VideoPlayerViewModel(
         controlsAutoHideJob = null
     }
 
+    private fun keepControlsVisibleWhileNotPlaying() {
+        cancelControlsAutoHide()
+        val currentState = _state.value
+        if (!currentState.showControls) {
+            _state.value = currentState.copy(showControls = true)
+        }
+    }
+
     private fun scheduleControlsAutoHideIfNeeded() {
         cancelControlsAutoHide()
 
         val currentState = _state.value
         if (
             !currentState.showControls ||
+            !currentState.isPlaying ||
             currentState.activePlaybackMenu != PlaybackMenu.None ||
             currentState.controlsInputLocked ||
             currentState.seekPreviewActive
@@ -1130,6 +1139,11 @@ class VideoPlayerViewModel(
 
                             override fun onIsPlayingChanged(isPlaying: Boolean) {
                                 _state.value = _state.value.copy(isPlaying = isPlaying)
+                                if (isPlaying) {
+                                    scheduleControlsAutoHideIfNeeded()
+                                } else {
+                                    keepControlsVisibleWhileNotPlaying()
+                                }
                             }
 
                             override fun onTracksChanged(tracks: androidx.media3.common.Tracks) {
@@ -1547,8 +1561,8 @@ class VideoPlayerViewModel(
 
     fun pause() {
         finishSeekPreviewSession(commit = false, restorePlayback = false)
+        keepControlsVisibleWhileNotPlaying()
         exoPlayer?.pause()
-        scheduleControlsAutoHideIfNeeded()
     }
 
     fun seekTo(positionMs: Long) {
