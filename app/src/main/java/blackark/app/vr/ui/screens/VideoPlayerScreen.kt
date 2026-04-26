@@ -259,6 +259,7 @@ fun VideoPlayerScreen(
 
     val playerState by videoPlayerViewModel.state.collectAsState()
     val dashboardPanelPose by blackark.app.vr.AppState.dashboardPanelPose.collectAsState()
+    val dashboardPanelSize by blackark.app.vr.AppState.dashboardPanelSize.collectAsState()
     val requestNavigateBackState =
         rememberUpdatedState { videoPlayerViewModel.requestNavigateBack() }
 
@@ -316,6 +317,8 @@ fun VideoPlayerScreen(
             videoPlayerViewModel = videoPlayerViewModel,
             playerState = playerState,
             dashboardPanelPose = dashboardPanelPose,
+            dashboardPanelWidth = dashboardPanelSize.widthDp.dp,
+            dashboardPanelHeight = dashboardPanelSize.heightDp.dp,
             onNavigateBack = { videoPlayerViewModel.requestNavigateBack() },
         )
     }
@@ -327,6 +330,8 @@ fun SpatialVideoPlayerContent(
     videoPlayerViewModel: VideoPlayerViewModel,
     playerState: VideoPlayerState,
     dashboardPanelPose: Pose?,
+    dashboardPanelWidth: Dp,
+    dashboardPanelHeight: Dp,
     onNavigateBack: () -> Unit,
 ) {
     val exoPlayer by videoPlayerViewModel.playerFlow.collectAsState()
@@ -363,10 +368,12 @@ fun SpatialVideoPlayerContent(
     // Without this anchor, Compose XR disables the underlying main window panel by default,
     // which lines up with controller input disappearing during playback.
     SpatialMainPanel(
-        modifier = SubspaceModifier
-            .width(2.dp)
-            .height(2.dp)
-            .offset(x = 4000.dp, y = 4000.dp),
+        modifier = buildPanelModifierFromSavedPose(
+            dashboardPanelPose = dashboardPanelPose,
+            density = density,
+            panelWidth = dashboardPanelWidth,
+            panelHeight = dashboardPanelHeight,
+        ),
     )
 
     val enableHeadFollowIn2D = playerState.videoFormat == VideoFormat.Format2D
