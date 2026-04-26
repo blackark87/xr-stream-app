@@ -110,13 +110,13 @@ fun XRPlaybackControls(
     val onAccent = colors.onPrimary
     val textStrong = colors.onSurface
     val textMuted = colors.onSurface.copy(alpha = 0.72f)
-    val panelTop = colors.background.copy(alpha = 0.78f)
-    val panelBottom = colors.surface.copy(alpha = 0.72f)
-    val sectionSurface = colors.surfaceVariant.copy(alpha = 0.54f)
-    val sectionBorder = colors.outline.copy(alpha = 0.34f)
-    val menuSurface = colors.surface.copy(alpha = 0.96f)
+    val panelTop = colors.background.copy(alpha = 0.58f)
+    val panelBottom = colors.surface.copy(alpha = 0.5f)
+    val sectionSurface = colors.surfaceVariant.copy(alpha = 0.4f)
+    val sectionBorder = colors.outline.copy(alpha = 0.28f)
+    val menuSurface = colors.surface.copy(alpha = 0.84f)
     val chipActive = colors.primary.copy(alpha = 0.18f)
-    val chipIdle = colors.surfaceVariant.copy(alpha = 0.72f)
+    val chipIdle = colors.surfaceVariant.copy(alpha = 0.5f)
 
     LaunchedEffect(playerState.currentPosition, playerState.duration) {
         if (!isScrubbing && playerState.duration > 0) {
@@ -188,7 +188,7 @@ fun XRPlaybackControls(
                 val maxX = (controlsRootWidthPx - menuWidthPx).coerceAtLeast(minX)
                 IntOffset(
                     x = (activeMenuAnchor.x - (menuWidthPx / 2)).coerceIn(minX, maxX),
-                    y = (activeMenuAnchor.y - menuHeightPx - menuGapPx).coerceAtLeast(0),
+                    y = activeMenuAnchor.y - menuHeightPx - menuGapPx,
                 )
             } else {
                 null
@@ -394,39 +394,110 @@ fun XRPlaybackControls(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                IconButton(
-                    onClick = onNavigateBack,
-                    modifier = Modifier
-                        .size(42.dp)
-                        .clip(CircleShape)
-                        .background(sectionSurface)
-                        .border(1.dp, sectionBorder, CircleShape),
+                Row(
+                    modifier = Modifier.weight(1f),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = "Back",
-                        tint = textStrong,
-                    )
+                    IconButton(
+                        onClick = onNavigateBack,
+                        modifier = Modifier
+                            .size(42.dp)
+                            .clip(CircleShape)
+                            .background(sectionSurface)
+                            .border(1.dp, sectionBorder, CircleShape),
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Back",
+                            tint = textStrong,
+                        )
+                    }
+
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(2.dp),
+                    ) {
+                        Text(
+                            text = playerState.videoFile?.name ?: "Video Player",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = textStrong,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            text = buildPlaybackSummary(playerState),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = textMuted,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                 }
 
-                Column(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text(
-                        text = playerState.videoFile?.name ?: "Video Player",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        color = textStrong,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
+                    PlaybackMenuIconButton(
+                        imageVector = Icons.Filled.FastForward,
+                        contentDescription = "Playback Speed",
+                        selected = playerState.activePlaybackMenu == PlaybackMenu.Speed,
+                        containerColor = if (playerState.activePlaybackMenu == PlaybackMenu.Speed) {
+                            chipActive
+                        } else {
+                            sectionSurface
+                        },
+                        borderColor = sectionBorder,
+                        contentColor = textStrong,
+                        onClick = {
+                            videoPlayerViewModel.togglePlaybackMenu(PlaybackMenu.Speed)
+                        },
+                        onPositioned = { centerX, topY ->
+                            speedAnchorCenterXPx = (centerX - controlsRootLeftPx).roundToInt()
+                            speedAnchorTopPx = (topY - controlsRootTopPx).roundToInt()
+                        },
                     )
-                    Text(
-                        text = buildPlaybackSummary(playerState),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = textMuted,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
+
+                    PlaybackMenuIconButton(
+                        imageVector = Icons.Filled.Movie,
+                        contentDescription = "Display Settings",
+                        selected = playerState.activePlaybackMenu == PlaybackMenu.Display,
+                        containerColor = if (playerState.activePlaybackMenu == PlaybackMenu.Display) {
+                            chipActive
+                        } else {
+                            sectionSurface
+                        },
+                        borderColor = sectionBorder,
+                        contentColor = textStrong,
+                        onClick = {
+                            videoPlayerViewModel.togglePlaybackMenu(PlaybackMenu.Display)
+                        },
+                        onPositioned = { centerX, topY ->
+                            displayAnchorCenterXPx = (centerX - controlsRootLeftPx).roundToInt()
+                            displayAnchorTopPx = (topY - controlsRootTopPx).roundToInt()
+                        },
+                    )
+
+                    PlaybackMenuIconButton(
+                        imageVector = Icons.Filled.VolumeUp,
+                        contentDescription = "Volume",
+                        selected = playerState.activePlaybackMenu == PlaybackMenu.Volume,
+                        containerColor = if (playerState.activePlaybackMenu == PlaybackMenu.Volume) {
+                            chipActive
+                        } else {
+                            sectionSurface
+                        },
+                        borderColor = sectionBorder,
+                        contentColor = textStrong,
+                        onClick = {
+                            videoPlayerViewModel.togglePlaybackMenu(PlaybackMenu.Volume)
+                        },
+                        onPositioned = { centerX, topY ->
+                            volumeAnchorCenterXPx = (centerX - controlsRootLeftPx).roundToInt()
+                            volumeAnchorTopPx = (topY - controlsRootTopPx).roundToInt()
+                        },
                     )
                 }
             }
@@ -501,15 +572,14 @@ fun XRPlaybackControls(
                 }
             }
 
-            Row(
+            Box(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.Bottom,
+                contentAlignment = Alignment.Center,
             ) {
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.weight(1f, fill = false),
+                    modifier = Modifier.defaultMinSize(minHeight = 68.dp),
                 ) {
                     PlaybackIconControlButton(
                         onClick = { videoPlayerViewModel.playPreviousVideo() },
@@ -570,71 +640,6 @@ fun XRPlaybackControls(
                         contentColor = textStrong,
                         buttonSize = 52.dp,
                         iconSize = 28.dp,
-                    )
-                }
-
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    PlaybackMenuIconButton(
-                        imageVector = Icons.Filled.FastForward,
-                        contentDescription = "Playback Speed",
-                        selected = playerState.activePlaybackMenu == PlaybackMenu.Speed,
-                        containerColor = if (playerState.activePlaybackMenu == PlaybackMenu.Speed) {
-                            chipActive
-                        } else {
-                            sectionSurface
-                        },
-                        borderColor = sectionBorder,
-                        contentColor = textStrong,
-                        onClick = {
-                            videoPlayerViewModel.togglePlaybackMenu(PlaybackMenu.Speed)
-                        },
-                        onPositioned = { centerX, topY ->
-                            speedAnchorCenterXPx = (centerX - controlsRootLeftPx).roundToInt()
-                            speedAnchorTopPx = (topY - controlsRootTopPx).roundToInt()
-                        },
-                    )
-
-                    PlaybackMenuIconButton(
-                        imageVector = Icons.Filled.Movie,
-                        contentDescription = "Display Settings",
-                        selected = playerState.activePlaybackMenu == PlaybackMenu.Display,
-                        containerColor = if (playerState.activePlaybackMenu == PlaybackMenu.Display) {
-                            chipActive
-                        } else {
-                            sectionSurface
-                        },
-                        borderColor = sectionBorder,
-                        contentColor = textStrong,
-                        onClick = {
-                            videoPlayerViewModel.togglePlaybackMenu(PlaybackMenu.Display)
-                        },
-                        onPositioned = { centerX, topY ->
-                            displayAnchorCenterXPx = (centerX - controlsRootLeftPx).roundToInt()
-                            displayAnchorTopPx = (topY - controlsRootTopPx).roundToInt()
-                        },
-                    )
-
-                    PlaybackMenuIconButton(
-                        imageVector = Icons.Filled.VolumeUp,
-                        contentDescription = "Volume",
-                        selected = playerState.activePlaybackMenu == PlaybackMenu.Volume,
-                        containerColor = if (playerState.activePlaybackMenu == PlaybackMenu.Volume) {
-                            chipActive
-                        } else {
-                            sectionSurface
-                        },
-                        borderColor = sectionBorder,
-                        contentColor = textStrong,
-                        onClick = {
-                            videoPlayerViewModel.togglePlaybackMenu(PlaybackMenu.Volume)
-                        },
-                        onPositioned = { centerX, topY ->
-                            volumeAnchorCenterXPx = (centerX - controlsRootLeftPx).roundToInt()
-                            volumeAnchorTopPx = (topY - controlsRootTopPx).roundToInt()
-                        },
                     )
                 }
             }
