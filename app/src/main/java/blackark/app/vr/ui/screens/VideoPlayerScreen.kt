@@ -98,7 +98,8 @@ import kotlinx.coroutines.delay
 
 private const val TAG = "VideoPlayerScreen"
 private val IMMERSIVE_STEREO_CONTROLS_LIFT = 160.dp
-private val HIDDEN_MAIN_PANEL_OFFSET = 8000.dp
+private val HIDDEN_MAIN_PANEL_OFFSET = 4000.dp
+private val HIDDEN_MAIN_PANEL_ANCHOR_SIZE = 2.dp
 
 private tailrec fun Context.findActivity(): Activity? =
     when (this) {
@@ -368,10 +369,7 @@ fun SpatialVideoPlayerContent(
     // Keep the Activity main panel alive while this screen is a pure Subspace composition.
     // The anchor stays off-screen so the dashboard panel does not cover video playback.
     SpatialMainPanel(
-        modifier = buildHiddenMainPanelAnchorModifier(
-            panelWidth = dashboardPanelWidth,
-            panelHeight = dashboardPanelHeight,
-        ),
+        modifier = buildHiddenMainPanelAnchorModifier(),
     )
 
     val enableHeadFollowIn2D = playerState.videoFormat == VideoFormat.Format2D
@@ -733,16 +731,13 @@ private fun buildFlatSurfaceModifier(
 }
 
 private fun buildHiddenMainPanelAnchorModifier(
-    panelWidth: Dp,
-    panelHeight: Dp,
 ): SubspaceModifier =
     SubspaceModifier
-        .width(panelWidth)
-        .height(panelHeight)
+        .width(HIDDEN_MAIN_PANEL_ANCHOR_SIZE)
+        .height(HIDDEN_MAIN_PANEL_ANCHOR_SIZE)
         .offset(
             x = HIDDEN_MAIN_PANEL_OFFSET,
             y = HIDDEN_MAIN_PANEL_OFFSET,
-            z = -HIDDEN_MAIN_PANEL_OFFSET,
         )
 
 private fun buildPanelModifierFromSavedPose(
