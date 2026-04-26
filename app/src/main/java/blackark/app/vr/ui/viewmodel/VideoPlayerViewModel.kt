@@ -27,7 +27,10 @@ import blackark.app.vr.player.SMBDataSource
 import blackark.app.vr.utils.InferredDisplayProfile
 import blackark.app.vr.utils.VideoFramePreviewExtractor
 import blackark.app.vr.utils.inferDisplayProfileFromFrame
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -36,7 +39,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlin.math.abs
@@ -107,6 +109,7 @@ class VideoPlayerViewModel(
 
     private val _playerEvents = Channel<PlayerEvent>()
     val playerEvents = _playerEvents.receiveAsFlow()
+    private val teardownScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private var exoPlayer: ExoPlayer? = null
     private var currentVideoId: Long? = null
@@ -1736,16 +1739,60 @@ class VideoPlayerViewModel(
         }
     }
 
-    fun releasePlayer() {
-        // This is safe because releasePlayer() is called from onCleared()/onDispose during teardown.
-        runBlocking {
-            releaseCurrentPlayer(resetUiState = true)
-        }
+    override fun onCleared() {
+        releasePlayerOnCleared()
+        super.onCleared()
     }
 
-    override fun onCleared() {
-        super.onCleared()
-        releasePlayer()
+    private fun releasePlayerOnCleared() {
+        pendingInitializationPath = null
+        positionTrackingJob?.cancel()
+        positionTrackingJob = null
+        pendingSaveJob?.cancel()
+        pendingSaveJob = null
+
+        val player = exoPlayer
+        val videoId = currentVideoId
+        val previewVideoPath = _state.value.videoFile?.path
+        val currentPosition = player?.currentPosition ?: 0L
+        val duration = player?.duration?.takeIf { it > 0L } ?: 0L
+
+        exoPlayer = null
+        _playerFlow.value = null
+        cancelSeekRepeat()
+        cancelVolumeRepeat()
+        cancelPlaybackHorizontalRepeat()
+        cancelThumbnailPreview()
+        cancelControlsAutoHide()
+        resetControlsInputLock()
+        unregisterVolumeObserver()
+        audioManager = null
+
+        _state.value = VideoPlayerState()
+        currentVideoId = null
+        pendingVideoFormatToPersist = null
+        pendingStereoModeToPersist = null
+        autoDisplayInferencePending = false
+        hasDispatchedNavigateBack = false
+        seekPreviewResumePlayback = false
+        seekPreviewShowControls = false
+        resetControllerAxisState()
+
+        runCatching { player?.release() }
+
+        teardownScope.launch {
+            if (player != null && videoId != null) {
+                runCatching {
+                    videoRepository.updatePlaybackState(
+                        videoId = videoId,
+                        position = currentPosition,
+                        duration = duration,
+                        timestamp = System.currentTimeMillis(),
+                    )
+                }
+            }
+            runCatching { VideoFramePreviewExtractor.clearPreparedVideo(previewVideoPath) }
+        }
     }
 
     private fun resolveAudioManager(): AudioManager? {

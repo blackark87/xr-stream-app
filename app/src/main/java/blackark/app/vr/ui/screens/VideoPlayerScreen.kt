@@ -148,22 +148,16 @@ private fun PlaybackScrollInputOverlay(
     val horizontalScrollState = rememberPlaybackScrollState(onDelta = onHorizontalScrollDelta)
     val focusRequester = remember { FocusRequester() }
     var hasFocus by remember { mutableStateOf(false) }
-    var isFocusCaptured by remember { mutableStateOf(false) }
 
-    LaunchedEffect(hasFocus, isFocusCaptured, showControls) {
-        if (hasFocus && !isFocusCaptured) {
-            focusRequester.captureFocus()
-            return@LaunchedEffect
-        }
-        while (!hasFocus) {
-            focusRequester.requestFocus()
-            delay(200)
-        }
+    LaunchedEffect(Unit) {
+        delay(80)
+        runCatching { focusRequester.requestFocus() }
     }
 
-    DisposableEffect(Unit) {
-        onDispose {
-            focusRequester.freeFocus()
+    LaunchedEffect(hasFocus) {
+        if (!hasFocus) {
+            delay(120)
+            focusRequester.requestFocus()
         }
     }
 
@@ -174,7 +168,6 @@ private fun PlaybackScrollInputOverlay(
             .focusRequester(focusRequester)
             .onFocusChanged { focusState ->
                 hasFocus = focusState.hasFocus
-                isFocusCaptured = focusState.isCaptured
             }
             .onPreviewKeyEvent { keyEvent ->
                 if (keyEvent.type != KeyEventType.KeyUp) {
