@@ -26,10 +26,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.FastForward
 import androidx.compose.material.icons.filled.FastRewind
+import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -50,15 +52,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -67,7 +69,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import androidx.media3.common.util.UnstableApi
 import blackark.app.vr.ui.viewmodel.PlaybackMenu
-import blackark.app.vr.ui.viewmodel.PlaybackPreviewMode
 import blackark.app.vr.ui.viewmodel.StereoMode
 import blackark.app.vr.ui.viewmodel.VideoFormat
 import blackark.app.vr.ui.viewmodel.VideoPlayerState
@@ -85,32 +86,38 @@ fun XRPlaybackControls(
     playerState: VideoPlayerState,
     onNavigateBack: () -> Unit,
 ) {
-    // Scrubbing state.
     var isScrubbing by remember { mutableStateOf(false) }
     var isVolumeScrubbing by remember { mutableStateOf(false) }
     var sliderPosition by remember { mutableFloatStateOf(0f) }
     var controlsRootLeftPx by remember { mutableFloatStateOf(0f) }
     var controlsRootTopPx by remember { mutableFloatStateOf(0f) }
+    var controlsRootWidthPx by remember { mutableIntStateOf(0) }
     var progressSectionLeftPx by remember { mutableIntStateOf(0) }
     var progressSectionTopPx by remember { mutableIntStateOf(0) }
     var progressSectionWidthPx by remember { mutableIntStateOf(0) }
+    var speedAnchorCenterXPx by remember { mutableIntStateOf(0) }
+    var speedAnchorTopPx by remember { mutableIntStateOf(0) }
+    var displayAnchorCenterXPx by remember { mutableIntStateOf(0) }
+    var displayAnchorTopPx by remember { mutableIntStateOf(0) }
+    var volumeAnchorCenterXPx by remember { mutableIntStateOf(0) }
+    var volumeAnchorTopPx by remember { mutableIntStateOf(0) }
+
     val context = LocalContext.current
     val density = LocalDensity.current
-
     val colors = MaterialTheme.colorScheme
     val accentStrong = colors.primary
-    val accentSoft = colors.secondary.copy(alpha = 0.24f)
+    val accentSoft = colors.primary.copy(alpha = 0.18f)
     val onAccent = colors.onPrimary
-    val textStrong = colors.onBackground
-    val textMuted = colors.onBackground.copy(alpha = 0.72f)
-    val panelTop = colors.background.copy(alpha = 0.98f)
-    val panelBottom = colors.surface.copy(alpha = 0.98f)
-    val sectionSurface = colors.surfaceVariant.copy(alpha = 0.94f)
-    val sectionBorder = colors.primary.copy(alpha = 0.36f)
-    val chipActive = colors.primary.copy(alpha = 0.16f)
-    val chipIdle = colors.surfaceVariant.copy(alpha = 0.88f)
+    val textStrong = colors.onSurface
+    val textMuted = colors.onSurface.copy(alpha = 0.72f)
+    val panelTop = colors.background.copy(alpha = 0.78f)
+    val panelBottom = colors.surface.copy(alpha = 0.72f)
+    val sectionSurface = colors.surfaceVariant.copy(alpha = 0.54f)
+    val sectionBorder = colors.outline.copy(alpha = 0.34f)
+    val menuSurface = colors.surface.copy(alpha = 0.96f)
+    val chipActive = colors.primary.copy(alpha = 0.18f)
+    val chipIdle = colors.surfaceVariant.copy(alpha = 0.72f)
 
-    // Update slider position from player state only when NOT scrubbing.
     LaunchedEffect(playerState.currentPosition, playerState.duration) {
         if (!isScrubbing && playerState.duration > 0) {
             sliderPosition = playerState.currentPosition.toFloat() / playerState.duration.toFloat()
@@ -131,17 +138,18 @@ fun XRPlaybackControls(
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 22.dp, vertical = 20.dp)
+            .padding(horizontal = 18.dp, vertical = 16.dp)
             .onGloballyPositioned { coordinates ->
                 val position = coordinates.positionInRoot()
                 controlsRootLeftPx = position.x
                 controlsRootTopPx = position.y
+                controlsRootWidthPx = coordinates.size.width
             },
     ) {
         val previewCardWidthPx = with(density) { SeekPreviewOverlayWidth.roundToPx() }
         val previewCardHeightPx = with(density) { SeekPreviewOverlayEstimatedHeight.roundToPx() }
         val previewCardGapPx = with(density) { SeekPreviewOverlayGap.roundToPx() }
-        val previewTrackInsetPx = with(density) { 14.dp.roundToPx() }
+        val previewTrackInsetPx = with(density) { 12.dp.roundToPx() }
         val previewFraction =
             if (playerState.duration > 0L) {
                 (playerState.seekPreviewTargetPositionMs.toFloat() / playerState.duration.toFloat())
@@ -162,52 +170,234 @@ fun XRPlaybackControls(
         val previewOffsetY =
             (progressSectionTopPx - previewCardHeightPx - previewCardGapPx).coerceAtLeast(0)
 
-        if (
-            playerState.seekPreviewActive &&
-            playerState.seekPreviewMode == PlaybackPreviewMode.ThumbnailOverlay
-        ) {
+        val activeMenu = playerState.activePlaybackMenu
+        val menuWidth = activeMenu.menuWidth(playerState.videoFormat)
+        val menuHeight = activeMenu.menuEstimatedHeight(playerState.videoFormat)
+        val menuWidthPx = with(density) { menuWidth.roundToPx() }
+        val menuHeightPx = with(density) { menuHeight.roundToPx() }
+        val menuGapPx = with(density) { 10.dp.roundToPx() }
+        val activeMenuAnchor = when (activeMenu) {
+            PlaybackMenu.Speed -> IntOffset(speedAnchorCenterXPx, speedAnchorTopPx)
+            PlaybackMenu.Display -> IntOffset(displayAnchorCenterXPx, displayAnchorTopPx)
+            PlaybackMenu.Volume -> IntOffset(volumeAnchorCenterXPx, volumeAnchorTopPx)
+            PlaybackMenu.None -> null
+        }
+        val activeMenuOffset =
+            if (activeMenu != PlaybackMenu.None && activeMenuAnchor != null) {
+                val minX = 0
+                val maxX = (controlsRootWidthPx - menuWidthPx).coerceAtLeast(minX)
+                IntOffset(
+                    x = (activeMenuAnchor.x - (menuWidthPx / 2)).coerceIn(minX, maxX),
+                    y = (activeMenuAnchor.y - menuHeightPx - menuGapPx).coerceAtLeast(0),
+                )
+            } else {
+                null
+            }
+
+        if (playerState.seekPreviewActive) {
             PlaybackSeekPreviewCard(
                 targetPositionMs = playerState.seekPreviewTargetPositionMs,
                 previewPath = playerState.seekPreviewThumbnailPath,
-                containerColor = sectionSurface,
-                borderColor = sectionBorder,
-                textColor = textStrong,
-                secondaryTextColor = textMuted,
                 context = context,
                 modifier = Modifier
                     .align(Alignment.TopStart)
-                    .zIndex(1f)
-                    .offset {
-                        IntOffset(previewOffsetX, previewOffsetY)
-                    },
+                    .zIndex(3f)
+                    .offset { IntOffset(previewOffsetX, previewOffsetY) },
             )
+        }
+
+        if (activeMenuOffset != null) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .zIndex(2f)
+                    .offset { activeMenuOffset },
+            ) {
+                when (activeMenu) {
+                    PlaybackMenu.Speed -> {
+                        PlaybackFloatingMenuCard(
+                            title = "Playback Speed",
+                            subtitle = "Adjust how fast playback moves",
+                            width = menuWidth,
+                            containerColor = menuSurface,
+                            borderColor = sectionBorder,
+                        ) {
+                            playbackSpeedRows().forEach { speedRow ->
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    speedRow.forEach { speed ->
+                                        PlaybackOptionButton(
+                                            text = "${prettySpeed(speed)}x",
+                                            selected = playerState.playbackSpeed == speed,
+                                            onClick = {
+                                                videoPlayerViewModel.setPlaybackSpeed(speed)
+                                                videoPlayerViewModel.dismissPlaybackMenu()
+                                            },
+                                            selectedContainerColor = accentStrong,
+                                            selectedContentColor = onAccent,
+                                            idleContainerColor = chipIdle,
+                                            idleContentColor = textStrong,
+                                            borderColor = sectionBorder,
+                                            modifier = Modifier.weight(1f),
+                                        )
+                                    }
+                                    repeat(3 - speedRow.size) {
+                                        Spacer(modifier = Modifier.weight(1f))
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    PlaybackMenu.Display -> {
+                        PlaybackFloatingMenuCard(
+                            title = "Display",
+                            subtitle = "Projection and stereo layout",
+                            width = menuWidth,
+                            containerColor = menuSurface,
+                            borderColor = sectionBorder,
+                        ) {
+                            Text(
+                                text = "Projection",
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.SemiBold,
+                                color = textMuted,
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                VideoFormat.entries.forEach { format ->
+                                    PlaybackOptionButton(
+                                        text = format.name.removePrefix("Format"),
+                                        selected = playerState.videoFormat == format,
+                                        onClick = {
+                                            videoPlayerViewModel.setVideoFormat(format)
+                                        },
+                                        selectedContainerColor = accentStrong,
+                                        selectedContentColor = onAccent,
+                                        idleContainerColor = chipIdle,
+                                        idleContentColor = textStrong,
+                                        borderColor = sectionBorder,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                }
+                            }
+
+                            if (playerState.videoFormat != VideoFormat.Format2D) {
+                                Text(
+                                    text = "Stereo",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = textMuted,
+                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    StereoMode.entries.forEach { mode ->
+                                        PlaybackOptionButton(
+                                            text = prettyStereoMode(mode),
+                                            selected = playerState.stereoMode == mode,
+                                            onClick = {
+                                                videoPlayerViewModel.setStereoMode(mode)
+                                            },
+                                            selectedContainerColor = accentStrong,
+                                            selectedContentColor = onAccent,
+                                            idleContainerColor = chipIdle,
+                                            idleContentColor = textStrong,
+                                            borderColor = sectionBorder,
+                                            modifier = Modifier.weight(1f),
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    PlaybackMenu.Volume -> {
+                        PlaybackFloatingMenuCard(
+                            title = "Volume",
+                            subtitle = "Output level for the current session",
+                            width = menuWidth,
+                            containerColor = menuSurface,
+                            borderColor = sectionBorder,
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    text = "Current Level",
+                                    color = textMuted,
+                                    style = MaterialTheme.typography.labelLarge,
+                                )
+                                Text(
+                                    text = "${(playerState.volume * 100).roundToInt()}%",
+                                    color = textStrong,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                            }
+
+                            Slider(
+                                value = playerState.volume,
+                                onValueChange = {
+                                    if (!isVolumeScrubbing) {
+                                        videoPlayerViewModel.beginControlsInputLock()
+                                    }
+                                    isVolumeScrubbing = true
+                                    videoPlayerViewModel.setVolume(it)
+                                },
+                                onValueChangeFinished = {
+                                    isVolumeScrubbing = false
+                                    videoPlayerViewModel.endControlsInputLock()
+                                },
+                                colors = SliderDefaults.colors(
+                                    thumbColor = accentStrong,
+                                    activeTrackColor = accentStrong,
+                                    inactiveTrackColor = accentSoft,
+                                ),
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
+                    }
+
+                    PlaybackMenu.None -> Unit
+                }
+            }
         }
 
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(30.dp))
+                .shadow(
+                    elevation = 18.dp,
+                    shape = RoundedCornerShape(28.dp),
+                    clip = false,
+                )
+                .clip(RoundedCornerShape(28.dp))
                 .background(
                     Brush.verticalGradient(
                         colors = listOf(panelTop, panelBottom),
                     ),
                 )
-                .border(1.dp, sectionBorder, RoundedCornerShape(30.dp))
-                .padding(horizontal = 20.dp, vertical = 18.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
+                .border(1.dp, sectionBorder, RoundedCornerShape(28.dp))
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            // Top row - title and back button.
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 IconButton(
-                    onClick = {
-                        onNavigateBack()
-                    },
+                    onClick = onNavigateBack,
                     modifier = Modifier
-                        .size(46.dp)
+                        .size(42.dp)
                         .clip(CircleShape)
                         .background(sectionSurface)
                         .border(1.dp, sectionBorder, CircleShape),
@@ -220,37 +410,27 @@ fun XRPlaybackControls(
                 }
 
                 Column(
-                    modifier = Modifier
-                        .weight(1f)
-                        .padding(horizontal = 14.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
                     Text(
                         text = playerState.videoFile?.name ?: "Video Player",
-                        style = MaterialTheme.typography.titleLarge,
+                        style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
                         color = textStrong,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
                     Text(
-                        text =
-                            "${playerState.videoFormat.name.removePrefix("Format")} | ${
-                                prettySpeed(
-                                    playerState.playbackSpeed
-                                )
-                            }x | ${(playerState.volume * 100).roundToInt()}%",
-                        style = MaterialTheme.typography.labelLarge,
+                        text = buildPlaybackSummary(playerState),
+                        style = MaterialTheme.typography.bodySmall,
                         color = textMuted,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
-
-                Spacer(modifier = Modifier.width(46.dp))
             }
 
-            // Progress bar.
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -266,8 +446,9 @@ fun XRPlaybackControls(
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(18.dp))
                         .background(sectionSurface)
-                        .border(1.dp, sectionBorder.copy(alpha = 0.7f), RoundedCornerShape(18.dp))
+                        .border(1.dp, sectionBorder, RoundedCornerShape(18.dp))
                         .padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     Slider(
                         value = sliderPosition,
@@ -296,9 +477,7 @@ fun XRPlaybackControls(
                     )
 
                     Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 2.dp),
+                        modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                     ) {
                         Text(
@@ -322,280 +501,140 @@ fun XRPlaybackControls(
                 }
             }
 
-            // Main controls.
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 2.dp),
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                PlaybackIconControlButton(
-                    onClick = {
-                        videoPlayerViewModel.playPreviousVideo()
-                    },
-                    imageVector = Icons.Filled.SkipPrevious,
-                    contentDescription = "Previous Video",
-                    containerColor = sectionSurface,
-                    borderColor = sectionBorder,
-                    contentColor = textStrong,
-                )
-
-                Spacer(modifier = Modifier.width(12.dp))
-
-                PlaybackIconControlButton(
-                    onClick = {
-                        videoPlayerViewModel.skipBackward()
-                    },
-                    imageVector = Icons.Filled.FastRewind,
-                    contentDescription = "Rewind",
-                    containerColor = sectionSurface,
-                    borderColor = sectionBorder,
-                    contentColor = textStrong,
-                )
-
-                Spacer(modifier = Modifier.width(18.dp))
-
-                PlaybackIconControlButton(
-                    onClick = {
-                        if (playerState.isPlaying) {
-                            videoPlayerViewModel.pause()
-                        } else {
-                            videoPlayerViewModel.play()
-                        }
-                    },
-                    imageVector = if (playerState.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                    contentDescription = if (playerState.isPlaying) "Pause" else "Play",
-                    containerColor = accentStrong,
-                    borderColor = accentStrong.copy(alpha = 0.8f),
-                    contentColor = onAccent,
-                    buttonSize = 78.dp,
-                    iconSize = 44.dp,
-                )
-
-                Spacer(modifier = Modifier.width(18.dp))
-
-                PlaybackIconControlButton(
-                    onClick = {
-                        videoPlayerViewModel.skipForward()
-                    },
-                    imageVector = Icons.Filled.FastForward,
-                    contentDescription = "Fast Forward",
-                    containerColor = sectionSurface,
-                    borderColor = sectionBorder,
-                    contentColor = textStrong,
-                )
-
-                Spacer(modifier = Modifier.width(12.dp))
-
-                PlaybackIconControlButton(
-                    onClick = {
-                        videoPlayerViewModel.playNextVideo()
-                    },
-                    imageVector = Icons.Filled.SkipNext,
-                    contentDescription = "Next Video",
-                    containerColor = sectionSurface,
-                    borderColor = sectionBorder,
-                    contentColor = textStrong,
-                )
-            }
-
-            // Bottom row - always-visible secondary controls.
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Bottom,
             ) {
-                PlaybackInfoChip(
-                    label = "Speed",
-                    value = "${prettySpeed(playerState.playbackSpeed)}x",
-                    selected = playerState.activePlaybackMenu == PlaybackMenu.Speed,
-                    onClick = {
-                        videoPlayerViewModel.togglePlaybackMenu(PlaybackMenu.Speed)
-                    },
-                    modifier = Modifier.weight(1f),
-                    activeContainerColor = chipActive,
-                    inactiveContainerColor = chipIdle,
-                    borderColor = sectionBorder,
-                    labelColor = textMuted,
-                    valueColor = textStrong,
-                )
-
-                PlaybackInfoChip(
-                    label = "Format",
-                    value = playerState.videoFormat.name.removePrefix("Format"),
-                    selected = playerState.activePlaybackMenu == PlaybackMenu.Display,
-                    onClick = {
-                        videoPlayerViewModel.togglePlaybackMenu(PlaybackMenu.Display)
-                    },
-                    modifier = Modifier.weight(1f),
-                    activeContainerColor = chipActive,
-                    inactiveContainerColor = chipIdle,
-                    borderColor = sectionBorder,
-                    labelColor = textMuted,
-                    valueColor = textStrong,
-                )
-
-                PlaybackInfoChip(
-                    label = "Volume",
-                    value = "${(playerState.volume * 100).roundToInt()}%",
-                    selected = playerState.activePlaybackMenu == PlaybackMenu.Volume,
-                    onClick = {
-                        videoPlayerViewModel.togglePlaybackMenu(PlaybackMenu.Volume)
-                    },
-                    modifier = Modifier.weight(1f),
-                    activeContainerColor = chipActive,
-                    inactiveContainerColor = chipIdle,
-                    borderColor = sectionBorder,
-                    labelColor = textMuted,
-                    valueColor = textStrong,
-                )
-            }
-
-            if (playerState.activePlaybackMenu == PlaybackMenu.Speed) {
-                PlaybackMenuCard(
-                    title = "Playback Speed",
-                    subtitle = "Adjust how fast the video moves",
-                    containerColor = panelBottom,
-                    borderColor = sectionBorder,
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.weight(1f, fill = false),
                 ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        listOf(0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f).forEach { speed ->
-                            PlaybackOptionButton(
-                                text = "${prettySpeed(speed)}x",
-                                selected = playerState.playbackSpeed == speed,
-                                onClick = {
-                                    videoPlayerViewModel.setPlaybackSpeed(speed)
-                                    videoPlayerViewModel.dismissPlaybackMenu()
-                                },
-                                modifier = Modifier.weight(1f),
-                                selectedContainerColor = accentStrong,
-                                selectedContentColor = onAccent,
-                                idleContainerColor = chipIdle,
-                                idleContentColor = textStrong,
-                                borderColor = sectionBorder,
-                            )
-                        }
-                    }
-                }
-            }
-
-            if (playerState.activePlaybackMenu == PlaybackMenu.Display) {
-                PlaybackMenuCard(
-                    title = "Video Format",
-                    subtitle =
-                        if (playerState.videoFormat == VideoFormat.Format2D) {
-                            "Switch the projection"
+                    PlaybackIconControlButton(
+                        onClick = { videoPlayerViewModel.playPreviousVideo() },
+                        imageVector = Icons.Filled.SkipPrevious,
+                        contentDescription = "Previous Video",
+                        containerColor = sectionSurface,
+                        borderColor = sectionBorder,
+                        contentColor = textStrong,
+                        buttonSize = 52.dp,
+                        iconSize = 28.dp,
+                    )
+                    PlaybackIconControlButton(
+                        onClick = { videoPlayerViewModel.skipBackward() },
+                        imageVector = Icons.Filled.FastRewind,
+                        contentDescription = "Rewind",
+                        containerColor = sectionSurface,
+                        borderColor = sectionBorder,
+                        contentColor = textStrong,
+                        buttonSize = 52.dp,
+                        iconSize = 28.dp,
+                    )
+                    PlaybackIconControlButton(
+                        onClick = {
+                            if (playerState.isPlaying) {
+                                videoPlayerViewModel.pause()
+                            } else {
+                                videoPlayerViewModel.play()
+                            }
+                        },
+                        imageVector = if (playerState.isPlaying) {
+                            Icons.Filled.Pause
                         } else {
-                            "Switch the projection and stereo mode"
+                            Icons.Filled.PlayArrow
                         },
-                    containerColor = panelBottom,
-                    borderColor = sectionBorder,
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        VideoFormat.entries.forEach { format ->
-                            PlaybackOptionButton(
-                                text = format.name.removePrefix("Format"),
-                                selected = playerState.videoFormat == format,
-                                onClick = {
-                                    videoPlayerViewModel.setVideoFormat(format)
-                                },
-                                modifier = Modifier.weight(1f),
-                                selectedContainerColor = accentStrong,
-                                selectedContentColor = onAccent,
-                                idleContainerColor = chipIdle,
-                                idleContentColor = textStrong,
-                                borderColor = sectionBorder,
-                            )
-                        }
-                    }
-
-                    if (playerState.videoFormat != VideoFormat.Format2D) {
-                        Spacer(modifier = Modifier.height(10.dp))
-
-                        Text(
-                            text = "Stereo Mode",
-                            style = MaterialTheme.typography.labelLarge,
-                            fontWeight = FontWeight.SemiBold,
-                            color = textMuted,
-                        )
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            StereoMode.entries.forEach { mode ->
-                                PlaybackOptionButton(
-                                    text = prettyStereoMode(mode),
-                                    selected = playerState.stereoMode == mode,
-                                    onClick = {
-                                        videoPlayerViewModel.setStereoMode(mode)
-                                    },
-                                    modifier = Modifier.weight(1f),
-                                    selectedContainerColor = accentStrong,
-                                    selectedContentColor = onAccent,
-                                    idleContainerColor = chipIdle,
-                                    idleContentColor = textStrong,
-                                    borderColor = sectionBorder,
-                                )
-                            }
-                        }
-                    }
+                        contentDescription = if (playerState.isPlaying) "Pause" else "Play",
+                        containerColor = accentStrong,
+                        borderColor = accentStrong.copy(alpha = 0.8f),
+                        contentColor = onAccent,
+                        buttonSize = 68.dp,
+                        iconSize = 38.dp,
+                    )
+                    PlaybackIconControlButton(
+                        onClick = { videoPlayerViewModel.skipForward() },
+                        imageVector = Icons.Filled.FastForward,
+                        contentDescription = "Fast Forward",
+                        containerColor = sectionSurface,
+                        borderColor = sectionBorder,
+                        contentColor = textStrong,
+                        buttonSize = 52.dp,
+                        iconSize = 28.dp,
+                    )
+                    PlaybackIconControlButton(
+                        onClick = { videoPlayerViewModel.playNextVideo() },
+                        imageVector = Icons.Filled.SkipNext,
+                        contentDescription = "Next Video",
+                        containerColor = sectionSurface,
+                        borderColor = sectionBorder,
+                        contentColor = textStrong,
+                        buttonSize = 52.dp,
+                        iconSize = 28.dp,
+                    )
                 }
-            }
 
-            if (playerState.activePlaybackMenu == PlaybackMenu.Volume) {
-                PlaybackMenuCard(
-                    title = "Volume",
-                    subtitle = "Output level for current playback",
-                    containerColor = panelBottom,
-                    borderColor = sectionBorder,
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            text = "Current Level",
-                            color = textMuted,
-                            style = MaterialTheme.typography.labelLarge,
-                        )
-                        Text(
-                            text = "${(playerState.volume * 100).roundToInt()}%",
-                            color = textStrong,
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold,
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    Slider(
-                        value = playerState.volume,
-                        onValueChange = {
-                            if (!isVolumeScrubbing) {
-                                videoPlayerViewModel.beginControlsInputLock()
-                            }
-                            isVolumeScrubbing = true
-                            videoPlayerViewModel.setVolume(it)
+                    PlaybackMenuIconButton(
+                        imageVector = Icons.Filled.FastForward,
+                        contentDescription = "Playback Speed",
+                        selected = playerState.activePlaybackMenu == PlaybackMenu.Speed,
+                        containerColor = if (playerState.activePlaybackMenu == PlaybackMenu.Speed) {
+                            chipActive
+                        } else {
+                            sectionSurface
                         },
-                        onValueChangeFinished = {
-                            isVolumeScrubbing = false
-                            videoPlayerViewModel.endControlsInputLock()
+                        borderColor = sectionBorder,
+                        contentColor = textStrong,
+                        onClick = {
+                            videoPlayerViewModel.togglePlaybackMenu(PlaybackMenu.Speed)
                         },
-                        colors = SliderDefaults.colors(
-                            thumbColor = accentStrong,
-                            activeTrackColor = accentStrong,
-                            inactiveTrackColor = accentSoft,
-                        ),
-                        modifier = Modifier.fillMaxWidth(),
+                        onPositioned = { centerX, topY ->
+                            speedAnchorCenterXPx = (centerX - controlsRootLeftPx).roundToInt()
+                            speedAnchorTopPx = (topY - controlsRootTopPx).roundToInt()
+                        },
+                    )
+
+                    PlaybackMenuIconButton(
+                        imageVector = Icons.Filled.Movie,
+                        contentDescription = "Display Settings",
+                        selected = playerState.activePlaybackMenu == PlaybackMenu.Display,
+                        containerColor = if (playerState.activePlaybackMenu == PlaybackMenu.Display) {
+                            chipActive
+                        } else {
+                            sectionSurface
+                        },
+                        borderColor = sectionBorder,
+                        contentColor = textStrong,
+                        onClick = {
+                            videoPlayerViewModel.togglePlaybackMenu(PlaybackMenu.Display)
+                        },
+                        onPositioned = { centerX, topY ->
+                            displayAnchorCenterXPx = (centerX - controlsRootLeftPx).roundToInt()
+                            displayAnchorTopPx = (topY - controlsRootTopPx).roundToInt()
+                        },
+                    )
+
+                    PlaybackMenuIconButton(
+                        imageVector = Icons.Filled.VolumeUp,
+                        contentDescription = "Volume",
+                        selected = playerState.activePlaybackMenu == PlaybackMenu.Volume,
+                        containerColor = if (playerState.activePlaybackMenu == PlaybackMenu.Volume) {
+                            chipActive
+                        } else {
+                            sectionSurface
+                        },
+                        borderColor = sectionBorder,
+                        contentColor = textStrong,
+                        onClick = {
+                            videoPlayerViewModel.togglePlaybackMenu(PlaybackMenu.Volume)
+                        },
+                        onPositioned = { centerX, topY ->
+                            volumeAnchorCenterXPx = (centerX - controlsRootLeftPx).roundToInt()
+                            volumeAnchorTopPx = (topY - controlsRootTopPx).roundToInt()
+                        },
                     )
                 }
             }
@@ -612,8 +651,8 @@ private fun PlaybackIconControlButton(
     borderColor: Color,
     contentColor: Color,
     modifier: Modifier = Modifier,
-    buttonSize: Dp = 62.dp,
-    iconSize: Dp = 34.dp,
+    buttonSize: Dp = 56.dp,
+    iconSize: Dp = 32.dp,
 ) {
     IconButton(
         onClick = onClick,
@@ -633,61 +672,60 @@ private fun PlaybackIconControlButton(
 }
 
 @Composable
-private fun PlaybackInfoChip(
-    label: String,
-    value: String,
+private fun PlaybackMenuIconButton(
+    imageVector: ImageVector,
+    contentDescription: String,
     selected: Boolean,
-    onClick: () -> Unit,
-    activeContainerColor: Color,
-    inactiveContainerColor: Color,
+    containerColor: Color,
     borderColor: Color,
-    labelColor: Color,
-    valueColor: Color,
-    modifier: Modifier = Modifier,
+    contentColor: Color,
+    onClick: () -> Unit,
+    onPositioned: (centerX: Int, topY: Int) -> Unit,
 ) {
-    Button(
+    IconButton(
         onClick = onClick,
-        modifier = modifier.defaultMinSize(minHeight = 68.dp),
-        shape = RoundedCornerShape(14.dp),
-        border = BorderStroke(1.dp, borderColor),
-        colors = ButtonDefaults.buttonColors(
-            containerColor = if (selected) activeContainerColor else inactiveContainerColor,
-            contentColor = valueColor,
-        ),
-        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
+        modifier = Modifier
+            .size(44.dp)
+            .onGloballyPositioned { coordinates ->
+                val position = coordinates.positionInRoot()
+                onPositioned(
+                    position.x.roundToInt() + (coordinates.size.width / 2),
+                    position.y.roundToInt(),
+                )
+            }
+            .clip(CircleShape)
+            .background(containerColor)
+            .border(
+                width = if (selected) 1.2.dp else 1.dp,
+                color = borderColor,
+                shape = CircleShape,
+            ),
     ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(
-                text = label,
-                style = MaterialTheme.typography.labelLarge,
-                color = labelColor,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Spacer(modifier = Modifier.height(2.dp))
-            Text(
-                text = value,
-                style = MaterialTheme.typography.bodyLarge,
-                fontWeight = FontWeight.SemiBold,
-                color = valueColor,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
+        Icon(
+            imageVector = imageVector,
+            contentDescription = contentDescription,
+            tint = contentColor,
+        )
     }
 }
 
 @Composable
-private fun PlaybackMenuCard(
+private fun PlaybackFloatingMenuCard(
     title: String,
     subtitle: String,
+    width: Dp,
     containerColor: Color,
     borderColor: Color,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     Column(
         modifier = Modifier
-            .fillMaxWidth()
+            .width(width)
+            .shadow(
+                elevation = 18.dp,
+                shape = RoundedCornerShape(18.dp),
+                clip = false,
+            )
             .clip(RoundedCornerShape(18.dp))
             .background(containerColor)
             .border(1.dp, borderColor, RoundedCornerShape(18.dp))
@@ -698,12 +736,12 @@ private fun PlaybackMenuCard(
             text = title,
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme.onBackground,
+            color = MaterialTheme.colorScheme.onSurface,
         )
         Text(
             text = subtitle,
             style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f),
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
         )
         content()
     }
@@ -713,10 +751,6 @@ private fun PlaybackMenuCard(
 private fun PlaybackSeekPreviewCard(
     targetPositionMs: Long,
     previewPath: String?,
-    containerColor: Color,
-    borderColor: Color,
-    textColor: Color,
-    secondaryTextColor: Color,
     context: android.content.Context,
     modifier: Modifier = Modifier,
 ) {
@@ -731,26 +765,25 @@ private fun PlaybackSeekPreviewCard(
         }
     }
 
-    Column(
+    Box(
         modifier = modifier
             .width(SeekPreviewOverlayWidth)
             .shadow(
-                elevation = 18.dp,
-                shape = RoundedCornerShape(14.dp),
+                elevation = 20.dp,
+                shape = RoundedCornerShape(16.dp),
                 clip = false,
             )
-            .clip(RoundedCornerShape(14.dp))
-            .background(Color.Black.copy(alpha = 0.82f))
-            .padding(horizontal = 8.dp, vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(7.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
+            .clip(RoundedCornerShape(16.dp))
+            .background(Color.Black.copy(alpha = 0.84f))
+            .border(1.dp, Color.White.copy(alpha = 0.14f), RoundedCornerShape(16.dp))
+            .padding(8.dp),
     ) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(SeekPreviewOverlayThumbnailHeight)
-                .clip(RoundedCornerShape(10.dp))
-                .background(Color.Black.copy(alpha = 0.36f)),
+                .clip(RoundedCornerShape(12.dp))
+                .background(Color.Black.copy(alpha = 0.42f)),
             contentAlignment = Alignment.Center,
         ) {
             if (previewRequest != null) {
@@ -764,24 +797,33 @@ private fun PlaybackSeekPreviewCard(
             } else {
                 Text(
                     text = "Preview",
-                    color = Color.White.copy(alpha = 0.70f),
+                    color = Color.White.copy(alpha = 0.74f),
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
         }
 
-        Text(
-            text = formatTime(targetPositionMs),
-            style = MaterialTheme.typography.labelMedium,
-            fontWeight = FontWeight.Medium,
-            color = Color.White.copy(alpha = 0.96f),
-        )
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .offset(x = (-8).dp, y = (-8).dp)
+                .clip(RoundedCornerShape(999.dp))
+                .background(Color.Black.copy(alpha = 0.78f))
+                .padding(horizontal = 10.dp, vertical = 5.dp),
+        ) {
+            Text(
+                text = formatTime(targetPositionMs),
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = Color.White.copy(alpha = 0.96f),
+            )
+        }
     }
 }
 
-private val SeekPreviewOverlayWidth = 228.dp
-private val SeekPreviewOverlayThumbnailHeight = 128.dp
-private val SeekPreviewOverlayEstimatedHeight = 184.dp
+private val SeekPreviewOverlayWidth = 216.dp
+private val SeekPreviewOverlayThumbnailHeight = 122.dp
+private val SeekPreviewOverlayEstimatedHeight = 146.dp
 private val SeekPreviewOverlayGap = 12.dp
 
 @Composable
@@ -798,7 +840,7 @@ private fun PlaybackOptionButton(
 ) {
     Button(
         onClick = onClick,
-        modifier = modifier.defaultMinSize(minHeight = 46.dp),
+        modifier = modifier.defaultMinSize(minHeight = 42.dp),
         shape = RoundedCornerShape(12.dp),
         border = BorderStroke(1.dp, borderColor),
         colors = if (selected) {
@@ -822,6 +864,37 @@ private fun PlaybackOptionButton(
             overflow = TextOverflow.Ellipsis,
         )
     }
+}
+
+private fun playbackSpeedRows(): List<List<Float>> =
+    listOf(0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f).chunked(3)
+
+private fun PlaybackMenu.menuWidth(videoFormat: VideoFormat): Dp = when (this) {
+    PlaybackMenu.Speed -> 276.dp
+    PlaybackMenu.Display -> if (videoFormat == VideoFormat.Format2D) 320.dp else 352.dp
+    PlaybackMenu.Volume -> 264.dp
+    PlaybackMenu.None -> 0.dp
+}
+
+private fun PlaybackMenu.menuEstimatedHeight(videoFormat: VideoFormat): Dp = when (this) {
+    PlaybackMenu.Speed -> 170.dp
+    PlaybackMenu.Display -> if (videoFormat == VideoFormat.Format2D) 172.dp else 238.dp
+    PlaybackMenu.Volume -> 156.dp
+    PlaybackMenu.None -> 0.dp
+}
+
+private fun buildPlaybackSummary(playerState: VideoPlayerState): String {
+    val projection = playerState.videoFormat.name.removePrefix("Format")
+    val stereo =
+        if (playerState.videoFormat == VideoFormat.Format2D) {
+            null
+        } else {
+            prettyStereoMode(playerState.stereoMode)
+        }
+    val speed = "${prettySpeed(playerState.playbackSpeed)}x"
+    val volume = "${(playerState.volume * 100).roundToInt()}%"
+
+    return listOfNotNull(projection, stereo, speed, volume).joinToString("  •  ")
 }
 
 @Suppress("MagicNumber")

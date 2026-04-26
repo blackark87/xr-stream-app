@@ -87,10 +87,6 @@
     <string name="share_name_optional">공유 이름(선택)</string>
     <string name="share_name_example">예: Videos</string>
     <string name="save">저장</string>
-    <string name="seek_preview_mode_description">thumb stick seek 미리보기 방식을 선택합니다. 변경 사항은 다음 재생 세션부터 적용됩니다.</string>
-    <string name="seek_preview_mode_player_frame">플레이어 화면 갱신</string>
-    <string name="seek_preview_mode_thumbnail_overlay">썸네일 오버레이</string>
-    <string name="seek_preview_mode_title">seek 미리보기 방식</string>
     <string name="settings">설정</string>
     <string name="settings_action_clear">비우기</string>
     <string name="settings_action_clearing">비우는 중...</string>

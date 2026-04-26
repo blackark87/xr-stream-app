@@ -38,8 +38,8 @@ import blackark.app.vr.data.database.entity.VirtualGroupMetadataPerformerCrossRe
         JvrPerformerMergeRule::class,
         VirtualGroupMetadataPerformerCrossRef::class,
     ],
-    version = 13,
-    exportSchema = false
+    version = 14,
+    exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun serverDao(): ServerDao
@@ -50,6 +50,8 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun virtualGroupMetadataDao(): VirtualGroupMetadataDao
 
     companion object {
+        const val DATABASE_NAME = "xr_video_player_database"
+
         @Volatile
         private var INSTANCE: AppDatabase? = null
 
@@ -58,11 +60,9 @@ abstract class AppDatabase : RoomDatabase() {
                 val instance = Room.databaseBuilder(
                     context.applicationContext,
                     AppDatabase::class.java,
-                    "xr_video_player_database"
+                    DATABASE_NAME,
                 )
-                    .fallbackToDestructiveMigration(
-                        dropAllTables = true
-                    ) // For development - recreates DB on schema changes
+                    .addMigrations(*AppDatabaseMigrations.ALL)
                     .build()
                 INSTANCE = instance
                 instance

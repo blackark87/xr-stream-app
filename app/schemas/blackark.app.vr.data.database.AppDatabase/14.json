@@ -1,0 +1,953 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 14,
+    "identityHash": "2facd16bcceeaaa04c25f2dc6b4cee51",
+    "entities": [
+      {
+        "tableName": "saved_servers",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `serverName` TEXT NOT NULL, `serverAddress` TEXT NOT NULL, `port` INTEGER NOT NULL, `shareName` TEXT NOT NULL, `username` TEXT NOT NULL, `password` TEXT NOT NULL, `domain` TEXT NOT NULL, `lastConnected` INTEGER NOT NULL, `isLocalStorage` INTEGER NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "serverName",
+            "columnName": "serverName",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "serverAddress",
+            "columnName": "serverAddress",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "port",
+            "columnName": "port",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "shareName",
+            "columnName": "shareName",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "username",
+            "columnName": "username",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "password",
+            "columnName": "password",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "domain",
+            "columnName": "domain",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastConnected",
+            "columnName": "lastConnected",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "isLocalStorage",
+            "columnName": "isLocalStorage",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        }
+      },
+      {
+        "tableName": "recent_videos",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `fileName` TEXT NOT NULL, `filePath` TEXT NOT NULL, `serverAddress` TEXT NOT NULL, `shareName` TEXT NOT NULL, `lastPlayed` INTEGER NOT NULL, `lastPosition` INTEGER NOT NULL, `duration` INTEGER NOT NULL, `thumbnailPath` TEXT, `resolvedTitle` TEXT)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "fileName",
+            "columnName": "fileName",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "filePath",
+            "columnName": "filePath",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "serverAddress",
+            "columnName": "serverAddress",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "shareName",
+            "columnName": "shareName",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastPlayed",
+            "columnName": "lastPlayed",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastPosition",
+            "columnName": "lastPosition",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "duration",
+            "columnName": "duration",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "thumbnailPath",
+            "columnName": "thumbnailPath",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "resolvedTitle",
+            "columnName": "resolvedTitle",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        }
+      },
+      {
+        "tableName": "favorite_videos",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`filePath` TEXT NOT NULL, `fileName` TEXT NOT NULL, `serverAddress` TEXT NOT NULL, `shareName` TEXT NOT NULL, `addedAt` INTEGER NOT NULL, `thumbnailPath` TEXT, `resolvedTitle` TEXT, PRIMARY KEY(`filePath`))",
+        "fields": [
+          {
+            "fieldPath": "filePath",
+            "columnName": "filePath",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "fileName",
+            "columnName": "fileName",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "serverAddress",
+            "columnName": "serverAddress",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "shareName",
+            "columnName": "shareName",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "addedAt",
+            "columnName": "addedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "thumbnailPath",
+            "columnName": "thumbnailPath",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "resolvedTitle",
+            "columnName": "resolvedTitle",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "filePath"
+          ]
+        }
+      },
+      {
+        "tableName": "video_display_settings",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`filePath` TEXT NOT NULL, `videoFormat` TEXT NOT NULL, `stereoMode` TEXT NOT NULL, `updatedAt` INTEGER NOT NULL, PRIMARY KEY(`filePath`))",
+        "fields": [
+          {
+            "fieldPath": "filePath",
+            "columnName": "filePath",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "videoFormat",
+            "columnName": "videoFormat",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "stereoMode",
+            "columnName": "stereoMode",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updatedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "filePath"
+          ]
+        }
+      },
+      {
+        "tableName": "av_library_assets",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`assetKey` TEXT NOT NULL, `sourceScope` TEXT NOT NULL, `normalizedCode` TEXT NOT NULL, `metadataCacheKey` TEXT, `metadataSource` TEXT, `representativePath` TEXT, `representativeFileName` TEXT, `representativeFolderPath` TEXT, `cachedTitle` TEXT, `cachedPosterUrl` TEXT, `cachedStudio` TEXT, `cachedReleaseDateEpochDay` INTEGER, `hasMetadata` INTEGER NOT NULL, `lastSeenAt` INTEGER NOT NULL, `lastScannedAt` INTEGER NOT NULL, `metadataResolvedAt` INTEGER, PRIMARY KEY(`assetKey`))",
+        "fields": [
+          {
+            "fieldPath": "assetKey",
+            "columnName": "assetKey",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sourceScope",
+            "columnName": "sourceScope",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "normalizedCode",
+            "columnName": "normalizedCode",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "metadataCacheKey",
+            "columnName": "metadataCacheKey",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "metadataSource",
+            "columnName": "metadataSource",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "representativePath",
+            "columnName": "representativePath",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "representativeFileName",
+            "columnName": "representativeFileName",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "representativeFolderPath",
+            "columnName": "representativeFolderPath",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "cachedTitle",
+            "columnName": "cachedTitle",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "cachedPosterUrl",
+            "columnName": "cachedPosterUrl",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "cachedStudio",
+            "columnName": "cachedStudio",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "cachedReleaseDateEpochDay",
+            "columnName": "cachedReleaseDateEpochDay",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "hasMetadata",
+            "columnName": "hasMetadata",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastSeenAt",
+            "columnName": "lastSeenAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastScannedAt",
+            "columnName": "lastScannedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "metadataResolvedAt",
+            "columnName": "metadataResolvedAt",
+            "affinity": "INTEGER"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "assetKey"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_av_library_assets_sourceScope",
+            "unique": false,
+            "columnNames": [
+              "sourceScope"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_av_library_assets_sourceScope` ON `${TABLE_NAME}` (`sourceScope`)"
+          },
+          {
+            "name": "index_av_library_assets_sourceScope_normalizedCode",
+            "unique": true,
+            "columnNames": [
+              "sourceScope",
+              "normalizedCode"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_av_library_assets_sourceScope_normalizedCode` ON `${TABLE_NAME}` (`sourceScope`, `normalizedCode`)"
+          },
+          {
+            "name": "index_av_library_assets_metadataCacheKey",
+            "unique": false,
+            "columnNames": [
+              "metadataCacheKey"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_av_library_assets_metadataCacheKey` ON `${TABLE_NAME}` (`metadataCacheKey`)"
+          }
+        ]
+      },
+      {
+        "tableName": "av_asset_locations",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`filePath` TEXT NOT NULL, `assetKey` TEXT NOT NULL, `sourceScope` TEXT NOT NULL, `fileName` TEXT NOT NULL, `partNumber` INTEGER, `size` INTEGER NOT NULL, `lastModified` INTEGER NOT NULL, `contentFingerprint` TEXT, `lastSeenAt` INTEGER NOT NULL, `isPresent` INTEGER NOT NULL, PRIMARY KEY(`filePath`), FOREIGN KEY(`assetKey`) REFERENCES `av_library_assets`(`assetKey`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "filePath",
+            "columnName": "filePath",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "assetKey",
+            "columnName": "assetKey",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sourceScope",
+            "columnName": "sourceScope",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "fileName",
+            "columnName": "fileName",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "partNumber",
+            "columnName": "partNumber",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "size",
+            "columnName": "size",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastModified",
+            "columnName": "lastModified",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "contentFingerprint",
+            "columnName": "contentFingerprint",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "lastSeenAt",
+            "columnName": "lastSeenAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "isPresent",
+            "columnName": "isPresent",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "filePath"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_av_asset_locations_assetKey",
+            "unique": false,
+            "columnNames": [
+              "assetKey"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_av_asset_locations_assetKey` ON `${TABLE_NAME}` (`assetKey`)"
+          },
+          {
+            "name": "index_av_asset_locations_sourceScope",
+            "unique": false,
+            "columnNames": [
+              "sourceScope"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_av_asset_locations_sourceScope` ON `${TABLE_NAME}` (`sourceScope`)"
+          },
+          {
+            "name": "index_av_asset_locations_contentFingerprint",
+            "unique": false,
+            "columnNames": [
+              "contentFingerprint"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_av_asset_locations_contentFingerprint` ON `${TABLE_NAME}` (`contentFingerprint`)"
+          },
+          {
+            "name": "index_av_asset_locations_sourceScope_isPresent",
+            "unique": false,
+            "columnNames": [
+              "sourceScope",
+              "isPresent"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_av_asset_locations_sourceScope_isPresent` ON `${TABLE_NAME}` (`sourceScope`, `isPresent`)"
+          },
+          {
+            "name": "index_av_asset_locations_sourceScope_size",
+            "unique": false,
+            "columnNames": [
+              "sourceScope",
+              "size"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_av_asset_locations_sourceScope_size` ON `${TABLE_NAME}` (`sourceScope`, `size`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "av_library_assets",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "assetKey"
+            ],
+            "referencedColumns": [
+              "assetKey"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "virtual_group_metadata",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`cacheKey` TEXT NOT NULL, `code` TEXT NOT NULL, `source` TEXT NOT NULL, `title` TEXT, `posterUrl` TEXT, `releaseDateEpochDay` INTEGER, `studio` TEXT, `isMiss` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, PRIMARY KEY(`cacheKey`))",
+        "fields": [
+          {
+            "fieldPath": "cacheKey",
+            "columnName": "cacheKey",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "code",
+            "columnName": "code",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "source",
+            "columnName": "source",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "title",
+            "columnName": "title",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "posterUrl",
+            "columnName": "posterUrl",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "releaseDateEpochDay",
+            "columnName": "releaseDateEpochDay",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "studio",
+            "columnName": "studio",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "isMiss",
+            "columnName": "isMiss",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updatedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "cacheKey"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_virtual_group_metadata_code",
+            "unique": false,
+            "columnNames": [
+              "code"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_virtual_group_metadata_code` ON `${TABLE_NAME}` (`code`)"
+          },
+          {
+            "name": "index_virtual_group_metadata_releaseDateEpochDay",
+            "unique": false,
+            "columnNames": [
+              "releaseDateEpochDay"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_virtual_group_metadata_releaseDateEpochDay` ON `${TABLE_NAME}` (`releaseDateEpochDay`)"
+          },
+          {
+            "name": "index_virtual_group_metadata_studio",
+            "unique": false,
+            "columnNames": [
+              "studio"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_virtual_group_metadata_studio` ON `${TABLE_NAME}` (`studio`)"
+          }
+        ]
+      },
+      {
+        "tableName": "virtual_group_metadata_genres",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`cacheKey` TEXT NOT NULL, `position` INTEGER NOT NULL, `genre` TEXT NOT NULL, PRIMARY KEY(`cacheKey`, `position`), FOREIGN KEY(`cacheKey`) REFERENCES `virtual_group_metadata`(`cacheKey`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "cacheKey",
+            "columnName": "cacheKey",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "position",
+            "columnName": "position",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "genre",
+            "columnName": "genre",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "cacheKey",
+            "position"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_virtual_group_metadata_genres_cacheKey",
+            "unique": false,
+            "columnNames": [
+              "cacheKey"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_virtual_group_metadata_genres_cacheKey` ON `${TABLE_NAME}` (`cacheKey`)"
+          },
+          {
+            "name": "index_virtual_group_metadata_genres_genre",
+            "unique": false,
+            "columnNames": [
+              "genre"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_virtual_group_metadata_genres_genre` ON `${TABLE_NAME}` (`genre`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "virtual_group_metadata",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "cacheKey"
+            ],
+            "referencedColumns": [
+              "cacheKey"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "jvr_performers",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`performerId` TEXT NOT NULL, `englishName` TEXT NOT NULL, `japaneseName` TEXT, `remoteProfileImageUrl` TEXT, `localProfileImageUrl` TEXT, `updatedAt` INTEGER NOT NULL, PRIMARY KEY(`performerId`))",
+        "fields": [
+          {
+            "fieldPath": "performerId",
+            "columnName": "performerId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "englishName",
+            "columnName": "englishName",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "japaneseName",
+            "columnName": "japaneseName",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "remoteProfileImageUrl",
+            "columnName": "remoteProfileImageUrl",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "localProfileImageUrl",
+            "columnName": "localProfileImageUrl",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updatedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "performerId"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_jvr_performers_englishName",
+            "unique": false,
+            "columnNames": [
+              "englishName"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_jvr_performers_englishName` ON `${TABLE_NAME}` (`englishName`)"
+          },
+          {
+            "name": "index_jvr_performers_japaneseName",
+            "unique": false,
+            "columnNames": [
+              "japaneseName"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_jvr_performers_japaneseName` ON `${TABLE_NAME}` (`japaneseName`)"
+          }
+        ]
+      },
+      {
+        "tableName": "jvr_performer_aliases",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`aliasKey` TEXT NOT NULL, `canonicalPerformerId` TEXT NOT NULL, `aliasKind` TEXT NOT NULL, `aliasValue` TEXT NOT NULL, `source` TEXT, `updatedAt` INTEGER NOT NULL, PRIMARY KEY(`aliasKey`), FOREIGN KEY(`canonicalPerformerId`) REFERENCES `jvr_performers`(`performerId`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "aliasKey",
+            "columnName": "aliasKey",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "canonicalPerformerId",
+            "columnName": "canonicalPerformerId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "aliasKind",
+            "columnName": "aliasKind",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "aliasValue",
+            "columnName": "aliasValue",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "source",
+            "columnName": "source",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updatedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "aliasKey"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_jvr_performer_aliases_canonicalPerformerId",
+            "unique": false,
+            "columnNames": [
+              "canonicalPerformerId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_jvr_performer_aliases_canonicalPerformerId` ON `${TABLE_NAME}` (`canonicalPerformerId`)"
+          },
+          {
+            "name": "index_jvr_performer_aliases_aliasKind",
+            "unique": false,
+            "columnNames": [
+              "aliasKind"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_jvr_performer_aliases_aliasKind` ON `${TABLE_NAME}` (`aliasKind`)"
+          },
+          {
+            "name": "index_jvr_performer_aliases_source",
+            "unique": false,
+            "columnNames": [
+              "source"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_jvr_performer_aliases_source` ON `${TABLE_NAME}` (`source`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "jvr_performers",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "canonicalPerformerId"
+            ],
+            "referencedColumns": [
+              "performerId"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "jvr_performer_merge_rules",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`sourcePerformerId` TEXT NOT NULL, `targetPerformerId` TEXT NOT NULL, `isManual` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, PRIMARY KEY(`sourcePerformerId`))",
+        "fields": [
+          {
+            "fieldPath": "sourcePerformerId",
+            "columnName": "sourcePerformerId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "targetPerformerId",
+            "columnName": "targetPerformerId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "isManual",
+            "columnName": "isManual",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updatedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "sourcePerformerId"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_jvr_performer_merge_rules_targetPerformerId",
+            "unique": false,
+            "columnNames": [
+              "targetPerformerId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_jvr_performer_merge_rules_targetPerformerId` ON `${TABLE_NAME}` (`targetPerformerId`)"
+          },
+          {
+            "name": "index_jvr_performer_merge_rules_isManual",
+            "unique": false,
+            "columnNames": [
+              "isManual"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_jvr_performer_merge_rules_isManual` ON `${TABLE_NAME}` (`isManual`)"
+          }
+        ]
+      },
+      {
+        "tableName": "virtual_group_metadata_performers",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`cacheKey` TEXT NOT NULL, `performerId` TEXT NOT NULL, `position` INTEGER NOT NULL, PRIMARY KEY(`cacheKey`, `performerId`), FOREIGN KEY(`cacheKey`) REFERENCES `virtual_group_metadata`(`cacheKey`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`performerId`) REFERENCES `jvr_performers`(`performerId`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "cacheKey",
+            "columnName": "cacheKey",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "performerId",
+            "columnName": "performerId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "position",
+            "columnName": "position",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "cacheKey",
+            "performerId"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_virtual_group_metadata_performers_cacheKey",
+            "unique": false,
+            "columnNames": [
+              "cacheKey"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_virtual_group_metadata_performers_cacheKey` ON `${TABLE_NAME}` (`cacheKey`)"
+          },
+          {
+            "name": "index_virtual_group_metadata_performers_performerId",
+            "unique": false,
+            "columnNames": [
+              "performerId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_virtual_group_metadata_performers_performerId` ON `${TABLE_NAME}` (`performerId`)"
+          },
+          {
+            "name": "index_virtual_group_metadata_performers_cacheKey_position",
+            "unique": true,
+            "columnNames": [
+              "cacheKey",
+              "position"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_virtual_group_metadata_performers_cacheKey_position` ON `${TABLE_NAME}` (`cacheKey`, `position`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "virtual_group_metadata",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "cacheKey"
+            ],
+            "referencedColumns": [
+              "cacheKey"
+            ]
+          },
+          {
+            "table": "jvr_performers",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "performerId"
+            ],
+            "referencedColumns": [
+              "performerId"
+            ]
+          }
+        ]
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '2facd16bcceeaaa04c25f2dc6b4cee51')"
+    ]
+  }
+}
