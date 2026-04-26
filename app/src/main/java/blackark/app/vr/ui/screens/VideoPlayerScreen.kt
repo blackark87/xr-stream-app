@@ -98,6 +98,7 @@ import kotlinx.coroutines.delay
 
 private const val TAG = "VideoPlayerScreen"
 private val IMMERSIVE_STEREO_CONTROLS_LIFT = 160.dp
+private val HIDDEN_MAIN_PANEL_OFFSET = 8000.dp
 
 private tailrec fun Context.findActivity(): Activity? =
     when (this) {
@@ -365,12 +366,9 @@ fun SpatialVideoPlayerContent(
     val isSurfaceReady = !playerState.isLoading && playerState.error == null
 
     // Keep the Activity main panel alive while this screen is a pure Subspace composition.
-    // Without this anchor, Compose XR disables the underlying main window panel by default,
-    // which lines up with controller input disappearing during playback.
+    // The anchor stays off-screen so the dashboard panel does not cover video playback.
     SpatialMainPanel(
-        modifier = buildPanelModifierFromSavedPose(
-            dashboardPanelPose = dashboardPanelPose,
-            density = density,
+        modifier = buildHiddenMainPanelAnchorModifier(
             panelWidth = dashboardPanelWidth,
             panelHeight = dashboardPanelHeight,
         ),
@@ -733,6 +731,19 @@ private fun buildFlatSurfaceModifier(
         )
         .rotate(headFollowPose.rotation)
 }
+
+private fun buildHiddenMainPanelAnchorModifier(
+    panelWidth: Dp,
+    panelHeight: Dp,
+): SubspaceModifier =
+    SubspaceModifier
+        .width(panelWidth)
+        .height(panelHeight)
+        .offset(
+            x = HIDDEN_MAIN_PANEL_OFFSET,
+            y = HIDDEN_MAIN_PANEL_OFFSET,
+            z = -HIDDEN_MAIN_PANEL_OFFSET,
+        )
 
 private fun buildPanelModifierFromSavedPose(
     dashboardPanelPose: Pose?,
