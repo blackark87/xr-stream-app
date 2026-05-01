@@ -148,7 +148,7 @@ class MainDashboardViewModel(
 
     private fun filterAndSortBrowsableFiles(fileList: List<SMBFileItem>): List<SMBFileItem> {
         val nameAscendingComparator =
-            compareBy<SMBFileItem>(String.CASE_INSENSITIVE_ORDER) { it.name }
+            compareBy<SMBFileItem, String>(String.CASE_INSENSITIVE_ORDER) { it.name }
                 .thenBy { it.name }
                 .thenByDescending { it.lastModified }
         val sortComparator = when (_uiState.value.fileSortMode) {
