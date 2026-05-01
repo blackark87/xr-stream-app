@@ -98,9 +98,13 @@
     <string name="sources">Sources</string>
     <string name="sort_files">Sort files</string>
     <string name="sort_filename_ascending">Filename A-Z</string>
+    <string name="sort_filename_ascending_description">Alphabetical order from A to Z</string>
     <string name="sort_filename_descending">Filename Z-A</string>
+    <string name="sort_filename_descending_description">Alphabetical order from Z to A</string>
     <string name="sort_newest">Newest</string>
+    <string name="sort_newest_description">Recently modified items first</string>
     <string name="sort_oldest">Oldest</string>
+    <string name="sort_oldest_description">Earliest modified items first</string>
     <string name="switch_to_list_view">Switch to list view</string>
     <string name="switch_to_thumbnail_view">Switch to thumbnail view</string>
     <string name="toggle_pane_layout">Toggle pane layout</string>

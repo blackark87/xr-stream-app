@@ -2820,30 +2820,103 @@ private fun FileBrowserPanel(
                     }
 
                     Box {
-                        TextButton(
-                            onClick = { showSortMenu = true },
-                            enabled = isConnected && !isLoading && !isDeleteMode && !isDeleteInProgress,
-                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                        Surface(
+                            modifier = Modifier
+                                .widthIn(min = 170.dp, max = 220.dp)
+                                .clip(RoundedCornerShape(18.dp))
+                                .clickable(
+                                    enabled = isConnected && !isLoading && !isDeleteMode && !isDeleteInProgress,
+                                ) {
+                                    showSortMenu = true
+                                },
+                            color = CardBackground.copy(alpha = 0.9f),
+                            shape = RoundedCornerShape(18.dp),
+                            tonalElevation = 2.dp,
+                            border = BorderStroke(
+                                1.dp,
+                                if (showSortMenu) {
+                                    NetflixRed.copy(alpha = 0.45f)
+                                } else {
+                                    DividerGray.copy(alpha = 0.7f)
+                                }
+                            ),
                         ) {
-                            Text(
-                                text = fileBrowserSortLabel(sortMode),
-                                color = if (isDeleteMode) TextTertiary else TextSecondary,
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Icon(
-                                imageVector = Icons.Filled.KeyboardArrowDown,
-                                contentDescription = stringResource(R.string.sort_files),
-                                tint = if (isDeleteMode) TextTertiary else TextSecondary,
-                            )
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                FileBrowserSortBadge(
+                                    sortMode = sortMode,
+                                    modifier = Modifier.size(36.dp),
+                                )
+
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = stringResource(R.string.sort_files),
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = if (isDeleteMode) TextTertiary else TextTertiary,
+                                        maxLines = 1,
+                                    )
+                                    Text(
+                                        text = fileBrowserSortLabel(sortMode),
+                                        style = MaterialTheme.typography.titleSmall,
+                                        color = if (isDeleteMode) TextTertiary else TextPrimary,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+
+                                Icon(
+                                    imageVector = Icons.Filled.KeyboardArrowDown,
+                                    contentDescription = stringResource(R.string.sort_files),
+                                    tint = if (isDeleteMode) TextTertiary else TextSecondary,
+                                    modifier = Modifier.rotate(if (showSortMenu) 180f else 0f),
+                                )
+                            }
                         }
 
                         DropdownMenu(
                             expanded = showSortMenu,
                             onDismissRequest = { showSortMenu = false },
+                            modifier = Modifier.widthIn(min = 260.dp, max = 320.dp),
+                            shape = RoundedCornerShape(20.dp),
+                            containerColor = CardBackgroundHover.copy(alpha = 0.98f),
+                            tonalElevation = 8.dp,
+                            shadowElevation = 18.dp,
+                            border = BorderStroke(1.dp, DividerGray.copy(alpha = 0.85f)),
                         ) {
                             FileBrowserSortMode.entries.forEach { mode ->
                                 DropdownMenuItem(
-                                    text = { Text(fileBrowserSortLabel(mode)) },
+                                    text = {
+                                        Column {
+                                            Text(
+                                                text = fileBrowserSortLabel(mode),
+                                                color = TextPrimary,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                            )
+                                            Text(
+                                                text = fileBrowserSortDescription(mode),
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = TextTertiary,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                            )
+                                        }
+                                    },
+                                    leadingIcon = {
+                                        FileBrowserSortBadge(sortMode = mode)
+                                    },
+                                    trailingIcon = {
+                                        if (mode == sortMode) {
+                                            Icon(
+                                                imageVector = Icons.Filled.CheckCircle,
+                                                contentDescription = null,
+                                                tint = SuccessGreen,
+                                            )
+                                        }
+                                    },
                                     onClick = {
                                         showSortMenu = false
                                         onSortModeSelected(mode)
@@ -3203,6 +3276,47 @@ private fun fileBrowserSortLabel(sortMode: FileBrowserSortMode): String = when (
     FileBrowserSortMode.Oldest -> stringResource(R.string.sort_oldest)
     FileBrowserSortMode.FilenameAscending -> stringResource(R.string.sort_filename_ascending)
     FileBrowserSortMode.FilenameDescending -> stringResource(R.string.sort_filename_descending)
+}
+
+@Composable
+private fun fileBrowserSortDescription(sortMode: FileBrowserSortMode): String = when (sortMode) {
+    FileBrowserSortMode.Newest -> stringResource(R.string.sort_newest_description)
+    FileBrowserSortMode.Oldest -> stringResource(R.string.sort_oldest_description)
+    FileBrowserSortMode.FilenameAscending -> stringResource(R.string.sort_filename_ascending_description)
+    FileBrowserSortMode.FilenameDescending -> stringResource(R.string.sort_filename_descending_description)
+}
+
+@Composable
+private fun FileBrowserSortBadge(
+    sortMode: FileBrowserSortMode,
+    modifier: Modifier = Modifier,
+) {
+    val badgeText = when (sortMode) {
+        FileBrowserSortMode.Newest -> "NEW"
+        FileBrowserSortMode.Oldest -> "OLD"
+        FileBrowserSortMode.FilenameAscending -> "A-Z"
+        FileBrowserSortMode.FilenameDescending -> "Z-A"
+    }
+    val accentColor = when (sortMode) {
+        FileBrowserSortMode.Newest,
+        FileBrowserSortMode.Oldest -> NetflixRed
+
+        FileBrowserSortMode.FilenameAscending,
+        FileBrowserSortMode.FilenameDescending -> AccentGold
+    }
+
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(12.dp))
+            .background(accentColor.copy(alpha = 0.14f)),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = badgeText,
+            style = MaterialTheme.typography.labelSmall,
+            color = accentColor,
+        )
+    }
 }
 
 private data class GroupHoverPreviewSpec(
