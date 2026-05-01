@@ -163,6 +163,7 @@ import blackark.app.vr.ui.theme.SuccessGreen
 import blackark.app.vr.ui.theme.TextPrimary
 import blackark.app.vr.ui.theme.TextSecondary
 import blackark.app.vr.ui.theme.TextTertiary
+import blackark.app.vr.ui.viewmodel.FileBrowserSortMode
 import blackark.app.vr.ui.viewmodel.FileBrowserViewMode
 import blackark.app.vr.ui.viewmodel.MainDashboardViewModel
 import blackark.app.vr.utils.ImageCacheVersionStore
@@ -1802,6 +1803,7 @@ fun MainDashboardScreen(
                                                         isLoading = uiState.isLoadingFiles,
                                                         errorMessage = uiState.errorMessage,
                                                         viewMode = uiState.fileViewMode,
+                                                        sortMode = uiState.fileSortMode,
                                                         currentPreviewKey = dashboardPreviewItem?.key,
                                                         onFileClick = { file ->
                                                             dashboardPreviewItem = null
@@ -1814,6 +1816,10 @@ fun MainDashboardScreen(
                                                         onToggleViewMode = {
                                                             dashboardPreviewItem = null
                                                             viewModel.toggleFileViewMode()
+                                                        },
+                                                        onSortModeSelected = { sortMode ->
+                                                            dashboardPreviewItem = null
+                                                            viewModel.setFileSortMode(sortMode)
                                                         },
                                                         onDeleteFiles = { selectedFiles ->
                                                             viewModel.deleteFiles(selectedFiles)
@@ -2221,13 +2227,11 @@ private tailrec fun Context.findActivity(): Activity? = when (this) {
 
 private data class VirtualVideoGroup(
     val key: String,
-    val files: List<SMBFileItem>
+    val files: List<SMBFileItem>,
+    val representativeFile: SMBFileItem?,
 ) {
     val fileCount: Int
         get() = files.size
-
-    val representativeFile: SMBFileItem?
-        get() = files.firstOrNull()
 }
 
 private sealed interface FileBrowserDisplayItem {
@@ -2487,10 +2491,12 @@ private fun FileBrowserPanel(
     isLoading: Boolean,
     errorMessage: String?,
     viewMode: FileBrowserViewMode,
+    sortMode: FileBrowserSortMode,
     currentPreviewKey: String?,
     onFileClick: (SMBFileItem) -> Unit,
     onBackClick: () -> Unit,
     onToggleViewMode: () -> Unit,
+    onSortModeSelected: (FileBrowserSortMode) -> Unit,
     onDeleteFiles: suspend (List<SMBFileItem>) -> Result<Int>,
     onPlayVideo: (String, String) -> Unit,
     onFavoriteToggle: (SMBFileItem, Boolean) -> Unit,
@@ -2505,6 +2511,7 @@ private fun FileBrowserPanel(
     var selectedPaths by remember { mutableStateOf<Set<String>>(emptySet()) }
     var showDeleteConfirmDialog by remember { mutableStateOf(false) }
     var isDeleteInProgress by remember { mutableStateOf(false) }
+    var showSortMenu by remember { mutableStateOf(false) }
     var activeVirtualGroupKey by rememberSaveable(currentPath) { mutableStateOf<String?>(null) }
 
     val virtualGroups = remember(files) { buildVirtualVideoGroups(files) }
@@ -2792,6 +2799,40 @@ private fun FileBrowserPanel(
                             },
                             tint = if (isDeleteMode) TextTertiary else TextSecondary
                         )
+                    }
+
+                    Box {
+                        TextButton(
+                            onClick = { showSortMenu = true },
+                            enabled = isConnected && !isLoading && !isDeleteMode && !isDeleteInProgress,
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                        ) {
+                            Text(
+                                text = fileBrowserSortLabel(sortMode),
+                                color = if (isDeleteMode) TextTertiary else TextSecondary,
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Icon(
+                                imageVector = Icons.Filled.KeyboardArrowDown,
+                                contentDescription = stringResource(R.string.sort_files),
+                                tint = if (isDeleteMode) TextTertiary else TextSecondary,
+                            )
+                        }
+
+                        DropdownMenu(
+                            expanded = showSortMenu,
+                            onDismissRequest = { showSortMenu = false },
+                        ) {
+                            FileBrowserSortMode.entries.forEach { mode ->
+                                DropdownMenuItem(
+                                    text = { Text(fileBrowserSortLabel(mode)) },
+                                    onClick = {
+                                        showSortMenu = false
+                                        onSortModeSelected(mode)
+                                    },
+                                )
+                            }
+                        }
                     }
 
                     IconButton(
@@ -3136,6 +3177,14 @@ private fun FileBrowserPanel(
             }
         )
     }
+}
+
+@Composable
+private fun fileBrowserSortLabel(sortMode: FileBrowserSortMode): String = when (sortMode) {
+    FileBrowserSortMode.Newest -> stringResource(R.string.sort_newest)
+    FileBrowserSortMode.Oldest -> stringResource(R.string.sort_oldest)
+    FileBrowserSortMode.FilenameAscending -> stringResource(R.string.sort_filename_ascending)
+    FileBrowserSortMode.FilenameDescending -> stringResource(R.string.sort_filename_descending)
 }
 
 private data class GroupHoverPreviewSpec(
@@ -4978,12 +5027,13 @@ private fun buildVirtualVideoGroups(files: List<SMBFileItem>): Map<String, Virtu
     return groupedCandidates.mapValues { (groupKey, groupedFiles) ->
         VirtualVideoGroup(
             key = groupKey,
-            files = groupedFiles.sortedWith(
+            files = groupedFiles,
+            representativeFile = groupedFiles.minWithOrNull(
                 compareBy<SMBFileItem>(
                     { extractVirtualGroupPart(it.name) ?: Int.MAX_VALUE },
                     { it.name.lowercase() }
                 )
-            )
+            ),
         )
     }
 }

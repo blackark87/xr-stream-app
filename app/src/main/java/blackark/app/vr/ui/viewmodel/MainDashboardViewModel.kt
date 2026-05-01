@@ -53,6 +53,7 @@ data class MainDashboardState(
     val pathHistory: List<String> = emptyList(),
     val errorMessage: String? = null,
     val fileViewMode: FileBrowserViewMode = FileBrowserViewMode.Thumbnail,
+    val fileSortMode: FileBrowserSortMode = FileBrowserSortMode.FilenameAscending,
     val avLibrary: AvLibraryState = AvLibraryState(),
     val isAvBackgroundIndexingEnabled: Boolean = false,
     val fileMetadataRefreshToken: Long = 0L,
@@ -61,6 +62,13 @@ data class MainDashboardState(
 enum class FileBrowserViewMode {
     List,
     Thumbnail
+}
+
+enum class FileBrowserSortMode {
+    Newest,
+    Oldest,
+    FilenameAscending,
+    FilenameDescending,
 }
 
 class MainDashboardViewModel(
@@ -135,11 +143,26 @@ class MainDashboardViewModel(
     private val avCastRepairAttemptedCacheKeys = mutableSetOf<String>()
 
     private fun filterAndSortBrowsableFiles(fileList: List<SMBFileItem>): List<SMBFileItem> {
+        val nameAscendingComparator =
+            compareBy<SMBFileItem>(String.CASE_INSENSITIVE_ORDER) { it.name }
+                .thenBy { it.name }
+                .thenByDescending { it.lastModified }
+        val sortComparator = when (_uiState.value.fileSortMode) {
+            FileBrowserSortMode.Newest -> compareByDescending<SMBFileItem> { it.lastModified }
+                .then(nameAscendingComparator)
+
+            FileBrowserSortMode.Oldest -> compareBy<SMBFileItem> { it.lastModified }
+                .then(nameAscendingComparator)
+
+            FileBrowserSortMode.FilenameAscending -> nameAscendingComparator
+            FileBrowserSortMode.FilenameDescending -> nameAscendingComparator.reversed()
+        }
+
         return fileList
             .filter { it.isDirectory || SMBClient.isVideoFile(it.name) }
             .sortedWith(
                 compareByDescending<SMBFileItem> { it.isDirectory }
-                    .thenBy { it.name.lowercase() }
+                    .then(sortComparator)
             )
     }
 
@@ -419,6 +442,20 @@ class MainDashboardViewModel(
                 FileBrowserViewMode.Thumbnail -> FileBrowserViewMode.List
             }
         )
+    }
+
+    fun setFileSortMode(sortMode: FileBrowserSortMode) {
+        if (_uiState.value.fileSortMode == sortMode) {
+            return
+        }
+
+        _uiState.value = _uiState.value.copy(fileSortMode = sortMode)
+
+        if (_files.value.isNotEmpty()) {
+            val sortedFiles = filterAndSortBrowsableFiles(_files.value)
+            _files.value = sortedFiles
+            syncCurrentListingForAv(sortedFiles)
+        }
     }
 
     suspend fun deleteFiles(files: List<SMBFileItem>): Result<Int> {

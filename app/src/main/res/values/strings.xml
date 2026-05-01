@@ -94,6 +94,11 @@
     <string name="settings_action_failed_title">Failed</string>
     <string name="source">Source</string>
     <string name="sources">Sources</string>
+    <string name="sort_files">Sort files</string>
+    <string name="sort_filename_ascending">Filename A-Z</string>
+    <string name="sort_filename_descending">Filename Z-A</string>
+    <string name="sort_newest">Newest</string>
+    <string name="sort_oldest">Oldest</string>
     <string name="switch_to_list_view">Switch to list view</string>
     <string name="switch_to_thumbnail_view">Switch to thumbnail view</string>
     <string name="toggle_pane_layout">Toggle pane layout</string>
