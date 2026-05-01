@@ -147,6 +147,7 @@ import blackark.app.vr.data.database.entity.SavedServer
 import blackark.app.vr.data.model.LibraryVideoItem
 import blackark.app.vr.network.SMBClient
 import blackark.app.vr.network.SMBFileItem
+import blackark.app.vr.ui.ApplyHandTrackingPreference
 import blackark.app.vr.ui.components.EmptyState
 import blackark.app.vr.ui.components.FancyFileCard
 import blackark.app.vr.ui.components.FancyMovieCard
@@ -1214,8 +1215,10 @@ private fun SourceSwitcherButton(
 @Composable
 private fun SettingsPanel(
     versionLabel: String,
+    isHandTrackingEnabled: Boolean,
     isAvBackgroundIndexingEnabled: Boolean,
     activeAction: SettingsAction?,
+    onHandTrackingChange: (Boolean) -> Unit,
     onAvBackgroundIndexingChange: (Boolean) -> Unit,
     onClearArtwork: () -> Unit,
     onClearThumbnails: () -> Unit,
@@ -1244,6 +1247,12 @@ private fun SettingsPanel(
 
             HorizontalDivider(color = DividerGray)
 
+            SettingsToggleRow(
+                title = stringResource(R.string.hand_tracking),
+                description = stringResource(R.string.hand_tracking_description),
+                checked = isHandTrackingEnabled,
+                onCheckedChange = onHandTrackingChange,
+            )
             SettingsToggleRow(
                 title = stringResource(R.string.av_background_indexing),
                 description = stringResource(R.string.av_background_indexing_description),
@@ -1501,6 +1510,11 @@ fun MainDashboardScreen(
     }
 
     Subspace {
+        ApplyHandTrackingPreference(
+            isHandTrackingEnabled = uiState.isHandTrackingEnabled,
+            logTag = "MainDashboardScreen",
+        )
+
         val dashboardPanelModifier =
             initialDashboardPose?.let { pose ->
                 SubspaceModifier
@@ -1628,8 +1642,10 @@ fun MainDashboardScreen(
                         } else {
                             SettingsPanel(
                                 versionLabel = appVersionLabel,
+                                isHandTrackingEnabled = uiState.isHandTrackingEnabled,
                                 isAvBackgroundIndexingEnabled = uiState.isAvBackgroundIndexingEnabled,
                                 activeAction = activeSettingsAction,
+                                onHandTrackingChange = viewModel::setHandTrackingEnabled,
                                 onAvBackgroundIndexingChange = viewModel::setAvBackgroundIndexingEnabled,
                                 onClearArtwork = {
                                     pendingSettingsAction = SettingsAction.ClearArtwork
@@ -1682,8 +1698,10 @@ fun MainDashboardScreen(
                             if (compactConnectedTab == ConnectedDashboardTab.Settings) {
                                 SettingsPanel(
                                     versionLabel = appVersionLabel,
+                                    isHandTrackingEnabled = uiState.isHandTrackingEnabled,
                                     isAvBackgroundIndexingEnabled = uiState.isAvBackgroundIndexingEnabled,
                                     activeAction = activeSettingsAction,
+                                    onHandTrackingChange = viewModel::setHandTrackingEnabled,
                                     onAvBackgroundIndexingChange = viewModel::setAvBackgroundIndexingEnabled,
                                     onClearArtwork = {
                                         pendingSettingsAction = SettingsAction.ClearArtwork

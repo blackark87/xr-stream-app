@@ -88,12 +88,15 @@ import androidx.xr.scenecore.InputEvent
 import blackark.app.vr.data.database.AppDatabase
 import blackark.app.vr.data.repository.VideoDisplaySettingsRepository
 import blackark.app.vr.data.repository.VideoRepository
+import blackark.app.vr.ui.ApplyHandTrackingPreference
 import blackark.app.vr.ui.components.XRPlaybackControls
+import blackark.app.vr.ui.isSpatialInputSourceAllowed
 import blackark.app.vr.ui.viewmodel.PlayerEvent
 import blackark.app.vr.ui.viewmodel.VideoFormat
 import blackark.app.vr.ui.viewmodel.VideoPlayerState
 import blackark.app.vr.ui.viewmodel.VideoPlayerViewModel
 import blackark.app.vr.ui.viewmodel.VideoPlayerViewModelFactory
+import blackark.app.vr.utils.AppSettingsStore
 import kotlinx.coroutines.delay
 
 private const val TAG = "VideoPlayerScreen"
@@ -110,9 +113,13 @@ private tailrec fun Context.findActivity(): Activity? =
 
 private fun clickInteractionPolicy(
     isEnabled: Boolean = true,
+    isHandTrackingEnabled: Boolean = true,
     onClick: (() -> Unit)? = null,
 ): InteractionPolicy =
     InteractionPolicy(isEnabled = isEnabled) { event ->
+        if (!isSpatialInputSourceAllowed(isHandTrackingEnabled, event.source)) {
+            return@InteractionPolicy
+        }
         if (onClick != null && event.action == InputEvent.Action.UP && event.hitPosition != null) {
             onClick()
         }
@@ -251,6 +258,9 @@ fun VideoPlayerScreen(
             videoDisplaySettingsRepository,
         ),
     )
+    val isHandTrackingEnabled = remember(context) {
+        AppSettingsStore.isHandTrackingEnabled(context.applicationContext)
+    }
 
     val playerState by videoPlayerViewModel.state.collectAsState()
     val dashboardPanelPose by blackark.app.vr.AppState.dashboardPanelPose.collectAsState()
@@ -311,6 +321,7 @@ fun VideoPlayerScreen(
         SpatialVideoPlayerContent(
             videoPlayerViewModel = videoPlayerViewModel,
             playerState = playerState,
+            isHandTrackingEnabled = isHandTrackingEnabled,
             dashboardPanelPose = dashboardPanelPose,
             dashboardPanelWidth = dashboardPanelSize.widthDp.dp,
             dashboardPanelHeight = dashboardPanelSize.heightDp.dp,
@@ -324,6 +335,7 @@ fun VideoPlayerScreen(
 fun SpatialVideoPlayerContent(
     videoPlayerViewModel: VideoPlayerViewModel,
     playerState: VideoPlayerState,
+    isHandTrackingEnabled: Boolean,
     dashboardPanelPose: Pose?,
     dashboardPanelWidth: Dp,
     dashboardPanelHeight: Dp,
@@ -333,6 +345,12 @@ fun SpatialVideoPlayerContent(
     val showControls = playerState.showControls
     val session = LocalSession.current
     val density = LocalDensity.current
+
+    ApplyHandTrackingPreference(
+        isHandTrackingEnabled = isHandTrackingEnabled,
+        logTag = TAG,
+    )
+
     var flatPanelWidth by remember { mutableStateOf(DEFAULT_FLAT_PANEL_WIDTH) }
     var flatPanelHeight by remember { mutableStateOf(DEFAULT_FLAT_PANEL_HEIGHT) }
     val flatPanelResizePolicy =
@@ -444,7 +462,7 @@ fun SpatialVideoPlayerContent(
             !playerState.seekPreviewActive &&
             !playerState.controlsInputLocked
         ) {
-            clickInteractionPolicy {
+            clickInteractionPolicy(isHandTrackingEnabled = isHandTrackingEnabled) {
                 videoPlayerViewModel.toggleControls()
             }
         } else {
@@ -492,7 +510,9 @@ fun SpatialVideoPlayerContent(
                 }
             SpatialPanel(
                 modifier = SubspaceModifier.fillMaxSize(),
-                interactionPolicy = clickInteractionPolicy(),
+                interactionPolicy = clickInteractionPolicy(
+                    isHandTrackingEnabled = isHandTrackingEnabled,
+                ),
             ) {
                 PlaybackScrollInputOverlay(
                     showControls = showControls,
@@ -538,6 +558,7 @@ fun SpatialVideoPlayerContent(
             isSurfaceReady = isSurfaceReady,
             videoPlayerViewModel = videoPlayerViewModel,
             playerState = playerState,
+            isHandTrackingEnabled = isHandTrackingEnabled,
             onNavigateBack = { videoPlayerViewModel.requestNavigateBack() },
             dashboardPanelPose = dashboardPanelPose,
             headFollowPose = if (enableHeadFollowIn2D && dashboardPanelPose == null) headFollowPose else null,
@@ -620,6 +641,7 @@ private fun Standard2DPlayer(
     isSurfaceReady: Boolean,
     videoPlayerViewModel: VideoPlayerViewModel,
     playerState: VideoPlayerState,
+    isHandTrackingEnabled: Boolean,
     onNavigateBack: () -> Unit,
     dashboardPanelPose: Pose?,
     headFollowPose: HeadFollowPose? = null,
@@ -650,7 +672,9 @@ private fun Standard2DPlayer(
                 if (isSurfaceReady) {
                     SpatialPanel(
                         modifier = SubspaceModifier.fillMaxSize(),
-                        interactionPolicy = clickInteractionPolicy(),
+                        interactionPolicy = clickInteractionPolicy(
+                            isHandTrackingEnabled = isHandTrackingEnabled,
+                        ),
                     ) {
                         PlaybackScrollInputOverlay(
                             showControls = showControls,

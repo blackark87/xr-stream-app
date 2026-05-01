@@ -17,7 +17,7 @@ import blackark.app.vr.network.LocalFileClient
 import blackark.app.vr.network.SMBClient
 import blackark.app.vr.network.SMBConfig
 import blackark.app.vr.network.SMBFileItem
-import blackark.app.vr.utils.AvLibrarySettingsStore
+import blackark.app.vr.utils.AppSettingsStore
 import blackark.app.vr.utils.JvrLibraryMetadataProvider
 import blackark.app.vr.utils.JvrMovieMetadata
 import blackark.app.vr.utils.buildAssetKey
@@ -54,6 +54,7 @@ data class MainDashboardState(
     val errorMessage: String? = null,
     val fileViewMode: FileBrowserViewMode = FileBrowserViewMode.Thumbnail,
     val avLibrary: AvLibraryState = AvLibraryState(),
+    val isHandTrackingEnabled: Boolean = false,
     val isAvBackgroundIndexingEnabled: Boolean = false,
     val fileMetadataRefreshToken: Long = 0L,
 )
@@ -72,7 +73,10 @@ class MainDashboardViewModel(
 
     private val _uiState = MutableStateFlow(
         MainDashboardState(
-            isAvBackgroundIndexingEnabled = AvLibrarySettingsStore.isBackgroundIndexingEnabled(
+            isHandTrackingEnabled = AppSettingsStore.isHandTrackingEnabled(
+                context.applicationContext
+            ),
+            isAvBackgroundIndexingEnabled = AppSettingsStore.isBackgroundIndexingEnabled(
                 context.applicationContext
             )
         )
@@ -290,6 +294,7 @@ class MainDashboardViewModel(
             currentPath = "",
             pathHistory = emptyList(),
             avLibrary = AvLibraryState(),
+            isHandTrackingEnabled = _uiState.value.isHandTrackingEnabled,
             isAvBackgroundIndexingEnabled = _uiState.value.isAvBackgroundIndexingEnabled,
         )
         _files.value = emptyList()
@@ -698,7 +703,7 @@ class MainDashboardViewModel(
     }
 
     fun setAvBackgroundIndexingEnabled(enabled: Boolean) {
-        AvLibrarySettingsStore.setBackgroundIndexingEnabled(context.applicationContext, enabled)
+        AppSettingsStore.setBackgroundIndexingEnabled(context.applicationContext, enabled)
         _uiState.value = _uiState.value.copy(isAvBackgroundIndexingEnabled = enabled)
 
         if (!enabled) {
@@ -707,6 +712,11 @@ class MainDashboardViewModel(
         }
 
         _uiState.value.selectedServer?.let(::startAvLibraryIndexingIfEnabled)
+    }
+
+    fun setHandTrackingEnabled(enabled: Boolean) {
+        AppSettingsStore.setHandTrackingEnabled(context.applicationContext, enabled)
+        _uiState.value = _uiState.value.copy(isHandTrackingEnabled = enabled)
     }
 
     suspend fun clearAvMetadataLinks() {
