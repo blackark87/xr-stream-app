@@ -539,6 +539,7 @@ fun FancyFileCard(
     isDirectory: Boolean,
     isVideoFile: Boolean,
     fileSize: String? = null,
+    supportingText: String? = null,
     isFavorite: Boolean = false,
     videoPath: String? = null,
     thumbnailModel: Any? = null,
@@ -554,6 +555,7 @@ fun FancyFileCard(
     val interactionSource = remember { MutableInteractionSource() }
     val isHovered by interactionSource.collectIsHoveredAsState()
     val isFocused by interactionSource.collectIsFocusedAsState()
+    val detailText = supportingText ?: fileSize
 
 
     val backgroundColor by animateColorAsState(
@@ -666,10 +668,10 @@ fun FancyFileCard(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
-                if (fileSize != null) {
+                if (detailText != null) {
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
-                        text = fileSize,
+                        text = detailText,
                         style = MaterialTheme.typography.labelSmall,
                         color = TextTertiary
                     )

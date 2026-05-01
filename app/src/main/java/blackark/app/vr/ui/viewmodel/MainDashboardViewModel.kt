@@ -25,6 +25,7 @@ import blackark.app.vr.utils.buildSourceScope
 import blackark.app.vr.utils.extractFileName
 import blackark.app.vr.utils.extractFolderPath
 import blackark.app.vr.utils.extractNormalizedCodeFromFileName
+import blackark.app.vr.utils.extractVirtualGroupKey
 import blackark.app.vr.utils.extractVirtualGroupPart
 import jcifs.smb.SmbRandomAccessFile
 import kotlinx.coroutines.CancellationException
@@ -43,6 +44,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.RandomAccessFile
 import java.security.MessageDigest
+import java.time.Instant
+import java.time.ZoneId
 
 data class MainDashboardState(
     val isConnected: Boolean = false,
@@ -141,29 +144,123 @@ class MainDashboardViewModel(
     private var avCastRepairJob: Job? = null
     private var avCastRepairSourceScope: String? = null
     private val avCastRepairAttemptedCacheKeys = mutableSetOf<String>()
+    private val systemZoneId: ZoneId = ZoneId.systemDefault()
 
     private fun filterAndSortBrowsableFiles(fileList: List<SMBFileItem>): List<SMBFileItem> {
+        val browsableFiles = fileList.filter { it.isDirectory || SMBClient.isVideoFile(it.name) }
         val nameAscendingComparator =
             compareBy<SMBFileItem, String>(String.CASE_INSENSITIVE_ORDER) { it.name }
                 .thenBy { it.name }
                 .thenByDescending { it.lastModified }
+        val primaryGroupFilesByKey = buildPrimaryGroupFilesByKey(browsableFiles)
+        val cachedReleaseDateByLookup = mutableMapOf<Pair<String, String>, Long?>()
+        val sortDateByPath = when (_uiState.value.fileSortMode) {
+            FileBrowserSortMode.Newest,
+            FileBrowserSortMode.Oldest -> browsableFiles.associate { file ->
+                file.path to resolveSortableDateEpochDay(
+                    file = file,
+                    primaryGroupFilesByKey = primaryGroupFilesByKey,
+                    cachedReleaseDateByLookup = cachedReleaseDateByLookup,
+                )
+            }
+
+            FileBrowserSortMode.FilenameAscending,
+            FileBrowserSortMode.FilenameDescending -> emptyMap()
+        }
         val sortComparator = when (_uiState.value.fileSortMode) {
-            FileBrowserSortMode.Newest -> compareByDescending<SMBFileItem> { it.lastModified }
+            FileBrowserSortMode.Newest -> compareByDescending<SMBFileItem> {
+                sortDateByPath[it.path] ?: Long.MIN_VALUE
+            }
                 .then(nameAscendingComparator)
 
-            FileBrowserSortMode.Oldest -> compareBy<SMBFileItem> { it.lastModified }
+            FileBrowserSortMode.Oldest -> compareBy<SMBFileItem> {
+                sortDateByPath[it.path] ?: Long.MIN_VALUE
+            }
                 .then(nameAscendingComparator)
 
             FileBrowserSortMode.FilenameAscending -> nameAscendingComparator
             FileBrowserSortMode.FilenameDescending -> nameAscendingComparator.reversed()
         }
 
-        return fileList
-            .filter { it.isDirectory || SMBClient.isVideoFile(it.name) }
+        return browsableFiles
             .sortedWith(
                 compareByDescending<SMBFileItem> { it.isDirectory }
                     .then(sortComparator)
             )
+    }
+
+    private fun buildPrimaryGroupFilesByKey(files: List<SMBFileItem>): Map<String, SMBFileItem> {
+        return files
+            .asSequence()
+            .filter { !it.isDirectory && SMBClient.isVideoFile(it.name) }
+            .mapNotNull { file ->
+                extractVirtualGroupKey(file.name)?.let { groupKey -> groupKey to file }
+            }
+            .groupBy(
+                keySelector = { it.first },
+                valueTransform = { it.second }
+            )
+            .filterValues { groupedFiles -> groupedFiles.size > 1 }
+            .mapValues { (_, groupedFiles) ->
+                groupedFiles.minWithOrNull(
+                    compareBy<SMBFileItem>(
+                        { extractVirtualGroupPart(it.name) ?: Int.MAX_VALUE },
+                        { it.name.lowercase() }
+                    )
+                ) ?: groupedFiles.first()
+            }
+    }
+
+    private fun resolveSortableDateEpochDay(
+        file: SMBFileItem,
+        primaryGroupFilesByKey: Map<String, SMBFileItem>,
+        cachedReleaseDateByLookup: MutableMap<Pair<String, String>, Long?>,
+    ): Long {
+        val fallbackFile = if (file.isDirectory) {
+            file
+        } else {
+            extractVirtualGroupKey(file.name)
+                ?.let(primaryGroupFilesByKey::get)
+                ?: file
+        }
+
+        return cachedReleaseDateEpochDay(
+            file = fallbackFile,
+            cachedReleaseDateByLookup = cachedReleaseDateByLookup,
+        ) ?: lastModifiedToEpochDay(fallbackFile.lastModified)
+            ?: Long.MIN_VALUE
+    }
+
+    private fun cachedReleaseDateEpochDay(
+        file: SMBFileItem,
+        cachedReleaseDateByLookup: MutableMap<Pair<String, String>, Long?>,
+    ): Long? {
+        if (file.isDirectory || !SMBClient.isVideoFile(file.name)) {
+            return null
+        }
+
+        val normalizedCode = extractNormalizedCodeFromFileName(file.name) ?: return null
+        val folderPath = extractFolderPath(file.path)
+        val lookupKey = normalizedCode to folderPath
+
+        return cachedReleaseDateByLookup.getOrPut(lookupKey) {
+            JvrLibraryMetadataProvider.peekCached(
+                context = context.applicationContext,
+                rawCode = normalizedCode,
+                folderPath = folderPath,
+            )?.releaseDate?.toEpochDay()
+        }
+    }
+
+    private fun lastModifiedToEpochDay(lastModified: Long): Long? {
+        if (lastModified <= 0L) {
+            return null
+        }
+
+        return Instant.ofEpochMilli(lastModified)
+            .atZone(systemZoneId)
+            .toLocalDate()
+            .toEpochDay()
     }
 
     fun addServer(server: SavedServer) {
@@ -1382,6 +1479,20 @@ class MainDashboardViewModel(
         _uiState.value = _uiState.value.copy(
             fileMetadataRefreshToken = _uiState.value.fileMetadataRefreshToken + 1L,
         )
+
+        if (_files.value.isEmpty()) {
+            return
+        }
+
+        when (_uiState.value.fileSortMode) {
+            FileBrowserSortMode.Newest,
+            FileBrowserSortMode.Oldest -> {
+                _files.value = filterAndSortBrowsableFiles(_files.value)
+            }
+
+            FileBrowserSortMode.FilenameAscending,
+            FileBrowserSortMode.FilenameDescending -> Unit
+        }
     }
 
     private fun currentSourceScope(): String? {

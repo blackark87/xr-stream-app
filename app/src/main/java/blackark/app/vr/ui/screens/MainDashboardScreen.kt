@@ -189,6 +189,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
 import kotlin.math.roundToInt
 import androidx.xr.compose.subspace.layout.onGloballyPositioned as onSubspaceGloballyPositioned
 
@@ -3494,6 +3497,7 @@ private fun VirtualGroupListCard(
     } else {
         "${group.fileCount} part files"
     }
+    val displayDateText = formatFileBrowserDate(resolveDisplayDate(group, metadata))
 
     val posterUrl = metadata?.posterUrl
     val representativePath = group.representativeFile?.path
@@ -3708,6 +3712,16 @@ private fun VirtualGroupListCard(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
+                displayDateText?.let { dateText ->
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = dateText,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = TextSecondary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
             }
 
             Icon(
@@ -3809,6 +3823,7 @@ private fun VirtualGroupThumbnailCard(
     } else {
         "${group.fileCount} part files"
     }
+    val displayDateText = formatFileBrowserDate(resolveDisplayDate(group, metadata))
 
     val posterUrl = metadata?.posterUrl
     val representativePath = group.representativeFile?.path
@@ -4031,6 +4046,16 @@ private fun VirtualGroupThumbnailCard(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
+            displayDateText?.let { dateText ->
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = dateText,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = TextSecondary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
         }
 
         GroupHoverPreviewPopup(
@@ -4072,6 +4097,14 @@ private fun FileListEntryCard(
     val displayTitle =
         if (allowJvrMetadata && isVideoFile) metadata?.title ?: file.name else file.name
     val subtitleText = if (allowJvrMetadata) metadata?.code ?: file.name else file.name
+    val detailText = if (!file.isDirectory) {
+        buildFileBrowserDetailText(
+            dateText = formatFileBrowserDate(resolveDisplayDate(file, metadata)),
+            sizeText = formatFileSizeHelper(file.size),
+        )
+    } else {
+        null
+    }
     val posterUrl = metadata?.posterUrl
     val posterCacheKey = posterUrl?.let { buildFilePosterCacheKey(file.name, it) }
     var posterLoadFailed by remember(file.name, posterUrl) { mutableStateOf(false) }
@@ -4144,11 +4177,7 @@ private fun FileListEntryCard(
         fileName = displayTitle,
         isDirectory = file.isDirectory,
         isVideoFile = isVideoFile,
-        fileSize = if (!file.isDirectory) {
-            formatFileSizeHelper(file.size)
-        } else {
-            null
-        },
+        supportingText = detailText,
         isFavorite = isFavorite,
         videoPath = if (isVideoFile) file.path else null,
         thumbnailModel = when {
@@ -4252,6 +4281,14 @@ private fun FileThumbnailCard(
     val displayTitle =
         if (allowJvrMetadata && isVideoFile) metadata?.title ?: file.name else file.name
     val subtitleText = if (allowJvrMetadata) metadata?.code ?: file.name else file.name
+    val detailText = if (!file.isDirectory) {
+        buildFileBrowserDetailText(
+            dateText = formatFileBrowserDate(resolveDisplayDate(file, metadata)),
+            sizeText = formatFileSizeHelper(file.size),
+        )
+    } else {
+        null
+    }
     val posterUrl = metadata?.posterUrl
     val posterCacheKey = posterUrl?.let { buildFilePosterCacheKey(file.name, it) }
     var posterLoadFailed by remember(file.name, posterUrl) { mutableStateOf(false) }
@@ -4478,10 +4515,10 @@ private fun FileThumbnailCard(
                 overflow = TextOverflow.Ellipsis
             )
 
-            if (!file.isDirectory) {
+            detailText?.let { supportingText ->
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = formatFileSizeHelper(file.size),
+                    text = supportingText,
                     style = MaterialTheme.typography.labelSmall,
                     color = TextTertiary
                 )
@@ -5051,6 +5088,8 @@ private fun buildFilePosterCacheKey(fileName: String, posterUrl: String): String
     return "file-poster:$generation:${fileName.hashCode()}:${posterUrl.hashCode()}"
 }
 
+private val fileBrowserZoneId: ZoneId = ZoneId.systemDefault()
+
 private val multipartVideoPattern = Regex("""^(.+)-(\d{1,2})$""")
 
 private fun buildVirtualVideoGroups(files: List<SMBFileItem>): Map<String, VirtualVideoGroup> {
@@ -5140,6 +5179,34 @@ private fun extractVirtualGroupPart(fileName: String): Int? {
     val stem = fileName.substringBeforeLast('.', fileName)
     val match = multipartVideoPattern.matchEntire(stem) ?: return null
     return match.groupValues[2].toIntOrNull()
+}
+
+private fun resolveDisplayDate(file: SMBFileItem, metadata: JvrMovieMetadata?): LocalDate? {
+    return metadata?.releaseDate ?: lastModifiedToLocalDate(file.lastModified)
+}
+
+private fun resolveDisplayDate(group: VirtualVideoGroup, metadata: JvrMovieMetadata?): LocalDate? {
+    return metadata?.releaseDate
+        ?: group.representativeFile?.lastModified?.let(::lastModifiedToLocalDate)
+}
+
+private fun lastModifiedToLocalDate(lastModified: Long): LocalDate? {
+    if (lastModified <= 0L) {
+        return null
+    }
+
+    return Instant.ofEpochMilli(lastModified)
+        .atZone(fileBrowserZoneId)
+        .toLocalDate()
+}
+
+private fun formatFileBrowserDate(date: LocalDate?): String? {
+    return date?.toString()
+}
+
+private fun buildFileBrowserDetailText(dateText: String?, sizeText: String?): String? {
+    val values = listOfNotNull(dateText, sizeText)
+    return values.takeIf { it.isNotEmpty() }?.joinToString(" · ")
 }
 
 /**
