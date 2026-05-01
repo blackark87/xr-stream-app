@@ -2822,7 +2822,7 @@ private fun FileBrowserPanel(
                     Box {
                         Surface(
                             modifier = Modifier
-                                .widthIn(min = 170.dp, max = 220.dp)
+                                .widthIn(min = 132.dp, max = 180.dp)
                                 .clip(RoundedCornerShape(18.dp))
                                 .clickable(
                                     enabled = isConnected && !isLoading && !isDeleteMode && !isDeleteInProgress,
@@ -2842,30 +2842,18 @@ private fun FileBrowserPanel(
                             ),
                         ) {
                             Row(
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                FileBrowserSortBadge(
-                                    sortMode = sortMode,
-                                    modifier = Modifier.size(36.dp),
+                                Text(
+                                    text = fileBrowserSortLabel(sortMode),
+                                    style = MaterialTheme.typography.titleSmall,
+                                    color = if (isDeleteMode) TextTertiary else TextPrimary,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f),
                                 )
-
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = stringResource(R.string.sort_files),
-                                        style = MaterialTheme.typography.labelMedium,
-                                        color = if (isDeleteMode) TextTertiary else TextTertiary,
-                                        maxLines = 1,
-                                    )
-                                    Text(
-                                        text = fileBrowserSortLabel(sortMode),
-                                        style = MaterialTheme.typography.titleSmall,
-                                        color = if (isDeleteMode) TextTertiary else TextPrimary,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                }
 
                                 Icon(
                                     imageVector = Icons.Filled.KeyboardArrowDown,
@@ -2889,24 +2877,13 @@ private fun FileBrowserPanel(
                             FileBrowserSortMode.entries.forEach { mode ->
                                 DropdownMenuItem(
                                     text = {
-                                        Column {
-                                            Text(
-                                                text = fileBrowserSortLabel(mode),
-                                                color = TextPrimary,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis,
-                                            )
-                                            Text(
-                                                text = fileBrowserSortDescription(mode),
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = TextTertiary,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis,
-                                            )
-                                        }
-                                    },
-                                    leadingIcon = {
-                                        FileBrowserSortBadge(sortMode = mode)
+                                        Text(
+                                            text = fileBrowserSortLabel(mode),
+                                            color = TextPrimary,
+                                            style = MaterialTheme.typography.titleSmall,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
                                     },
                                     trailingIcon = {
                                         if (mode == sortMode) {
@@ -3276,47 +3253,6 @@ private fun fileBrowserSortLabel(sortMode: FileBrowserSortMode): String = when (
     FileBrowserSortMode.Oldest -> stringResource(R.string.sort_oldest)
     FileBrowserSortMode.FilenameAscending -> stringResource(R.string.sort_filename_ascending)
     FileBrowserSortMode.FilenameDescending -> stringResource(R.string.sort_filename_descending)
-}
-
-@Composable
-private fun fileBrowserSortDescription(sortMode: FileBrowserSortMode): String = when (sortMode) {
-    FileBrowserSortMode.Newest -> stringResource(R.string.sort_newest_description)
-    FileBrowserSortMode.Oldest -> stringResource(R.string.sort_oldest_description)
-    FileBrowserSortMode.FilenameAscending -> stringResource(R.string.sort_filename_ascending_description)
-    FileBrowserSortMode.FilenameDescending -> stringResource(R.string.sort_filename_descending_description)
-}
-
-@Composable
-private fun FileBrowserSortBadge(
-    sortMode: FileBrowserSortMode,
-    modifier: Modifier = Modifier,
-) {
-    val badgeText = when (sortMode) {
-        FileBrowserSortMode.Newest -> "NEW"
-        FileBrowserSortMode.Oldest -> "OLD"
-        FileBrowserSortMode.FilenameAscending -> "A-Z"
-        FileBrowserSortMode.FilenameDescending -> "Z-A"
-    }
-    val accentColor = when (sortMode) {
-        FileBrowserSortMode.Newest,
-        FileBrowserSortMode.Oldest -> NetflixRed
-
-        FileBrowserSortMode.FilenameAscending,
-        FileBrowserSortMode.FilenameDescending -> AccentGold
-    }
-
-    Box(
-        modifier = modifier
-            .clip(RoundedCornerShape(12.dp))
-            .background(accentColor.copy(alpha = 0.14f)),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            text = badgeText,
-            style = MaterialTheme.typography.labelSmall,
-            color = accentColor,
-        )
-    }
 }
 
 private data class GroupHoverPreviewSpec(
