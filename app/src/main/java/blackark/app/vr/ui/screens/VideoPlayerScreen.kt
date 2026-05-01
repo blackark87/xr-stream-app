@@ -261,6 +261,12 @@ fun VideoPlayerScreen(
     val isHandTrackingEnabled = remember(context) {
         AppSettingsStore.isHandTrackingEnabled(context.applicationContext)
     }
+    val hasHandTrackingPermission = remember(context) {
+        androidx.core.content.ContextCompat.checkSelfPermission(
+            context.applicationContext,
+            "android.permission.HAND_TRACKING"
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+    }
 
     val playerState by videoPlayerViewModel.state.collectAsState()
     val dashboardPanelPose by blackark.app.vr.AppState.dashboardPanelPose.collectAsState()
@@ -322,6 +328,7 @@ fun VideoPlayerScreen(
             videoPlayerViewModel = videoPlayerViewModel,
             playerState = playerState,
             isHandTrackingEnabled = isHandTrackingEnabled,
+            hasHandTrackingPermission = hasHandTrackingPermission,
             dashboardPanelPose = dashboardPanelPose,
             dashboardPanelWidth = dashboardPanelSize.widthDp.dp,
             dashboardPanelHeight = dashboardPanelSize.heightDp.dp,
@@ -336,6 +343,7 @@ fun SpatialVideoPlayerContent(
     videoPlayerViewModel: VideoPlayerViewModel,
     playerState: VideoPlayerState,
     isHandTrackingEnabled: Boolean,
+    hasHandTrackingPermission: Boolean,
     dashboardPanelPose: Pose?,
     dashboardPanelWidth: Dp,
     dashboardPanelHeight: Dp,
@@ -348,6 +356,7 @@ fun SpatialVideoPlayerContent(
 
     ApplyHandTrackingPreference(
         isHandTrackingEnabled = isHandTrackingEnabled,
+        hasHandTrackingPermission = hasHandTrackingPermission,
         logTag = TAG,
     )
 

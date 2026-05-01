@@ -11,14 +11,15 @@ import androidx.xr.scenecore.InputEvent
 @Composable
 internal fun ApplyHandTrackingPreference(
     isHandTrackingEnabled: Boolean,
+    hasHandTrackingPermission: Boolean,
     logTag: String,
 ) {
     val session = LocalSession.current
 
-    LaunchedEffect(session, isHandTrackingEnabled) {
+    LaunchedEffect(session, isHandTrackingEnabled, hasHandTrackingPermission) {
         val activeSession = session ?: return@LaunchedEffect
         val desiredMode =
-            if (isHandTrackingEnabled) {
+            if (isHandTrackingEnabled && hasHandTrackingPermission) {
                 HandTrackingMode.BOTH
             } else {
                 HandTrackingMode.DISABLED

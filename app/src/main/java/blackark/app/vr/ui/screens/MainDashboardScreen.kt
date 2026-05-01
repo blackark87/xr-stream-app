@@ -1426,6 +1426,7 @@ fun MainDashboardScreen(
     navController: NavController,
     viewModel: MainDashboardViewModel,
     hasControllerLikeInputDevice: Boolean,
+    hasHandTrackingPermission: Boolean,
 ) {
     val context = LocalContext.current
     val activity = remember(context) { context.findActivity() }
@@ -1525,6 +1526,7 @@ fun MainDashboardScreen(
     Subspace {
         ApplyHandTrackingPreference(
             isHandTrackingEnabled = uiState.isHandTrackingEnabled,
+            hasHandTrackingPermission = hasHandTrackingPermission,
             logTag = "MainDashboardScreen",
         )
 

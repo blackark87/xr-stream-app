@@ -60,6 +60,15 @@ class MainActivity : ComponentActivity() {
                     )
                 }
 
+                var hasHandTrackingPermission by remember {
+                    mutableStateOf(
+                        ContextCompat.checkSelfPermission(
+                            context,
+                            "android.permission.HAND_TRACKING"
+                        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                    )
+                }
+
                 var hasStoragePermission by remember {
                     val permission = "android.permission.READ_MEDIA_VIDEO"
                     mutableStateOf(
@@ -78,6 +87,14 @@ class MainActivity : ComponentActivity() {
                         }
                     )
 
+                val handTrackingLauncher =
+                    androidx.activity.compose.rememberLauncherForActivityResult(
+                        contract = androidx.activity.result.contract.ActivityResultContracts.RequestPermission(),
+                        onResult = { isGranted ->
+                            hasHandTrackingPermission = isGranted
+                        }
+                    )
+
                 val storageLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
                     contract = androidx.activity.result.contract.ActivityResultContracts.RequestPermission(),
                     onResult = { isGranted ->
@@ -88,6 +105,9 @@ class MainActivity : ComponentActivity() {
                 LaunchedEffect(Unit) {
                     if (!hasHeadTrackingPermission) {
                         headTrackingLauncher.launch("android.permission.HEAD_TRACKING")
+                    }
+                    if (!hasHandTrackingPermission) {
+                        handTrackingLauncher.launch("android.permission.HAND_TRACKING")
                     }
                     if (!hasStoragePermission) {
                         storageLauncher.launch("android.permission.READ_MEDIA_VIDEO")
@@ -125,6 +145,7 @@ class MainActivity : ComponentActivity() {
                     navController = navController,
                     context = this,
                     hasControllerLikeInputDevice = hasControllerLikeInputDevice,
+                    hasHandTrackingPermission = hasHandTrackingPermission,
                 )
             }
         }

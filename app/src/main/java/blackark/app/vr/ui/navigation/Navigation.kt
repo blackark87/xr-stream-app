@@ -33,6 +33,7 @@ fun AppNavigation(
     navController: NavHostController,
     context: Context,
     hasControllerLikeInputDevice: Boolean,
+    hasHandTrackingPermission: Boolean,
 ) {
     val appContext = remember(context) { context.applicationContext }
     val database = remember(appContext) { AppDatabase.getDatabase(appContext) }
@@ -81,6 +82,7 @@ fun AppNavigation(
                 navController = navController,
                 viewModel = viewModel,
                 hasControllerLikeInputDevice = hasControllerLikeInputDevice,
+                hasHandTrackingPermission = hasHandTrackingPermission,
             )
         }
 

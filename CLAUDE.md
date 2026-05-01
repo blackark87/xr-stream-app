@@ -28,7 +28,19 @@ XR Video Player - An Android XR application for streaming and playing videos fro
 
 # Install on device
 ./gradlew installDebug
+
+# Lint
+./gradlew lint
 ```
+
+## SMB Default Credentials (Dev Testing)
+
+Set in `gradle.properties` (not committed):
+```
+SMB_DEFAULT_USERNAME=youruser
+SMB_DEFAULT_PASSWORD=yourpass
+```
+These are injected as `BuildConfig.SMB_DEFAULT_USERNAME` / `BuildConfig.SMB_DEFAULT_PASSWORD`.
 
 ## Architecture
 
