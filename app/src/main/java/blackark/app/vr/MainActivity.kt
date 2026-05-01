@@ -272,9 +272,13 @@ class MainActivity : ComponentActivity() {
                 (source and InputDevice.SOURCE_DPAD) == InputDevice.SOURCE_DPAD
 
     private fun hasConnectedControllerLikeInputDevice(): Boolean {
-        return InputDevice.getDeviceIds()
-            .mapNotNull(InputDevice::getDevice)
-            .any(::isControllerLikeInputDevice)
+        for (deviceId in InputDevice.getDeviceIds()) {
+            val device = InputDevice.getDevice(deviceId) ?: continue
+            if (isControllerLikeInputDevice(device)) {
+                return true
+            }
+        }
+        return false
     }
 
     private fun isControllerLikeInputDevice(device: InputDevice): Boolean {
