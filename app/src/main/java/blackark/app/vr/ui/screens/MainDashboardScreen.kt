@@ -2806,63 +2806,15 @@ private fun FileBrowserPanel(
                     }
 
                     Box {
-                        Surface(
-                            modifier = Modifier
-                                .widthIn(min = 168.dp, max = 220.dp)
-                                .clip(RoundedCornerShape(18.dp))
-                                .clickable(
-                                    enabled = isConnected && !isLoading && !isDeleteMode && !isDeleteInProgress,
-                                ) {
-                                    showSortMenu = true
-                                },
-                            color = CardBackground.copy(alpha = 0.9f),
-                            shape = RoundedCornerShape(18.dp),
-                            tonalElevation = 2.dp,
-                            border = BorderStroke(
-                                1.dp,
-                                if (showSortMenu) {
-                                    NetflixRed.copy(alpha = 0.45f)
-                                } else {
-                                    DividerGray.copy(alpha = 0.7f)
-                                }
-                            ),
+                        IconButton(
+                            onClick = { showSortMenu = true },
+                            enabled = isConnected && !isLoading && !isDeleteMode && !isDeleteInProgress,
                         ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(34.dp)
-                                        .clip(RoundedCornerShape(10.dp))
-                                        .background(fileBrowserSortAccent(sortMode).copy(alpha = 0.14f)),
-                                    contentAlignment = Alignment.Center,
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Filled.Sort,
-                                        contentDescription = null,
-                                        tint = fileBrowserSortAccent(sortMode),
-                                        modifier = Modifier.size(18.dp),
-                                    )
-                                }
-
-                                Text(
-                                    text = fileBrowserSortLabel(sortMode),
-                                    style = MaterialTheme.typography.titleSmall,
-                                    color = if (isDeleteMode) TextTertiary else TextPrimary,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.weight(1f),
-                                )
-
-                                Icon(
-                                    imageVector = Icons.Filled.KeyboardArrowDown,
-                                    contentDescription = stringResource(R.string.sort_files),
-                                    tint = if (isDeleteMode) TextTertiary else TextSecondary,
-                                    modifier = Modifier.rotate(if (showSortMenu) 180f else 0f),
-                                )
-                            }
+                            Icon(
+                                imageVector = Icons.Filled.Sort,
+                                contentDescription = stringResource(R.string.sort_files),
+                                tint = if (showSortMenu) NetflixRed else TextSecondary,
+                            )
                         }
 
                         DropdownMenu(
