@@ -55,6 +55,7 @@ data class MainDashboardState(
     val fileViewMode: FileBrowserViewMode = FileBrowserViewMode.Thumbnail,
     val avLibrary: AvLibraryState = AvLibraryState(),
     val isHandTrackingEnabled: Boolean = false,
+    val isControllerHandTrackingPromptHandled: Boolean = false,
     val isAvBackgroundIndexingEnabled: Boolean = false,
     val fileMetadataRefreshToken: Long = 0L,
 )
@@ -76,6 +77,10 @@ class MainDashboardViewModel(
             isHandTrackingEnabled = AppSettingsStore.isHandTrackingEnabled(
                 context.applicationContext
             ),
+            isControllerHandTrackingPromptHandled =
+                AppSettingsStore.isControllerHandTrackingPromptHandled(
+                    context.applicationContext
+                ),
             isAvBackgroundIndexingEnabled = AppSettingsStore.isBackgroundIndexingEnabled(
                 context.applicationContext
             )
@@ -295,6 +300,8 @@ class MainDashboardViewModel(
             pathHistory = emptyList(),
             avLibrary = AvLibraryState(),
             isHandTrackingEnabled = _uiState.value.isHandTrackingEnabled,
+            isControllerHandTrackingPromptHandled =
+                _uiState.value.isControllerHandTrackingPromptHandled,
             isAvBackgroundIndexingEnabled = _uiState.value.isAvBackgroundIndexingEnabled,
         )
         _files.value = emptyList()
@@ -717,6 +724,16 @@ class MainDashboardViewModel(
     fun setHandTrackingEnabled(enabled: Boolean) {
         AppSettingsStore.setHandTrackingEnabled(context.applicationContext, enabled)
         _uiState.value = _uiState.value.copy(isHandTrackingEnabled = enabled)
+    }
+
+    fun setControllerHandTrackingPromptHandled(handled: Boolean = true) {
+        AppSettingsStore.setControllerHandTrackingPromptHandled(
+            context.applicationContext,
+            handled
+        )
+        _uiState.value = _uiState.value.copy(
+            isControllerHandTrackingPromptHandled = handled
+        )
     }
 
     suspend fun clearAvMetadataLinks() {

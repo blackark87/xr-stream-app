@@ -1416,7 +1416,8 @@ private fun SettingsActionRow(
 @Composable
 fun MainDashboardScreen(
     navController: NavController,
-    viewModel: MainDashboardViewModel
+    viewModel: MainDashboardViewModel,
+    hasControllerLikeInputDevice: Boolean,
 ) {
     val context = LocalContext.current
     val activity = remember(context) { context.findActivity() }
@@ -1452,6 +1453,10 @@ fun MainDashboardScreen(
     var settingsFeedback by remember { mutableStateOf<SettingsFeedback?>(null) }
     val dashboardScope = rememberCoroutineScope()
     val appVersionLabel = remember(context) { resolveAppVersionLabel(context) }
+    val shouldShowControllerHandTrackingPrompt =
+        hasControllerLikeInputDevice &&
+                uiState.isHandTrackingEnabled &&
+                !uiState.isControllerHandTrackingPromptHandled
 
     val availableSources = remember(servers) {
         servers
@@ -2111,6 +2116,45 @@ fun MainDashboardScreen(
                     onClick = { settingsFeedback = null },
                 ) {
                     Text(stringResource(R.string.ok), color = NetflixRed)
+                }
+            },
+        )
+    }
+
+    if (shouldShowControllerHandTrackingPrompt) {
+        AlertDialog(
+            onDismissRequest = {
+                viewModel.setControllerHandTrackingPromptHandled()
+            },
+            title = {
+                Text(stringResource(R.string.controller_detected_hand_tracking_title))
+            },
+            text = {
+                Text(stringResource(R.string.controller_detected_hand_tracking_message))
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.setHandTrackingEnabled(false)
+                        viewModel.setControllerHandTrackingPromptHandled()
+                    },
+                ) {
+                    Text(
+                        stringResource(R.string.disable_hand_tracking_action),
+                        color = NetflixRed,
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.setControllerHandTrackingPromptHandled()
+                    },
+                ) {
+                    Text(
+                        stringResource(R.string.keep_hand_tracking_action),
+                        color = TextSecondary,
+                    )
                 }
             },
         )

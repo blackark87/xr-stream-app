@@ -1,5 +1,6 @@
 package blackark.app.vr
 
+import android.hardware.input.InputManager
 import android.os.Bundle
 import android.view.InputDevice
 import android.view.KeyEvent
@@ -7,6 +8,7 @@ import android.view.MotionEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -92,10 +94,37 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
+                var hasControllerLikeInputDevice by remember {
+                    mutableStateOf(hasConnectedControllerLikeInputDevice())
+                }
+
+                DisposableEffect(Unit) {
+                    val inputManager = getSystemService(InputManager::class.java)
+                    val listener = object : InputManager.InputDeviceListener {
+                        override fun onInputDeviceAdded(deviceId: Int) {
+                            hasControllerLikeInputDevice = hasConnectedControllerLikeInputDevice()
+                        }
+
+                        override fun onInputDeviceRemoved(deviceId: Int) {
+                            hasControllerLikeInputDevice = hasConnectedControllerLikeInputDevice()
+                        }
+
+                        override fun onInputDeviceChanged(deviceId: Int) {
+                            hasControllerLikeInputDevice = hasConnectedControllerLikeInputDevice()
+                        }
+                    }
+
+                    inputManager?.registerInputDeviceListener(listener, null)
+                    onDispose {
+                        inputManager?.unregisterInputDeviceListener(listener)
+                    }
+                }
+
                 val navController = rememberNavController()
                 AppNavigation(
                     navController = navController,
-                    context = this
+                    context = this,
+                    hasControllerLikeInputDevice = hasControllerLikeInputDevice,
                 )
             }
         }
@@ -241,6 +270,22 @@ class MainActivity : ComponentActivity() {
         (source and InputDevice.SOURCE_JOYSTICK) == InputDevice.SOURCE_JOYSTICK ||
                 (source and InputDevice.SOURCE_GAMEPAD) == InputDevice.SOURCE_GAMEPAD ||
                 (source and InputDevice.SOURCE_DPAD) == InputDevice.SOURCE_DPAD
+
+    private fun hasConnectedControllerLikeInputDevice(): Boolean {
+        return InputDevice.getDeviceIds()
+            .mapNotNull(InputDevice::getDevice)
+            .any(::isControllerLikeInputDevice)
+    }
+
+    private fun isControllerLikeInputDevice(device: InputDevice): Boolean {
+        if (device.isVirtual || !device.isExternal) {
+            return false
+        }
+
+        return device.supportsSource(InputDevice.SOURCE_JOYSTICK) ||
+                device.supportsSource(InputDevice.SOURCE_GAMEPAD) ||
+                device.supportsSource(InputDevice.SOURCE_DPAD)
+    }
 
     private fun shouldIgnoreAbsolutePointerAxis(
         source: Int,

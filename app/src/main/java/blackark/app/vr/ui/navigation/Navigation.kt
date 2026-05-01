@@ -29,7 +29,11 @@ sealed class Screen(val route: String) {
 }
 
 @Composable
-fun AppNavigation(navController: NavHostController, context: Context) {
+fun AppNavigation(
+    navController: NavHostController,
+    context: Context,
+    hasControllerLikeInputDevice: Boolean,
+) {
     val appContext = remember(context) { context.applicationContext }
     val database = remember(appContext) { AppDatabase.getDatabase(appContext) }
     val serverRepository = remember(database) { ServerRepository(database.serverDao()) }
@@ -75,7 +79,8 @@ fun AppNavigation(navController: NavHostController, context: Context) {
 
             MainDashboardScreen(
                 navController = navController,
-                viewModel = viewModel
+                viewModel = viewModel,
+                hasControllerLikeInputDevice = hasControllerLikeInputDevice,
             )
         }
 
