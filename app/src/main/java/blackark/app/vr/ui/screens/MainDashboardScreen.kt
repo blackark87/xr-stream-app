@@ -60,7 +60,11 @@ import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Minimize
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.MovieCreation
+import androidx.compose.material.icons.filled.North
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Sort
+import androidx.compose.material.icons.filled.SortByAlpha
+import androidx.compose.material.icons.filled.South
 import androidx.compose.material.icons.filled.ViewModule
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material3.AlertDialog
@@ -2804,7 +2808,7 @@ private fun FileBrowserPanel(
                     Box {
                         Surface(
                             modifier = Modifier
-                                .widthIn(min = 132.dp, max = 180.dp)
+                                .widthIn(min = 168.dp, max = 220.dp)
                                 .clip(RoundedCornerShape(18.dp))
                                 .clickable(
                                     enabled = isConnected && !isLoading && !isDeleteMode && !isDeleteInProgress,
@@ -2828,6 +2832,21 @@ private fun FileBrowserPanel(
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(34.dp)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(fileBrowserSortAccent(sortMode).copy(alpha = 0.14f)),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Filled.Sort,
+                                        contentDescription = null,
+                                        tint = fileBrowserSortAccent(sortMode),
+                                        modifier = Modifier.size(18.dp),
+                                    )
+                                }
+
                                 Text(
                                     text = fileBrowserSortLabel(sortMode),
                                     style = MaterialTheme.typography.titleSmall,
@@ -2865,6 +2884,13 @@ private fun FileBrowserPanel(
                                             style = MaterialTheme.typography.titleSmall,
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis,
+                                        )
+                                    },
+                                    leadingIcon = {
+                                        Icon(
+                                            imageVector = fileBrowserSortIcon(mode),
+                                            contentDescription = null,
+                                            tint = fileBrowserSortAccent(mode),
                                         )
                                     },
                                     trailingIcon = {
@@ -3235,6 +3261,21 @@ private fun fileBrowserSortLabel(sortMode: FileBrowserSortMode): String = when (
     FileBrowserSortMode.Oldest -> stringResource(R.string.sort_oldest)
     FileBrowserSortMode.FilenameAscending -> stringResource(R.string.sort_filename_ascending)
     FileBrowserSortMode.FilenameDescending -> stringResource(R.string.sort_filename_descending)
+}
+
+private fun fileBrowserSortIcon(sortMode: FileBrowserSortMode): ImageVector = when (sortMode) {
+    FileBrowserSortMode.Newest -> Icons.Filled.South
+    FileBrowserSortMode.Oldest -> Icons.Filled.North
+    FileBrowserSortMode.FilenameAscending,
+    FileBrowserSortMode.FilenameDescending -> Icons.Filled.SortByAlpha
+}
+
+private fun fileBrowserSortAccent(sortMode: FileBrowserSortMode): Color = when (sortMode) {
+    FileBrowserSortMode.Newest,
+    FileBrowserSortMode.Oldest -> NetflixRed
+
+    FileBrowserSortMode.FilenameAscending,
+    FileBrowserSortMode.FilenameDescending -> AccentGold
 }
 
 private data class GroupHoverPreviewSpec(
