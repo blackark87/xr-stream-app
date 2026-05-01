@@ -64,6 +64,8 @@
     <string name="favorites">Favorites</string>
     <string name="files">Files</string>
     <string name="files_selected_count">%1$d selected</string>
+    <string name="hand_tracking">Hand tracking</string>
+    <string name="hand_tracking_description">Allows hand input throughout the app. Turn this off to use only the 6DoF controller during playback. Off by default.</string>
     <string name="ip_address">IP Address</string>
     <string name="ip_address_example">e.g., 192.168.1.100</string>
     <string name="library">Library</string>
