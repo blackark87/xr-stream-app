@@ -52,6 +52,7 @@
     <string name="connect_to_browse_files">Connect to a source to browse files</string>
     <string name="connect_to_view_library">Connect to view library</string>
     <string name="connecting_to_server">Connecting to server...</string>
+    <string name="connecting_to_source">Connecting to source...</string>
     <string name="connection_failed_message">Connection failed: %1$s</string>
     <string name="controller_detected_hand_tracking_message">A controller was detected. Disable hand tracking to reduce accidental playback gestures? You can change this later in Settings.</string>
     <string name="controller_detected_hand_tracking_title">Controller detected</string>
@@ -72,13 +73,20 @@
     <string name="ip_address">IP Address</string>
     <string name="ip_address_example">e.g., 192.168.1.100</string>
     <string name="library">Library</string>
+    <string name="local_files">Local Files</string>
+    <string name="local_folder_ready">Saved local folder</string>
     <string name="local_storage">Local Storage</string>
+    <string name="change_folder">Change Folder</string>
+    <string name="choose_folder">Choose Folder</string>
+    <string name="choose_local_folder_message">Choose a local folder to browse videos from device storage.</string>
     <string name="keep_hand_tracking_action">Keep hand tracking</string>
     <string name="minimize">Minimize</string>
     <string name="movie">Movie</string>
     <string name="no_favorites_yet">No favorites yet</string>
     <string name="no_files_in_directory">No files in this directory</string>
+    <string name="no_local_folder_selected">No local folder selected</string>
     <string name="no_recent_videos_yet">No recent videos yet</string>
+    <string name="open_local_files">Open Local Files</string>
     <string name="ok">OK</string>
     <string name="password">Password</string>
     <string name="poster_thumbnail">Poster thumbnail</string>
@@ -100,6 +108,8 @@
     <string name="settings_action_failed_title">Failed</string>
     <string name="source">Source</string>
     <string name="sources">Sources</string>
+    <string name="saved_local_folder_message">Use the saved folder as your local media source, or switch to a different folder.</string>
+    <string name="smb_files">SMB Files</string>
     <string name="sort_files">Sort files</string>
     <string name="sort_filename_ascending">Filename A-Z</string>
     <string name="sort_filename_descending">Filename Z-A</string>
@@ -118,4 +128,8 @@
     <string name="build_time_utc">Build time (UTC)</string>
     <string name="video_thumbnail">Video thumbnail</string>
     <string name="watched_progress_percent">%1$d%% watched</string>
+    <string name="youtube">YouTube</string>
+    <string name="youtube_forward">Forward</string>
+    <string name="youtube_home">YouTube Home</string>
+    <string name="youtube_reload">Reload</string>
 </resources>
