@@ -161,7 +161,7 @@ fun XRPlaybackControls(
             (progressSectionWidthPx - (previewTrackInsetPx * 2)).coerceAtLeast(0)
         val previewThumbCenterPx =
             progressSectionLeftPx + previewTrackInsetPx +
-                (previewTrackWidthPx * previewFraction).roundToInt()
+                    (previewTrackWidthPx * previewFraction).roundToInt()
         val previewMinX = progressSectionLeftPx
         val previewMaxX = (progressSectionLeftPx + progressSectionWidthPx - previewCardWidthPx)
             .coerceAtLeast(previewMinX)

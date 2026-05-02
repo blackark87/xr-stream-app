@@ -1453,7 +1453,8 @@ class VideoPlayerViewModel(
                     compareByDescending<SMBFileItem> { it.isDirectory }
                         .thenBy { it.name.lowercase() }
                 )
-            val videoFiles = sortedFiles.filter { !it.isDirectory && SMBClient.isVideoFile(it.name) }
+            val videoFiles =
+                sortedFiles.filter { !it.isDirectory && SMBClient.isVideoFile(it.name) }
             val currentIndex = resolveCurrentPlaylistIndex(videoFiles, currentFile)
 
             _state.value = _state.value.copy(

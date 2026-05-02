@@ -808,9 +808,12 @@ private fun buildImmersiveControlsModifier(
         return baseModifier
     }
 
-    val anchoredX = with(density) { dashboardPanelPose.translation.x.toDp() } * IMMERSIVE_CONTROLS_FRONT_FACTOR
-    val anchoredY = with(density) { dashboardPanelPose.translation.y.toDp() } + IMMERSIVE_CONTROLS_DOWN_OFFSET
-    val anchoredZ = with(density) { dashboardPanelPose.translation.z.toDp() } * IMMERSIVE_CONTROLS_FRONT_FACTOR
+    val anchoredX =
+        with(density) { dashboardPanelPose.translation.x.toDp() } * IMMERSIVE_CONTROLS_FRONT_FACTOR
+    val anchoredY =
+        with(density) { dashboardPanelPose.translation.y.toDp() } + IMMERSIVE_CONTROLS_DOWN_OFFSET
+    val anchoredZ =
+        with(density) { dashboardPanelPose.translation.z.toDp() } * IMMERSIVE_CONTROLS_FRONT_FACTOR
 
     return baseModifier
         .offset(

@@ -70,7 +70,8 @@ object VideoFramePreviewExtractor {
 
         try {
             sessionMutex.withLock {
-                val session = obtainPreparedSessionLocked(context, videoPath) ?: return@withContext null
+                val session =
+                    obtainPreparedSessionLocked(context, videoPath) ?: return@withContext null
                 val clampedTargetMs =
                     if (session.durationMs > 0L) {
                         targetPositionMs.coerceIn(0L, session.durationMs)
@@ -170,7 +171,11 @@ object VideoFramePreviewExtractor {
         } catch (error: Exception) {
             runCatching { retriever.release() }
             closeDataSource?.invoke()
-            Log.w(TAG, "Failed to prepare preview session for path=$videoPath: ${error.message}", error)
+            Log.w(
+                TAG,
+                "Failed to prepare preview session for path=$videoPath: ${error.message}",
+                error
+            )
             return null
         }
     }

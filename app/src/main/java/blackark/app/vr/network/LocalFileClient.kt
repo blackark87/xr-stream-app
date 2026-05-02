@@ -184,11 +184,13 @@ class LocalFileClient(
                     return@use null
                 }
 
-                val name = cursor.getStringIfPresent(cursor.getColumnIndex(Document.COLUMN_DISPLAY_NAME))
-                    ?.trim()
-                    .orEmpty()
-                val mimeType = cursor.getStringIfPresent(cursor.getColumnIndex(Document.COLUMN_MIME_TYPE))
-                    .orEmpty()
+                val name =
+                    cursor.getStringIfPresent(cursor.getColumnIndex(Document.COLUMN_DISPLAY_NAME))
+                        ?.trim()
+                        .orEmpty()
+                val mimeType =
+                    cursor.getStringIfPresent(cursor.getColumnIndex(Document.COLUMN_MIME_TYPE))
+                        .orEmpty()
                 val isDirectory = mimeType == Document.MIME_TYPE_DIR
                 val size = cursor.getLongIfPresent(cursor.getColumnIndex(Document.COLUMN_SIZE))
                     .coerceAtLeast(0L)

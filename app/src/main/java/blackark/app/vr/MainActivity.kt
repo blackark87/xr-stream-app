@@ -134,8 +134,8 @@ class MainActivity : ComponentActivity() {
     private fun handleGlobalKeyEvent(event: KeyEvent): Boolean {
         AppState.keyEvents.tryEmit(event)
         return AppState.consumePlaybackBackKeyEvents.value &&
-            (event.keyCode == KeyEvent.KEYCODE_BUTTON_B ||
-                event.keyCode == KeyEvent.KEYCODE_BACK)
+                (event.keyCode == KeyEvent.KEYCODE_BUTTON_B ||
+                        event.keyCode == KeyEvent.KEYCODE_BACK)
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {

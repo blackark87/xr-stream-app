@@ -54,6 +54,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.automirrored.filled.ViewList
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CheckCircle
@@ -71,7 +72,6 @@ import androidx.compose.material.icons.filled.MovieCreation
 import androidx.compose.material.icons.filled.North
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Sort
 import androidx.compose.material.icons.filled.SortByAlpha
 import androidx.compose.material.icons.filled.South
 import androidx.compose.material.icons.filled.ViewModule
@@ -182,8 +182,8 @@ import blackark.app.vr.ui.viewmodel.AvVrFilterOption
 import blackark.app.vr.ui.viewmodel.FileBrowserSortMode
 import blackark.app.vr.ui.viewmodel.FileBrowserViewMode
 import blackark.app.vr.ui.viewmodel.MainDashboardViewModel
-import blackark.app.vr.utils.ImageCacheVersionStore
 import blackark.app.vr.utils.AppSettingsStore
+import blackark.app.vr.utils.ImageCacheVersionStore
 import blackark.app.vr.utils.JvrCastMetadata
 import blackark.app.vr.utils.JvrLibraryMetadataProvider
 import blackark.app.vr.utils.JvrMovieMetadata
@@ -357,7 +357,9 @@ private fun resolveSourceTitle(
     selectedServer: SavedServer?,
 ): String = when (destination) {
     PrimaryDestination.LocalFiles -> "Local Files"
-    PrimaryDestination.SmbFiles -> selectedServer?.serverName?.takeIf { it.isNotBlank() } ?: "SMB Files"
+    PrimaryDestination.SmbFiles -> selectedServer?.serverName?.takeIf { it.isNotBlank() }
+        ?: "SMB Files"
+
     PrimaryDestination.YouTube -> "YouTube"
     PrimaryDestination.Settings -> "Settings"
 }
@@ -569,7 +571,7 @@ private fun DashboardNavigationRail(
     onPaneSelected: (DashboardPaneDestination) -> Unit,
     onToggleLayoutMode: () -> Unit,
     onAddServerClick: () -> Unit,
-    destinations: List<DashboardPaneDestination> = DashboardPaneDestination.values().toList(),
+    destinations: List<DashboardPaneDestination> = DashboardPaneDestination.entries,
     showLayoutToggle: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
@@ -2177,7 +2179,12 @@ fun MainDashboardScreen(
         }
     }
 
-    LaunchedEffect(primaryDestination, persistedLocalTreeUri, uiState.isConnected, uiState.selectedServer?.id) {
+    LaunchedEffect(
+        primaryDestination,
+        persistedLocalTreeUri,
+        uiState.isConnected,
+        uiState.selectedServer?.id
+    ) {
         when (primaryDestination) {
             PrimaryDestination.LocalFiles -> {
                 viewModel.switchToLocalSource(persistedLocalTreeUri)
@@ -3811,7 +3818,7 @@ private fun FileBrowserPanel(
                             enabled = isConnected && !isLoading && !isDeleteMode && !isDeleteInProgress,
                         ) {
                             Icon(
-                                imageVector = Icons.Filled.Sort,
+                                imageVector = Icons.AutoMirrored.Filled.Sort,
                                 contentDescription = stringResource(R.string.sort_files),
                                 tint = if (showSortMenu) NetflixRed else TextSecondary,
                             )

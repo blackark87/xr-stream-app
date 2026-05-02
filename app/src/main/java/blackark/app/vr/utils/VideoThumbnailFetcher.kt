@@ -944,9 +944,9 @@ class VideoThumbnailFetcher(
         }
     }
 
-    class UriFactory : Fetcher.Factory<android.net.Uri> {
+    class UriFactory : Fetcher.Factory<Uri> {
         override fun create(
-            data: android.net.Uri,
+            data: Uri,
             options: Options,
             imageLoader: ImageLoader
         ): Fetcher? {

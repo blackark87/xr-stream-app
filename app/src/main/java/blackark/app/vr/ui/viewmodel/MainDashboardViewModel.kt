@@ -238,7 +238,7 @@ class MainDashboardViewModel(
             file = fallbackFile,
             cachedReleaseDateByLookup = cachedReleaseDateByLookup,
         ) ?: lastModifiedToEpochDay(fallbackFile.lastModified)
-            ?: Long.MIN_VALUE
+        ?: Long.MIN_VALUE
     }
 
     private fun cachedReleaseDateEpochDay(
