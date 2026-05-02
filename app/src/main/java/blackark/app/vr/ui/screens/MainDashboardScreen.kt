@@ -5960,6 +5960,7 @@ private fun AddServerDialog(
     onTestConnection: suspend (SavedServer) -> Result<Unit>
 ) {
     val context = LocalContext.current
+    val connectionFailedPrefix = stringResource(R.string.connection_failed_prefix)
     val (storedUsername, storedPassword) = remember {
         ServerCredentialAutofillStore.load(context)
     }
@@ -6157,10 +6158,15 @@ private fun AddServerDialog(
                                         )
                                         onSave(serverToSave)
                                     } else {
-                                        connectionError = context.getString(
-                                            R.string.connection_failed_message,
-                                            result.exceptionOrNull()?.message.orEmpty(),
-                                        )
+                                        connectionError = buildString {
+                                            append(connectionFailedPrefix)
+                                            val detail =
+                                                result.exceptionOrNull()?.message.orEmpty()
+                                            if (detail.isNotBlank()) {
+                                                append(' ')
+                                                append(detail)
+                                            }
+                                        }
                                         isTestingConnection = false
                                     }
                                 }
