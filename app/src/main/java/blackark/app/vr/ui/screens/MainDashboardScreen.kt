@@ -1995,9 +1995,6 @@ fun MainDashboardScreen(
     var secondaryPaneMode by rememberSaveable {
         mutableStateOf(SecondaryPaneMode.Preview)
     }
-    var hasAttemptedInitialLocalPicker by rememberSaveable {
-        mutableStateOf(false)
-    }
     val previewResetKey =
         "preview:${primaryDestination.name}:${uiState.selectedServer?.id}:${uiState.currentPath}"
     var dashboardPreviewItem by remember(previewResetKey) {
@@ -2141,15 +2138,6 @@ fun MainDashboardScreen(
         when (primaryDestination) {
             PrimaryDestination.LocalFiles -> {
                 viewModel.switchToLocalSource(persistedLocalTreeUri)
-                if (
-                    persistedLocalTreeUri.isNullOrBlank() &&
-                    !uiState.isConnected &&
-                    !uiState.isConnecting &&
-                    !hasAttemptedInitialLocalPicker
-                ) {
-                    hasAttemptedInitialLocalPicker = true
-                    requestLocalStorageConnection(forcePicker = true)
-                }
             }
 
             PrimaryDestination.SmbFiles -> {
