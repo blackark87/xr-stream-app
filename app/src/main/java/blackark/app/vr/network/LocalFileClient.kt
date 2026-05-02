@@ -4,7 +4,6 @@ import android.content.Context
 import android.net.Uri
 import android.provider.DocumentsContract
 import android.provider.DocumentsContract.Document
-import androidx.documentfile.provider.DocumentFile
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.InputStream
@@ -58,18 +57,26 @@ class LocalFileClient(
 
     suspend fun connect(): Result<Unit> = withContext(Dispatchers.IO) {
         try {
-            val root = DocumentFile.fromTreeUri(appContext, rootUri)
-                ?: return@withContext Result.failure(
-                    IllegalStateException("Unable to open local root tree URI")
-                )
+            val rootDocumentId = DocumentsContract.getTreeDocumentId(rootUri)
+            val rootDocumentUri =
+                DocumentsContract.buildDocumentUriUsingTree(rootUri, rootDocumentId)
+            val rootMimeType = appContext.contentResolver.query(
+                rootDocumentUri,
+                arrayOf(Document.COLUMN_MIME_TYPE),
+                null,
+                null,
+                null,
+            )?.use { cursor ->
+                if (!cursor.moveToFirst()) {
+                    return@use null
+                }
+                val mimeTypeIndex = cursor.getColumnIndex(Document.COLUMN_MIME_TYPE)
+                cursor.getStringIfPresent(mimeTypeIndex)
+            } ?: return@withContext Result.failure(
+                IllegalStateException("Local root folder is not accessible")
+            )
 
-            if (!root.exists()) {
-                return@withContext Result.failure(
-                    IllegalStateException("Local root folder is not accessible")
-                )
-            }
-
-            if (!root.isDirectory) {
+            if (rootMimeType != Document.MIME_TYPE_DIR) {
                 return@withContext Result.failure(
                     IllegalStateException("Selected local root is not a directory")
                 )
