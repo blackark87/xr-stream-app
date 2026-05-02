@@ -106,7 +106,7 @@ private val IMMERSIVE_CONTROLS_PANEL_HEIGHT = 360.dp
 private val IMMERSIVE_CONTROLS_PANEL_WIDTH_MONO = 1260.dp
 private val IMMERSIVE_CONTROLS_PANEL_WIDTH_STEREO = 1460.dp
 private const val IMMERSIVE_CONTROLS_FRONT_FACTOR = 0.84f
-private val IMMERSIVE_CONTROLS_DOWN_OFFSET = 180.dp
+private val IMMERSIVE_CONTROLS_DOWN_OFFSET = 280.dp
 
 private tailrec fun Context.findActivity(): Activity? =
     when (this) {
@@ -796,7 +796,7 @@ private fun buildImmersiveControlsModifier(
             .height(IMMERSIVE_CONTROLS_PANEL_HEIGHT)
 
     if (dashboardPanelPose == null) {
-        return baseModifier
+        return baseModifier.offset(y = IMMERSIVE_CONTROLS_DOWN_OFFSET)
     }
 
     val anchoredX = with(density) { dashboardPanelPose.translation.x.toDp() } * IMMERSIVE_CONTROLS_FRONT_FACTOR
