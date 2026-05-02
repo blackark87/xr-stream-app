@@ -100,9 +100,13 @@ import blackark.app.vr.utils.AppSettingsStore
 import kotlinx.coroutines.delay
 
 private const val TAG = "VideoPlayerScreen"
-private val IMMERSIVE_STEREO_CONTROLS_LIFT = 160.dp
 private val HIDDEN_MAIN_PANEL_OFFSET = 4000.dp
 private val HIDDEN_MAIN_PANEL_ANCHOR_SIZE = 2.dp
+private val IMMERSIVE_CONTROLS_PANEL_HEIGHT = 360.dp
+private val IMMERSIVE_CONTROLS_PANEL_WIDTH_MONO = 1260.dp
+private val IMMERSIVE_CONTROLS_PANEL_WIDTH_STEREO = 1460.dp
+private const val IMMERSIVE_CONTROLS_FRONT_FACTOR = 0.84f
+private val IMMERSIVE_CONTROLS_DOWN_OFFSET = 180.dp
 
 private tailrec fun Context.findActivity(): Activity? =
     when (this) {
@@ -507,16 +511,6 @@ fun SpatialVideoPlayerContent(
         )
 
         if (isSurfaceReady) {
-            val immersiveControlsSizeModifier =
-                if (playerState.stereoMode == blackark.app.vr.ui.viewmodel.StereoMode.Mono) {
-                    Modifier
-                        .fillMaxWidth(0.82f)
-                        .widthIn(max = 1180.dp)
-                } else {
-                    Modifier
-                        .fillMaxWidth(0.9f)
-                        .widthIn(max = 1380.dp)
-                }
             SpatialPanel(
                 modifier = SubspaceModifier.fillMaxSize(),
                 interactionPolicy = clickInteractionPolicy(
@@ -524,24 +518,12 @@ fun SpatialVideoPlayerContent(
                 ),
             ) {
                 PlaybackScrollInputOverlay(
-                    showControls = showControls,
+                    showControls = false,
                     onKeyUp = { event ->
                         videoPlayerViewModel.dispatchPlaybackKeyEvent(event)
                     },
                     controlsInputLocked = playerState.controlsInputLocked,
                     seekPreviewActive = playerState.seekPreviewActive,
-                    controlsAlignment = Alignment.BottomCenter,
-                    controlsPadding =
-                        if (playerState.stereoMode == blackark.app.vr.ui.viewmodel.StereoMode.Mono) {
-                            PaddingValues(start = 24.dp, end = 24.dp, bottom = 36.dp)
-                        } else {
-                            PaddingValues(
-                                start = 24.dp,
-                                end = 24.dp,
-                                bottom = 64.dp + IMMERSIVE_STEREO_CONTROLS_LIFT,
-                            )
-                        },
-                    controlsModifier = immersiveControlsSizeModifier,
                     onToggleControls = { videoPlayerViewModel.toggleControls() },
                     onHorizontalScrollDelta = { delta ->
                         videoPlayerViewModel.handlePlaybackHorizontalScroll(delta)
@@ -549,12 +531,42 @@ fun SpatialVideoPlayerContent(
                     onVerticalScrollDelta = { delta ->
                         videoPlayerViewModel.handlePlaybackVerticalScroll(delta)
                     },
+                )
+            }
+
+            if (showControls) {
+                SpatialPanel(
+                    modifier = buildImmersiveControlsModifier(
+                        dashboardPanelPose = dashboardPanelPose,
+                        density = density,
+                        stereoMode = playerState.stereoMode,
+                    ),
+                    interactionPolicy = clickInteractionPolicy(
+                        isHandTrackingEnabled = isHandTrackingEnabled,
+                    ),
                 ) {
-                    XRPlaybackControls(
-                        videoPlayerViewModel = videoPlayerViewModel,
-                        playerState = playerState,
-                        onNavigateBack = { videoPlayerViewModel.requestNavigateBack() },
-                    )
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clickable(
+                                enabled = !playerState.controlsInputLocked && !playerState.seekPreviewActive,
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null,
+                            ) {
+                                videoPlayerViewModel.toggleControls()
+                            },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Box(
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            XRPlaybackControls(
+                                videoPlayerViewModel = videoPlayerViewModel,
+                                playerState = playerState,
+                                onNavigateBack = { videoPlayerViewModel.requestNavigateBack() },
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -765,6 +777,40 @@ private fun buildHiddenMainPanelAnchorModifier(
             x = HIDDEN_MAIN_PANEL_OFFSET,
             y = HIDDEN_MAIN_PANEL_OFFSET,
         )
+
+private fun buildImmersiveControlsModifier(
+    dashboardPanelPose: Pose?,
+    density: Density,
+    stereoMode: blackark.app.vr.ui.viewmodel.StereoMode,
+): SubspaceModifier {
+    val panelWidth =
+        if (stereoMode == blackark.app.vr.ui.viewmodel.StereoMode.Mono) {
+            IMMERSIVE_CONTROLS_PANEL_WIDTH_MONO
+        } else {
+            IMMERSIVE_CONTROLS_PANEL_WIDTH_STEREO
+        }
+
+    val baseModifier =
+        SubspaceModifier
+            .width(panelWidth)
+            .height(IMMERSIVE_CONTROLS_PANEL_HEIGHT)
+
+    if (dashboardPanelPose == null) {
+        return baseModifier
+    }
+
+    val anchoredX = with(density) { dashboardPanelPose.translation.x.toDp() } * IMMERSIVE_CONTROLS_FRONT_FACTOR
+    val anchoredY = with(density) { dashboardPanelPose.translation.y.toDp() } + IMMERSIVE_CONTROLS_DOWN_OFFSET
+    val anchoredZ = with(density) { dashboardPanelPose.translation.z.toDp() } * IMMERSIVE_CONTROLS_FRONT_FACTOR
+
+    return baseModifier
+        .offset(
+            x = anchoredX,
+            y = anchoredY,
+            z = anchoredZ,
+        )
+        .rotate(dashboardPanelPose.rotation)
+}
 
 private fun buildPanelModifierFromSavedPose(
     dashboardPanelPose: Pose?,
