@@ -647,34 +647,35 @@ private fun DashboardSourceRail(
     modifier: Modifier = Modifier,
 ) {
     Surface(
-        modifier = modifier.clip(RoundedCornerShape(24.dp)),
+        modifier = modifier.clip(RoundedCornerShape(22.dp)),
         color = CardBackground.copy(alpha = 0.92f),
-        shape = RoundedCornerShape(24.dp),
-        tonalElevation = 6.dp,
-        shadowElevation = 10.dp,
+        shape = RoundedCornerShape(22.dp),
+        tonalElevation = 10.dp,
+        shadowElevation = 18.dp,
     ) {
-        NavigationRail(
-            containerColor = Color.Transparent,
+        Column(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 12.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
+            Text(
+                text = selectedMode.label,
+                style = MaterialTheme.typography.labelMedium,
+                color = TextPrimary,
+                maxLines = 1,
+            )
+
+            HorizontalDivider(
+                modifier = Modifier.width(40.dp),
+                color = DividerGray.copy(alpha = 0.72f),
+            )
+
             PrimaryDestination.entries.forEach { mode ->
-                NavigationRailItem(
+                OrbiterRailButton(
+                    label = mode.label,
+                    icon = mode.icon(),
                     selected = selectedMode == mode,
                     onClick = { onModeSelected(mode) },
-                    icon = {
-                        Icon(
-                            imageVector = mode.icon(),
-                            contentDescription = mode.label,
-                        )
-                    },
-                    label = { Text(mode.label) },
-                    alwaysShowLabel = true,
-                    colors = NavigationRailItemDefaults.colors(
-                        selectedIconColor = TextPrimary,
-                        selectedTextColor = TextPrimary,
-                        unselectedIconColor = TextSecondary,
-                        unselectedTextColor = TextTertiary,
-                        indicatorColor = NetflixRed.copy(alpha = 0.26f),
-                    ),
                 )
             }
         }
@@ -688,33 +689,70 @@ private fun LibraryOrbiterRail(
     modifier: Modifier = Modifier,
 ) {
     Surface(
-        modifier = modifier.clip(RoundedCornerShape(24.dp)),
+        modifier = modifier.clip(RoundedCornerShape(22.dp)),
         color = CardBackground.copy(alpha = 0.92f),
-        shape = RoundedCornerShape(24.dp),
-        tonalElevation = 6.dp,
-        shadowElevation = 10.dp,
+        shape = RoundedCornerShape(22.dp),
+        tonalElevation = 10.dp,
+        shadowElevation = 18.dp,
     ) {
-        NavigationRail(
-            containerColor = Color.Transparent,
+        Column(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 12.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            NavigationRailItem(
+            Text(
+                text = stringResource(R.string.library),
+                style = MaterialTheme.typography.labelMedium,
+                color = if (isSelected) TextPrimary else TextSecondary,
+                maxLines = 1,
+            )
+
+            HorizontalDivider(
+                modifier = Modifier.width(40.dp),
+                color = DividerGray.copy(alpha = 0.72f),
+            )
+
+            OrbiterRailButton(
+                label = stringResource(R.string.library),
+                icon = Icons.Filled.Favorite,
                 selected = isSelected,
                 onClick = onClick,
-                icon = {
-                    Icon(
-                        imageVector = Icons.Filled.Favorite,
-                        contentDescription = stringResource(R.string.library),
-                    )
-                },
-                label = { Text(stringResource(R.string.library)) },
-                alwaysShowLabel = true,
-                colors = NavigationRailItemDefaults.colors(
-                    selectedIconColor = TextPrimary,
-                    selectedTextColor = TextPrimary,
-                    unselectedIconColor = TextSecondary,
-                    unselectedTextColor = TextTertiary,
-                    indicatorColor = NetflixRed.copy(alpha = 0.26f),
-                ),
+            )
+        }
+    }
+}
+
+@Composable
+private fun OrbiterRailButton(
+    label: String,
+    icon: ImageVector,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier
+            .size(56.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .clickable(onClick = onClick),
+        color = if (selected) {
+            NetflixRed.copy(alpha = 0.18f)
+        } else {
+            CardBackgroundHover.copy(alpha = 0.92f)
+        },
+        shape = RoundedCornerShape(18.dp),
+        tonalElevation = if (selected) 4.dp else 2.dp,
+        border = BorderStroke(
+            1.dp,
+            if (selected) NetflixRed.copy(alpha = 0.42f) else DividerGray.copy(alpha = 0.76f),
+        ),
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Icon(
+                imageVector = icon,
+                contentDescription = label,
+                tint = if (selected) TextPrimary else TextSecondary,
+                modifier = Modifier.size(24.dp),
             )
         }
     }
@@ -2819,7 +2857,7 @@ fun MainDashboardScreen(
 
         Orbiter(
             position = ContentEdge.Start,
-            offset = 28.dp,
+            offset = 44.dp,
             offsetType = OrbiterOffsetType.OuterEdge,
             alignment = Alignment.CenterVertically,
             elevation = 20.dp,
@@ -2834,7 +2872,7 @@ fun MainDashboardScreen(
         if (showLibraryOrbiter) {
             Orbiter(
                 position = ContentEdge.End,
-                offset = 28.dp,
+                offset = 44.dp,
                 offsetType = OrbiterOffsetType.OuterEdge,
                 alignment = Alignment.CenterVertically,
                 elevation = 20.dp,
