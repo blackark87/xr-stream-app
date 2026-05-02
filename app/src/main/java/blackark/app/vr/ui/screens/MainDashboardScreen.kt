@@ -2279,6 +2279,7 @@ fun MainDashboardScreen(
                     .padding(innerPadding)
                     .padding(horizontal = 16.dp, vertical = 12.dp)
             ) {
+                val dashboardContentWidth = maxWidth
                 Box(
                     modifier = Modifier
                         .fillMaxSize(),
@@ -2375,15 +2376,15 @@ fun MainDashboardScreen(
                             } else {
                                 val previewDensity = LocalDensity.current
                                 val defaultPreviewWidth = when {
-                                    maxWidth >= 1500.dp -> 420.dp
-                                    maxWidth >= 1180.dp -> 360.dp
+                                    dashboardContentWidth >= 1500.dp -> 420.dp
+                                    dashboardContentWidth >= 1180.dp -> 360.dp
                                     else -> 300.dp
                                 }
                                 val minPreviewWidth = 280.dp
                                 val minPrimaryPaneWidth = 460.dp
                                 val dividerWidth = 18.dp
                                 val maxPreviewWidth =
-                                    (maxWidth - dividerWidth - minPrimaryPaneWidth)
+                                    (dashboardContentWidth - dividerWidth - minPrimaryPaneWidth)
                                         .coerceAtLeast(minPreviewWidth)
 
                                 LaunchedEffect(
@@ -2633,15 +2634,15 @@ fun MainDashboardScreen(
                             } else {
                                 val previewDensity = LocalDensity.current
                                 val defaultPreviewWidth = when {
-                                    maxWidth >= 1500.dp -> 420.dp
-                                    maxWidth >= 1180.dp -> 360.dp
+                                    dashboardContentWidth >= 1500.dp -> 420.dp
+                                    dashboardContentWidth >= 1180.dp -> 360.dp
                                     else -> 300.dp
                                 }
                                 val minPreviewWidth = 280.dp
                                 val minPrimaryPaneWidth = 460.dp
                                 val dividerWidth = 18.dp
                                 val maxPreviewWidth =
-                                    (maxWidth - dividerWidth - minPrimaryPaneWidth)
+                                    (dashboardContentWidth - dividerWidth - minPrimaryPaneWidth)
                                         .coerceAtLeast(minPreviewWidth)
 
                                 LaunchedEffect(
@@ -2829,7 +2830,7 @@ fun MainDashboardScreen(
         }
 
         Orbiter(
-            position = ContentEdge.Left,
+            position = ContentEdge.Start,
             offset = 28.dp,
             offsetType = OrbiterOffsetType.OuterEdge,
             alignment = Alignment.CenterVertically,
@@ -2844,7 +2845,7 @@ fun MainDashboardScreen(
 
         if (showLibraryOrbiter) {
             Orbiter(
-                position = ContentEdge.Right,
+                position = ContentEdge.End,
                 offset = 28.dp,
                 offsetType = OrbiterOffsetType.OuterEdge,
                 alignment = Alignment.CenterVertically,
