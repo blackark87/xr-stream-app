@@ -60,7 +60,11 @@ import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Minimize
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.MovieCreation
+import androidx.compose.material.icons.filled.North
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Sort
+import androidx.compose.material.icons.filled.SortByAlpha
+import androidx.compose.material.icons.filled.South
 import androidx.compose.material.icons.filled.ViewModule
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material3.AlertDialog
@@ -147,6 +151,7 @@ import blackark.app.vr.data.database.entity.SavedServer
 import blackark.app.vr.data.model.LibraryVideoItem
 import blackark.app.vr.network.SMBClient
 import blackark.app.vr.network.SMBFileItem
+import blackark.app.vr.ui.ApplyHandTrackingPreference
 import blackark.app.vr.ui.components.EmptyState
 import blackark.app.vr.ui.components.FancyFileCard
 import blackark.app.vr.ui.components.FancyMovieCard
@@ -163,6 +168,7 @@ import blackark.app.vr.ui.theme.SuccessGreen
 import blackark.app.vr.ui.theme.TextPrimary
 import blackark.app.vr.ui.theme.TextSecondary
 import blackark.app.vr.ui.theme.TextTertiary
+import blackark.app.vr.ui.viewmodel.FileBrowserSortMode
 import blackark.app.vr.ui.viewmodel.FileBrowserViewMode
 import blackark.app.vr.ui.viewmodel.MainDashboardViewModel
 import blackark.app.vr.utils.ImageCacheVersionStore
@@ -184,6 +190,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
 import kotlin.math.roundToInt
 import androidx.xr.compose.subspace.layout.onGloballyPositioned as onSubspaceGloballyPositioned
 
@@ -1214,8 +1223,10 @@ private fun SourceSwitcherButton(
 @Composable
 private fun SettingsPanel(
     versionLabel: String,
+    isHandTrackingEnabled: Boolean,
     isAvBackgroundIndexingEnabled: Boolean,
     activeAction: SettingsAction?,
+    onHandTrackingChange: (Boolean) -> Unit,
     onAvBackgroundIndexingChange: (Boolean) -> Unit,
     onClearArtwork: () -> Unit,
     onClearThumbnails: () -> Unit,
@@ -1244,6 +1255,12 @@ private fun SettingsPanel(
 
             HorizontalDivider(color = DividerGray)
 
+            SettingsToggleRow(
+                title = stringResource(R.string.hand_tracking),
+                description = stringResource(R.string.hand_tracking_description),
+                checked = isHandTrackingEnabled,
+                onCheckedChange = onHandTrackingChange,
+            )
             SettingsToggleRow(
                 title = stringResource(R.string.av_background_indexing),
                 description = stringResource(R.string.av_background_indexing_description),
@@ -1407,7 +1424,9 @@ private fun SettingsActionRow(
 @Composable
 fun MainDashboardScreen(
     navController: NavController,
-    viewModel: MainDashboardViewModel
+    viewModel: MainDashboardViewModel,
+    hasControllerLikeInputDevice: Boolean,
+    hasHandTrackingPermission: Boolean,
 ) {
     val context = LocalContext.current
     val activity = remember(context) { context.findActivity() }
@@ -1443,6 +1462,10 @@ fun MainDashboardScreen(
     var settingsFeedback by remember { mutableStateOf<SettingsFeedback?>(null) }
     val dashboardScope = rememberCoroutineScope()
     val appVersionLabel = remember(context) { resolveAppVersionLabel(context) }
+    val shouldShowControllerHandTrackingPrompt =
+        hasControllerLikeInputDevice &&
+                uiState.isHandTrackingEnabled &&
+                !uiState.isControllerHandTrackingPromptHandled
 
     val availableSources = remember(servers) {
         servers
@@ -1501,6 +1524,12 @@ fun MainDashboardScreen(
     }
 
     Subspace {
+        ApplyHandTrackingPreference(
+            isHandTrackingEnabled = uiState.isHandTrackingEnabled,
+            hasHandTrackingPermission = hasHandTrackingPermission,
+            logTag = "MainDashboardScreen",
+        )
+
         val dashboardPanelModifier =
             initialDashboardPose?.let { pose ->
                 SubspaceModifier
@@ -1628,8 +1657,10 @@ fun MainDashboardScreen(
                         } else {
                             SettingsPanel(
                                 versionLabel = appVersionLabel,
+                                isHandTrackingEnabled = uiState.isHandTrackingEnabled,
                                 isAvBackgroundIndexingEnabled = uiState.isAvBackgroundIndexingEnabled,
                                 activeAction = activeSettingsAction,
+                                onHandTrackingChange = viewModel::setHandTrackingEnabled,
                                 onAvBackgroundIndexingChange = viewModel::setAvBackgroundIndexingEnabled,
                                 onClearArtwork = {
                                     pendingSettingsAction = SettingsAction.ClearArtwork
@@ -1682,8 +1713,10 @@ fun MainDashboardScreen(
                             if (compactConnectedTab == ConnectedDashboardTab.Settings) {
                                 SettingsPanel(
                                     versionLabel = appVersionLabel,
+                                    isHandTrackingEnabled = uiState.isHandTrackingEnabled,
                                     isAvBackgroundIndexingEnabled = uiState.isAvBackgroundIndexingEnabled,
                                     activeAction = activeSettingsAction,
+                                    onHandTrackingChange = viewModel::setHandTrackingEnabled,
                                     onAvBackgroundIndexingChange = viewModel::setAvBackgroundIndexingEnabled,
                                     onClearArtwork = {
                                         pendingSettingsAction = SettingsAction.ClearArtwork
@@ -1802,6 +1835,7 @@ fun MainDashboardScreen(
                                                         isLoading = uiState.isLoadingFiles,
                                                         errorMessage = uiState.errorMessage,
                                                         viewMode = uiState.fileViewMode,
+                                                        sortMode = uiState.fileSortMode,
                                                         currentPreviewKey = dashboardPreviewItem?.key,
                                                         onFileClick = { file ->
                                                             dashboardPreviewItem = null
@@ -1814,6 +1848,10 @@ fun MainDashboardScreen(
                                                         onToggleViewMode = {
                                                             dashboardPreviewItem = null
                                                             viewModel.toggleFileViewMode()
+                                                        },
+                                                        onSortModeSelected = { sortMode ->
+                                                            dashboardPreviewItem = null
+                                                            viewModel.setFileSortMode(sortMode)
                                                         },
                                                         onDeleteFiles = { selectedFiles ->
                                                             viewModel.deleteFiles(selectedFiles)
@@ -2097,6 +2135,45 @@ fun MainDashboardScreen(
             },
         )
     }
+
+    if (shouldShowControllerHandTrackingPrompt) {
+        AlertDialog(
+            onDismissRequest = {
+                viewModel.setControllerHandTrackingPromptHandled()
+            },
+            title = {
+                Text(stringResource(R.string.controller_detected_hand_tracking_title))
+            },
+            text = {
+                Text(stringResource(R.string.controller_detected_hand_tracking_message))
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.setHandTrackingEnabled(false)
+                        viewModel.setControllerHandTrackingPromptHandled()
+                    },
+                ) {
+                    Text(
+                        stringResource(R.string.disable_hand_tracking_action),
+                        color = NetflixRed,
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.setControllerHandTrackingPromptHandled()
+                    },
+                ) {
+                    Text(
+                        stringResource(R.string.keep_hand_tracking_action),
+                        color = TextSecondary,
+                    )
+                }
+            },
+        )
+    }
 }
 
 @Composable
@@ -2221,13 +2298,11 @@ private tailrec fun Context.findActivity(): Activity? = when (this) {
 
 private data class VirtualVideoGroup(
     val key: String,
-    val files: List<SMBFileItem>
+    val files: List<SMBFileItem>,
+    val representativeFile: SMBFileItem?,
 ) {
     val fileCount: Int
         get() = files.size
-
-    val representativeFile: SMBFileItem?
-        get() = files.firstOrNull()
 }
 
 private sealed interface FileBrowserDisplayItem {
@@ -2487,10 +2562,12 @@ private fun FileBrowserPanel(
     isLoading: Boolean,
     errorMessage: String?,
     viewMode: FileBrowserViewMode,
+    sortMode: FileBrowserSortMode,
     currentPreviewKey: String?,
     onFileClick: (SMBFileItem) -> Unit,
     onBackClick: () -> Unit,
     onToggleViewMode: () -> Unit,
+    onSortModeSelected: (FileBrowserSortMode) -> Unit,
     onDeleteFiles: suspend (List<SMBFileItem>) -> Result<Int>,
     onPlayVideo: (String, String) -> Unit,
     onFavoriteToggle: (SMBFileItem, Boolean) -> Unit,
@@ -2505,6 +2582,7 @@ private fun FileBrowserPanel(
     var selectedPaths by remember { mutableStateOf<Set<String>>(emptySet()) }
     var showDeleteConfirmDialog by remember { mutableStateOf(false) }
     var isDeleteInProgress by remember { mutableStateOf(false) }
+    var showSortMenu by remember { mutableStateOf(false) }
     var activeVirtualGroupKey by rememberSaveable(currentPath) { mutableStateOf<String?>(null) }
 
     val virtualGroups = remember(files) { buildVirtualVideoGroups(files) }
@@ -2792,6 +2870,64 @@ private fun FileBrowserPanel(
                             },
                             tint = if (isDeleteMode) TextTertiary else TextSecondary
                         )
+                    }
+
+                    Box {
+                        IconButton(
+                            onClick = { showSortMenu = true },
+                            enabled = isConnected && !isLoading && !isDeleteMode && !isDeleteInProgress,
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Sort,
+                                contentDescription = stringResource(R.string.sort_files),
+                                tint = if (showSortMenu) NetflixRed else TextSecondary,
+                            )
+                        }
+
+                        DropdownMenu(
+                            expanded = showSortMenu,
+                            onDismissRequest = { showSortMenu = false },
+                            modifier = Modifier.widthIn(min = 260.dp, max = 320.dp),
+                            shape = RoundedCornerShape(20.dp),
+                            containerColor = CardBackgroundHover.copy(alpha = 0.98f),
+                            tonalElevation = 8.dp,
+                            shadowElevation = 18.dp,
+                            border = BorderStroke(1.dp, DividerGray.copy(alpha = 0.85f)),
+                        ) {
+                            FileBrowserSortMode.entries.forEach { mode ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            text = fileBrowserSortLabel(mode),
+                                            color = TextPrimary,
+                                            style = MaterialTheme.typography.titleSmall,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    },
+                                    leadingIcon = {
+                                        Icon(
+                                            imageVector = fileBrowserSortIcon(mode),
+                                            contentDescription = null,
+                                            tint = fileBrowserSortAccent(mode),
+                                        )
+                                    },
+                                    trailingIcon = {
+                                        if (mode == sortMode) {
+                                            Icon(
+                                                imageVector = Icons.Filled.CheckCircle,
+                                                contentDescription = null,
+                                                tint = SuccessGreen,
+                                            )
+                                        }
+                                    },
+                                    onClick = {
+                                        showSortMenu = false
+                                        onSortModeSelected(mode)
+                                    },
+                                )
+                            }
+                        }
                     }
 
                     IconButton(
@@ -3138,6 +3274,29 @@ private fun FileBrowserPanel(
     }
 }
 
+@Composable
+private fun fileBrowserSortLabel(sortMode: FileBrowserSortMode): String = when (sortMode) {
+    FileBrowserSortMode.Newest -> stringResource(R.string.sort_newest)
+    FileBrowserSortMode.Oldest -> stringResource(R.string.sort_oldest)
+    FileBrowserSortMode.FilenameAscending -> stringResource(R.string.sort_filename_ascending)
+    FileBrowserSortMode.FilenameDescending -> stringResource(R.string.sort_filename_descending)
+}
+
+private fun fileBrowserSortIcon(sortMode: FileBrowserSortMode): ImageVector = when (sortMode) {
+    FileBrowserSortMode.Newest -> Icons.Filled.South
+    FileBrowserSortMode.Oldest -> Icons.Filled.North
+    FileBrowserSortMode.FilenameAscending,
+    FileBrowserSortMode.FilenameDescending -> Icons.Filled.SortByAlpha
+}
+
+private fun fileBrowserSortAccent(sortMode: FileBrowserSortMode): Color = when (sortMode) {
+    FileBrowserSortMode.Newest,
+    FileBrowserSortMode.Oldest -> NetflixRed
+
+    FileBrowserSortMode.FilenameAscending,
+    FileBrowserSortMode.FilenameDescending -> AccentGold
+}
+
 private data class GroupHoverPreviewSpec(
     val model: Any,
     val diskCacheKey: String?,
@@ -3402,6 +3561,7 @@ private fun VirtualGroupListCard(
     } else {
         "${group.fileCount} part files"
     }
+    val displayDateText = formatFileBrowserDate(resolveDisplayDate(group, metadata))
 
     val posterUrl = metadata?.posterUrl
     val representativePath = group.representativeFile?.path
@@ -3616,6 +3776,16 @@ private fun VirtualGroupListCard(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
+                displayDateText?.let { dateText ->
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = dateText,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = TextSecondary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
             }
 
             Icon(
@@ -3717,6 +3887,7 @@ private fun VirtualGroupThumbnailCard(
     } else {
         "${group.fileCount} part files"
     }
+    val displayDateText = formatFileBrowserDate(resolveDisplayDate(group, metadata))
 
     val posterUrl = metadata?.posterUrl
     val representativePath = group.representativeFile?.path
@@ -3939,6 +4110,16 @@ private fun VirtualGroupThumbnailCard(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
+            displayDateText?.let { dateText ->
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = dateText,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = TextSecondary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
         }
 
         GroupHoverPreviewPopup(
@@ -3980,6 +4161,14 @@ private fun FileListEntryCard(
     val displayTitle =
         if (allowJvrMetadata && isVideoFile) metadata?.title ?: file.name else file.name
     val subtitleText = if (allowJvrMetadata) metadata?.code ?: file.name else file.name
+    val detailText = if (!file.isDirectory) {
+        buildFileBrowserDetailText(
+            dateText = formatFileBrowserDate(resolveDisplayDate(file, metadata)),
+            sizeText = formatFileSizeHelper(file.size),
+        )
+    } else {
+        null
+    }
     val posterUrl = metadata?.posterUrl
     val posterCacheKey = posterUrl?.let { buildFilePosterCacheKey(file.name, it) }
     var posterLoadFailed by remember(file.name, posterUrl) { mutableStateOf(false) }
@@ -4052,11 +4241,7 @@ private fun FileListEntryCard(
         fileName = displayTitle,
         isDirectory = file.isDirectory,
         isVideoFile = isVideoFile,
-        fileSize = if (!file.isDirectory) {
-            formatFileSizeHelper(file.size)
-        } else {
-            null
-        },
+        supportingText = detailText,
         isFavorite = isFavorite,
         videoPath = if (isVideoFile) file.path else null,
         thumbnailModel = when {
@@ -4160,6 +4345,14 @@ private fun FileThumbnailCard(
     val displayTitle =
         if (allowJvrMetadata && isVideoFile) metadata?.title ?: file.name else file.name
     val subtitleText = if (allowJvrMetadata) metadata?.code ?: file.name else file.name
+    val detailText = if (!file.isDirectory) {
+        buildFileBrowserDetailText(
+            dateText = formatFileBrowserDate(resolveDisplayDate(file, metadata)),
+            sizeText = formatFileSizeHelper(file.size),
+        )
+    } else {
+        null
+    }
     val posterUrl = metadata?.posterUrl
     val posterCacheKey = posterUrl?.let { buildFilePosterCacheKey(file.name, it) }
     var posterLoadFailed by remember(file.name, posterUrl) { mutableStateOf(false) }
@@ -4386,10 +4579,10 @@ private fun FileThumbnailCard(
                 overflow = TextOverflow.Ellipsis
             )
 
-            if (!file.isDirectory) {
+            detailText?.let { supportingText ->
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = formatFileSizeHelper(file.size),
+                    text = supportingText,
                     style = MaterialTheme.typography.labelSmall,
                     color = TextTertiary
                 )
@@ -4959,6 +5152,8 @@ private fun buildFilePosterCacheKey(fileName: String, posterUrl: String): String
     return "file-poster:$generation:${fileName.hashCode()}:${posterUrl.hashCode()}"
 }
 
+private val fileBrowserZoneId: ZoneId = ZoneId.systemDefault()
+
 private val multipartVideoPattern = Regex("""^(.+)-(\d{1,2})$""")
 
 private fun buildVirtualVideoGroups(files: List<SMBFileItem>): Map<String, VirtualVideoGroup> {
@@ -4978,12 +5173,13 @@ private fun buildVirtualVideoGroups(files: List<SMBFileItem>): Map<String, Virtu
     return groupedCandidates.mapValues { (groupKey, groupedFiles) ->
         VirtualVideoGroup(
             key = groupKey,
-            files = groupedFiles.sortedWith(
+            files = groupedFiles,
+            representativeFile = groupedFiles.minWithOrNull(
                 compareBy<SMBFileItem>(
                     { extractVirtualGroupPart(it.name) ?: Int.MAX_VALUE },
                     { it.name.lowercase() }
                 )
-            )
+            ),
         )
     }
 }
@@ -5047,6 +5243,34 @@ private fun extractVirtualGroupPart(fileName: String): Int? {
     val stem = fileName.substringBeforeLast('.', fileName)
     val match = multipartVideoPattern.matchEntire(stem) ?: return null
     return match.groupValues[2].toIntOrNull()
+}
+
+private fun resolveDisplayDate(file: SMBFileItem, metadata: JvrMovieMetadata?): LocalDate? {
+    return metadata?.releaseDate ?: lastModifiedToLocalDate(file.lastModified)
+}
+
+private fun resolveDisplayDate(group: VirtualVideoGroup, metadata: JvrMovieMetadata?): LocalDate? {
+    return metadata?.releaseDate
+        ?: group.representativeFile?.lastModified?.let(::lastModifiedToLocalDate)
+}
+
+private fun lastModifiedToLocalDate(lastModified: Long): LocalDate? {
+    if (lastModified <= 0L) {
+        return null
+    }
+
+    return Instant.ofEpochMilli(lastModified)
+        .atZone(fileBrowserZoneId)
+        .toLocalDate()
+}
+
+private fun formatFileBrowserDate(date: LocalDate?): String? {
+    return date?.toString()
+}
+
+private fun buildFileBrowserDetailText(dateText: String?, sizeText: String?): String? {
+    val values = listOfNotNull(dateText, sizeText)
+    return values.takeIf { it.isNotEmpty() }?.joinToString(" · ")
 }
 
 /**
