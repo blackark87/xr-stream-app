@@ -201,6 +201,7 @@ dependencies {
     // Room Database
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)
+    implementation("androidx.documentfile:documentfile:1.1.0")
     implementation(libs.androidx.ui)
     ksp(libs.androidx.room.compiler)
 
@@ -229,4 +230,3 @@ dependencies {
     debugImplementation(libs.androidx.compose.ui.tooling)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
 }
-

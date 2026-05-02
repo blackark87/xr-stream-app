@@ -425,6 +425,38 @@ class MainDashboardViewModel(
         )
     }
 
+    fun switchToLocalSource(configuredTreeUri: String?) {
+        val currentState = _uiState.value
+        if (currentState.isConnected && currentState.selectedServer?.isLocalStorage == true) {
+            return
+        }
+
+        if (currentState.isConnected) {
+            disconnect()
+        }
+
+        configuredTreeUri
+            ?.takeIf { it.isNotBlank() }
+            ?.let { treeUri ->
+                connectToServer(
+                    SavedServer.createLocalStorageServer().copy(shareName = treeUri)
+                )
+            }
+    }
+
+    fun switchToSmbSource() {
+        val currentState = _uiState.value
+        if (currentState.isConnected && currentState.selectedServer?.isLocalStorage == true) {
+            disconnect()
+        }
+    }
+
+    fun switchToExternalSource() {
+        if (_uiState.value.isConnected) {
+            disconnect()
+        }
+    }
+
     fun disconnect() {
         avScanJob?.cancel()
         avScanJob = null
