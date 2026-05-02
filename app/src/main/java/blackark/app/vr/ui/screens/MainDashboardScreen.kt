@@ -2288,8 +2288,8 @@ fun MainDashboardScreen(
             ),
             resizePolicy = ResizePolicy(
                 minimumSize = DpVolumeSize(
-                    width = 920.dp,
-                    height = 560.dp,
+                    width = 860.dp,
+                    height = 520.dp,
                     depth = 0.dp,
                 ),
                 onSizeChange = { newSize ->
