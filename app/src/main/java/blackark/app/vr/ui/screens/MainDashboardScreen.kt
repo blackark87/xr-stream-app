@@ -1,9 +1,7 @@
 package blackark.app.vr.ui.screens
 
 import android.annotation.SuppressLint
-import android.app.Activity
 import android.content.Context
-import android.content.ContextWrapper
 import android.content.Intent
 import android.net.Uri
 import android.provider.DocumentsContract
@@ -16,7 +14,6 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.Orientation
@@ -68,7 +65,6 @@ import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.Minimize
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.MovieCreation
 import androidx.compose.material.icons.filled.North
@@ -125,7 +121,6 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -2024,7 +2019,6 @@ fun MainDashboardScreen(
     hasHandTrackingPermission: Boolean,
 ) {
     val context = LocalContext.current
-    val activity = remember(context) { context.findActivity() }
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val servers by viewModel.servers.collectAsStateWithLifecycle()
     val files by viewModel.files.collectAsStateWithLifecycle()
@@ -2275,8 +2269,8 @@ fun MainDashboardScreen(
             ),
             resizePolicy = ResizePolicy(
                 minimumSize = DpVolumeSize(
-                    width = 1024.dp,
-                    height = 640.dp,
+                    width = 920.dp,
+                    height = 560.dp,
                     depth = 0.dp,
                 ),
                 onSizeChange = { newSize ->
@@ -2902,27 +2896,6 @@ fun MainDashboardScreen(
             }
         }
 
-        if (!uiState.isConnected) {
-            Orbiter(
-                position = ContentEdge.Top,
-                offset = 66.dp,
-                offsetType = OrbiterOffsetType.OuterEdge,
-                alignment = Alignment.CenterHorizontally,
-                elevation = 24.dp,
-                shouldRenderInNonSpatial = true,
-            ) {
-                DashboardWindowControls(
-                    onMinimize = {
-                        activity?.moveTaskToBack(true)
-                    },
-                    onClose = {
-                        activity?.finishAndRemoveTask()
-                        activity?.finishAffinity()
-                    }
-                )
-            }
-        }
-
         // Add/Edit Server Dialog
         if (showAddServerDialog || serverToEdit != null) {
             AddServerDialog(
@@ -3144,92 +3117,6 @@ private fun DashboardOrbitArea(
             }
         }
     }
-}
-
-@Composable
-private fun DashboardWindowControls(
-    onMinimize: () -> Unit,
-    onClose: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Surface(
-        modifier = modifier,
-        color = CardBackgroundHover.copy(alpha = 0.94f),
-        shape = RoundedCornerShape(20.dp),
-        tonalElevation = 8.dp,
-        shadowElevation = 12.dp
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(44.dp)
-                    .background(CardBackground.copy(alpha = 0.75f), RoundedCornerShape(12.dp)),
-                contentAlignment = Alignment.Center
-            ) {
-                Image(
-                    painter = painterResource(id = R.mipmap.app_icon_foreground),
-                    contentDescription = stringResource(R.string.app_name),
-                    modifier = Modifier.size(30.dp)
-                )
-            }
-
-            OrbiterActionButton(
-                imageVector = Icons.Filled.Minimize,
-                contentDescription = stringResource(R.string.minimize),
-                onClick = onMinimize
-            )
-
-            OrbiterActionButton(
-                imageVector = Icons.Filled.Close,
-                contentDescription = stringResource(R.string.close),
-                onClick = onClose
-            )
-        }
-    }
-}
-
-@Composable
-private fun OrbiterActionButton(
-    imageVector: ImageVector,
-    contentDescription: String,
-    onClick: () -> Unit,
-) {
-    val interactionSource = remember { MutableInteractionSource() }
-    val isHovered by interactionSource.collectIsHoveredAsState()
-    val isFocused by interactionSource.collectIsFocusedAsState()
-    val isPressed by interactionSource.collectIsPressedAsState()
-    val isActivePointer = isHovered || isFocused
-
-    val iconTint = when {
-        isPressed -> NetflixRed
-        isActivePointer -> NetflixRed.copy(alpha = 0.85f)
-        else -> TextPrimary
-    }
-
-    IconButton(
-        onClick = onClick,
-        interactionSource = interactionSource,
-        modifier = Modifier
-            .size(44.dp)
-            .hoverable(interactionSource = interactionSource)
-    ) {
-        Icon(
-            imageVector = imageVector,
-            contentDescription = contentDescription,
-            tint = iconTint,
-            modifier = Modifier.size(24.dp)
-        )
-    }
-}
-
-private tailrec fun Context.findActivity(): Activity? = when (this) {
-    is Activity -> this
-    is ContextWrapper -> baseContext.findActivity()
-    else -> null
 }
 
 private data class VirtualVideoGroup(

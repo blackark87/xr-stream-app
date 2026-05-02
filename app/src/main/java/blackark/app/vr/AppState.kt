@@ -16,8 +16,8 @@ data class ControllerAxisEvent(
 )
 
 data class DashboardPanelSize(
-    val widthDp: Float = 1920f,
-    val heightDp: Float = 1080f,
+    val widthDp: Float = 1560f,
+    val heightDp: Float = 900f,
 )
 
 object AppState {
