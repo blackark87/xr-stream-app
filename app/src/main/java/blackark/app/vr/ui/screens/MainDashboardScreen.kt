@@ -2877,7 +2877,7 @@ fun MainDashboardScreen(
         if (showLibraryOrbiter) {
             Orbiter(
                 position = ContentEdge.End,
-                offset = 44.dp,
+                offset = 72.dp,
                 offsetType = OrbiterOffsetType.OuterEdge,
                 alignment = Alignment.CenterVertically,
                 elevation = 20.dp,
