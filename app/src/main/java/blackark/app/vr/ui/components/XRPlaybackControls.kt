@@ -24,6 +24,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.FastForward
 import androidx.compose.material.icons.filled.FastRewind
 import androidx.compose.material.icons.filled.Movie
@@ -481,7 +482,7 @@ fun XRPlaybackControls(
                     )
 
                     PlaybackMenuIconButton(
-                        imageVector = Icons.Filled.VolumeUp,
+                        imageVector = Icons.AutoMirrored.Filled.VolumeUp,
                         contentDescription = "Volume",
                         selected = playerState.activePlaybackMenu == PlaybackMenu.Volume,
                         containerColor = if (playerState.activePlaybackMenu == PlaybackMenu.Volume) {

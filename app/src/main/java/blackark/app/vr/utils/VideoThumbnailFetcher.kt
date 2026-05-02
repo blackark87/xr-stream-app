@@ -342,7 +342,7 @@ class VideoThumbnailFetcher(
             !linkedAsset?.metadataCacheKey.isNullOrBlank() -> {
                 JvrLibraryMetadataProvider.getByCacheKey(
                     context = options.context.applicationContext,
-                    cacheKey = linkedAsset!!.metadataCacheKey!!,
+                    cacheKey = linkedAsset.metadataCacheKey,
                 )
             }
 

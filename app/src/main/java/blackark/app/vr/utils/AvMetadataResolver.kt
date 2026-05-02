@@ -31,7 +31,7 @@ suspend fun resolveLinkedMetadataForVideoPath(
         !asset?.metadataCacheKey.isNullOrBlank() -> {
             JvrLibraryMetadataProvider.getByCacheKey(
                 context = context.applicationContext,
-                cacheKey = asset!!.metadataCacheKey!!,
+                cacheKey = asset.metadataCacheKey,
             )
         }
 
@@ -71,7 +71,7 @@ suspend fun resolveLinkedMetadataForGroup(
         !asset?.metadataCacheKey.isNullOrBlank() -> {
             JvrLibraryMetadataProvider.getByCacheKey(
                 context = context.applicationContext,
-                cacheKey = asset!!.metadataCacheKey!!,
+                cacheKey = asset.metadataCacheKey,
             )
         }
 
