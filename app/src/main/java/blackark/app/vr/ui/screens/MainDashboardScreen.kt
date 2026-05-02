@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
 import android.net.Uri
+import android.provider.DocumentsContract
 import android.util.Log
 import android.view.KeyEvent
 import android.webkit.WebChromeClient
@@ -32,6 +33,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -179,6 +181,9 @@ import blackark.app.vr.ui.theme.SuccessGreen
 import blackark.app.vr.ui.theme.TextPrimary
 import blackark.app.vr.ui.theme.TextSecondary
 import blackark.app.vr.ui.theme.TextTertiary
+import blackark.app.vr.ui.viewmodel.AvFilterFamily
+import blackark.app.vr.ui.viewmodel.AvLibraryState
+import blackark.app.vr.ui.viewmodel.AvVrFilterOption
 import blackark.app.vr.ui.viewmodel.FileBrowserSortMode
 import blackark.app.vr.ui.viewmodel.FileBrowserViewMode
 import blackark.app.vr.ui.viewmodel.MainDashboardViewModel
@@ -217,10 +222,11 @@ private enum class DashboardPaneDestination(val label: String) {
     Library("Library"),
 }
 
-private enum class DashboardSourceMode(val label: String) {
+private enum class PrimaryDestination(val label: String) {
     LocalFiles("Local Files"),
     SmbFiles("SMB Files"),
     YouTube("YouTube"),
+    Settings("Settings"),
 }
 
 private fun logMetadataTrace(tag: String, message: String) {
@@ -240,16 +246,14 @@ private enum class DashboardWidthClass {
     Expanded,
 }
 
-private enum class ConnectedDashboardTab {
-    Files,
-    Library,
-    AV,
-    Settings,
+private enum class FileWorkspaceMode {
+    Browser,
+    Av,
 }
 
-private enum class DisconnectedDashboardTab {
-    Sources,
-    Settings,
+private enum class SecondaryPaneMode {
+    Preview,
+    Library,
 }
 
 private enum class SettingsAction {
@@ -292,10 +296,11 @@ private fun DashboardPaneDestination.icon(): ImageVector = when (this) {
     DashboardPaneDestination.Library -> Icons.Filled.Favorite
 }
 
-private fun DashboardSourceMode.icon(): ImageVector = when (this) {
-    DashboardSourceMode.LocalFiles -> Icons.Filled.FolderOpen
-    DashboardSourceMode.SmbFiles -> Icons.Filled.Cloud
-    DashboardSourceMode.YouTube -> Icons.Filled.Movie
+private fun PrimaryDestination.icon(): ImageVector = when (this) {
+    PrimaryDestination.LocalFiles -> Icons.Filled.FolderOpen
+    PrimaryDestination.SmbFiles -> Icons.Filled.Cloud
+    PrimaryDestination.YouTube -> Icons.Filled.Movie
+    PrimaryDestination.Settings -> Icons.Filled.Settings
 }
 
 private fun resolveLocalFolderDisplayName(context: Context, treeUri: String?): String? {
@@ -309,6 +314,68 @@ private fun resolveLocalFolderDisplayName(context: Context, treeUri: String?): S
                 ?.substringAfterLast(':')
                 ?.takeIf { it.isNotBlank() }
     }.getOrNull()
+}
+
+private fun buildLocalPickerInitialUri(pathSegment: String): Uri? {
+    return runCatching {
+        DocumentsContract.buildDocumentUri(
+            "com.android.externalstorage.documents",
+            "primary:$pathSegment",
+        )
+    }.getOrNull()
+}
+
+private fun resolvePreferredLocalPickerInitialUri(configuredTreeUri: String?): Uri? {
+    configuredTreeUri?.takeIf { it.isNotBlank() }?.let { return Uri.parse(it) }
+    return buildLocalPickerInitialUri("Download")
+        ?: buildLocalPickerInitialUri("Documents")
+}
+
+private fun resolveLocalBreadcrumbLabel(
+    currentPath: String,
+    rootLabel: String?,
+): String? {
+    if (currentPath.isBlank()) {
+        return rootLabel
+    }
+
+    return runCatching {
+        DocumentsContract.getDocumentId(Uri.parse(currentPath))
+            .substringAfter(':', currentPath)
+            .takeIf { it.isNotBlank() }
+    }.getOrNull() ?: rootLabel
+}
+
+private fun resolveSourceTitle(
+    destination: PrimaryDestination,
+    selectedServer: SavedServer?,
+): String = when (destination) {
+    PrimaryDestination.LocalFiles -> "Local Files"
+    PrimaryDestination.SmbFiles -> selectedServer?.serverName?.takeIf { it.isNotBlank() } ?: "SMB Files"
+    PrimaryDestination.YouTube -> "YouTube"
+    PrimaryDestination.Settings -> "Settings"
+}
+
+private fun resolveSourceBreadcrumb(
+    destination: PrimaryDestination,
+    selectedServer: SavedServer?,
+    currentPath: String,
+    localRootLabel: String?,
+): String? = when (destination) {
+    PrimaryDestination.LocalFiles -> resolveLocalBreadcrumbLabel(
+        currentPath = currentPath,
+        rootLabel = localRootLabel,
+    )
+
+    PrimaryDestination.SmbFiles -> when {
+        currentPath.isNotBlank() -> currentPath
+        selectedServer?.shareName?.isNotBlank() == true -> selectedServer.shareName
+        selectedServer?.serverAddress?.isNotBlank() == true -> selectedServer.serverAddress
+        else -> null
+    }
+
+    PrimaryDestination.YouTube,
+    PrimaryDestination.Settings -> null
 }
 
 private fun resolveDashboardWidthClass(width: Dp): DashboardWidthClass = when {
@@ -575,8 +642,8 @@ private fun DashboardNavigationRail(
 
 @Composable
 private fun DashboardSourceRail(
-    selectedMode: DashboardSourceMode,
-    onModeSelected: (DashboardSourceMode) -> Unit,
+    selectedMode: PrimaryDestination,
+    onModeSelected: (PrimaryDestination) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Surface(
@@ -589,7 +656,7 @@ private fun DashboardSourceRail(
         NavigationRail(
             containerColor = Color.Transparent,
         ) {
-            DashboardSourceMode.entries.forEach { mode ->
+            PrimaryDestination.entries.forEach { mode ->
                 NavigationRailItem(
                     selected = selectedMode == mode,
                     onClick = { onModeSelected(mode) },
@@ -608,6 +675,165 @@ private fun DashboardSourceRail(
                         unselectedTextColor = TextTertiary,
                         indicatorColor = NetflixRed.copy(alpha = 0.26f),
                     ),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun LibraryOrbiterRail(
+    isSelected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier.clip(RoundedCornerShape(24.dp)),
+        color = CardBackground.copy(alpha = 0.92f),
+        shape = RoundedCornerShape(24.dp),
+        tonalElevation = 6.dp,
+        shadowElevation = 10.dp,
+    ) {
+        NavigationRail(
+            containerColor = Color.Transparent,
+        ) {
+            NavigationRailItem(
+                selected = isSelected,
+                onClick = onClick,
+                icon = {
+                    Icon(
+                        imageVector = Icons.Filled.Favorite,
+                        contentDescription = stringResource(R.string.library),
+                    )
+                },
+                label = { Text(stringResource(R.string.library)) },
+                alwaysShowLabel = true,
+                colors = NavigationRailItemDefaults.colors(
+                    selectedIconColor = TextPrimary,
+                    selectedTextColor = TextPrimary,
+                    unselectedIconColor = TextSecondary,
+                    unselectedTextColor = TextTertiary,
+                    indicatorColor = NetflixRed.copy(alpha = 0.26f),
+                ),
+            )
+        }
+    }
+}
+
+@Composable
+private fun DashboardHeaderChip(
+    text: String,
+    icon: ImageVector? = null,
+    selected: Boolean = false,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier
+            .clip(RoundedCornerShape(18.dp))
+            .clickable(onClick = onClick),
+        color = if (selected) {
+            NetflixRed.copy(alpha = 0.16f)
+        } else {
+            CardBackgroundHover.copy(alpha = 0.96f)
+        },
+        shape = RoundedCornerShape(18.dp),
+        tonalElevation = if (selected) 4.dp else 2.dp,
+        border = BorderStroke(
+            1.dp,
+            if (selected) NetflixRed.copy(alpha = 0.36f) else DividerGray.copy(alpha = 0.78f),
+        ),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (icon != null) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = if (selected) NetflixRed else TextSecondary,
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+            Text(
+                text = text,
+                style = MaterialTheme.typography.labelLarge,
+                color = if (selected) TextPrimary else TextSecondary,
+                maxLines = 1,
+            )
+        }
+    }
+}
+
+@Composable
+private fun CompactSourceSwitcherButton(
+    selectedSource: SavedServer?,
+    availableSources: List<SavedServer>,
+    onSourceSelected: (SavedServer) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val label = selectedSource?.serverName?.takeIf { it.isNotBlank() }
+        ?: stringResource(R.string.smb_files)
+
+    Box(modifier = modifier) {
+        DashboardHeaderChip(
+            text = label,
+            icon = Icons.Filled.Cloud,
+            onClick = { expanded = true },
+        )
+
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            modifier = Modifier.widthIn(min = 260.dp, max = 320.dp),
+            shape = RoundedCornerShape(20.dp),
+            containerColor = CardBackgroundHover.copy(alpha = 0.98f),
+            tonalElevation = 8.dp,
+            shadowElevation = 18.dp,
+            border = BorderStroke(1.dp, DividerGray.copy(alpha = 0.85f)),
+        ) {
+            availableSources.forEach { server ->
+                DropdownMenuItem(
+                    text = {
+                        Column {
+                            Text(
+                                text = server.serverName,
+                                color = TextPrimary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Text(
+                                text = "${server.serverAddress}:${server.port}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = TextTertiary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    },
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Filled.Cloud,
+                            contentDescription = null,
+                            tint = NetflixRed.copy(alpha = 0.92f),
+                        )
+                    },
+                    trailingIcon = {
+                        if (selectedSource?.id == server.id) {
+                            Icon(
+                                imageVector = Icons.Filled.CheckCircle,
+                                contentDescription = null,
+                                tint = SuccessGreen,
+                            )
+                        }
+                    },
+                    onClick = {
+                        expanded = false
+                        onSourceSelected(server)
+                    },
                 )
             }
         }
@@ -945,107 +1171,6 @@ private fun YouTubePanel(
                         view.loadUrl(currentUrl)
                     }
                 },
-            )
-        }
-    }
-}
-
-@Composable
-private fun ConnectedSectionRail(
-    selectedTab: ConnectedDashboardTab,
-    onTabSelected: (ConnectedDashboardTab) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Surface(
-        modifier = modifier.clip(RoundedCornerShape(24.dp)),
-        color = CardBackground.copy(alpha = 0.92f),
-        shape = RoundedCornerShape(24.dp),
-        tonalElevation = 6.dp,
-        shadowElevation = 10.dp,
-    ) {
-        NavigationRail(
-            containerColor = Color.Transparent,
-        ) {
-            NavigationRailItem(
-                selected = selectedTab == ConnectedDashboardTab.Files,
-                onClick = { onTabSelected(ConnectedDashboardTab.Files) },
-                icon = {
-                    Icon(
-                        imageVector = Icons.Filled.FolderOpen,
-                        contentDescription = stringResource(R.string.files),
-                    )
-                },
-                label = { Text(stringResource(R.string.files)) },
-                alwaysShowLabel = true,
-                colors = NavigationRailItemDefaults.colors(
-                    selectedIconColor = TextPrimary,
-                    selectedTextColor = TextPrimary,
-                    unselectedIconColor = TextSecondary,
-                    unselectedTextColor = TextTertiary,
-                    indicatorColor = NetflixRed.copy(alpha = 0.26f),
-                ),
-            )
-
-            NavigationRailItem(
-                selected = selectedTab == ConnectedDashboardTab.Library,
-                onClick = { onTabSelected(ConnectedDashboardTab.Library) },
-                icon = {
-                    Icon(
-                        imageVector = Icons.Filled.Favorite,
-                        contentDescription = stringResource(R.string.library),
-                    )
-                },
-                label = { Text(stringResource(R.string.library)) },
-                alwaysShowLabel = true,
-                colors = NavigationRailItemDefaults.colors(
-                    selectedIconColor = TextPrimary,
-                    selectedTextColor = TextPrimary,
-                    unselectedIconColor = TextSecondary,
-                    unselectedTextColor = TextTertiary,
-                    indicatorColor = NetflixRed.copy(alpha = 0.26f),
-                ),
-            )
-
-            NavigationRailItem(
-                selected = selectedTab == ConnectedDashboardTab.AV,
-                onClick = { onTabSelected(ConnectedDashboardTab.AV) },
-                icon = {
-                    Icon(
-                        imageVector = Icons.Filled.MovieCreation,
-                        contentDescription = "AV",
-                    )
-                },
-                label = { Text("AV") },
-                alwaysShowLabel = true,
-                colors = NavigationRailItemDefaults.colors(
-                    selectedIconColor = TextPrimary,
-                    selectedTextColor = TextPrimary,
-                    unselectedIconColor = TextSecondary,
-                    unselectedTextColor = TextTertiary,
-                    indicatorColor = NetflixRed.copy(alpha = 0.26f),
-                ),
-            )
-
-            Spacer(modifier = Modifier.weight(1f))
-
-            NavigationRailItem(
-                selected = selectedTab == ConnectedDashboardTab.Settings,
-                onClick = { onTabSelected(ConnectedDashboardTab.Settings) },
-                icon = {
-                    Icon(
-                        imageVector = Icons.Filled.Settings,
-                        contentDescription = stringResource(R.string.settings),
-                    )
-                },
-                label = { Text(stringResource(R.string.settings)) },
-                alwaysShowLabel = true,
-                colors = NavigationRailItemDefaults.colors(
-                    selectedIconColor = TextPrimary,
-                    selectedTextColor = TextPrimary,
-                    unselectedIconColor = TextSecondary,
-                    unselectedTextColor = TextTertiary,
-                    indicatorColor = NetflixRed.copy(alpha = 0.26f),
-                ),
             )
         }
     }
@@ -1861,18 +1986,20 @@ fun MainDashboardScreen(
 
     var showAddServerDialog by remember { mutableStateOf(false) }
     var serverToEdit by remember { mutableStateOf<SavedServer?>(null) }
-    var dashboardSourceMode by rememberSaveable {
-        mutableStateOf(DashboardSourceMode.LocalFiles)
+    var primaryDestination by rememberSaveable {
+        mutableStateOf(PrimaryDestination.LocalFiles)
     }
-    var compactConnectedTab by rememberSaveable {
-        mutableStateOf(ConnectedDashboardTab.Files)
+    var fileWorkspaceMode by rememberSaveable {
+        mutableStateOf(FileWorkspaceMode.Browser)
     }
-    val previewResetKey = when (compactConnectedTab) {
-        ConnectedDashboardTab.Files -> "files:${uiState.selectedServer?.id}:${uiState.currentPath}"
-        ConnectedDashboardTab.Library -> "library:${uiState.selectedServer?.id}"
-        ConnectedDashboardTab.AV -> "av:${uiState.selectedServer?.id}:${uiState.avLibrary.filters.activeFamily}"
-        ConnectedDashboardTab.Settings -> "settings:${uiState.selectedServer?.id}"
+    var secondaryPaneMode by rememberSaveable {
+        mutableStateOf(SecondaryPaneMode.Preview)
     }
+    var hasAttemptedInitialLocalPicker by rememberSaveable {
+        mutableStateOf(false)
+    }
+    val previewResetKey =
+        "preview:${primaryDestination.name}:${uiState.selectedServer?.id}:${uiState.currentPath}"
     var dashboardPreviewItem by remember(previewResetKey) {
         mutableStateOf<DashboardPreviewItem?>(
             null
@@ -1903,7 +2030,7 @@ fun MainDashboardScreen(
             }
 
             dashboardPreviewItem = null
-            compactConnectedTab = ConnectedDashboardTab.Files
+            fileWorkspaceMode = FileWorkspaceMode.Browser
             viewModel.connectToLocalTree(treeUri)
         }
     )
@@ -1925,11 +2052,35 @@ fun MainDashboardScreen(
         uiState.isConnected && uiState.selectedServer?.isLocalStorage == true
     val isSmbModeConnected =
         uiState.isConnected && uiState.selectedServer?.isLocalStorage == false
-    val isSelectedSourceModeConnected = when (dashboardSourceMode) {
-        DashboardSourceMode.LocalFiles -> isLocalModeConnected
-        DashboardSourceMode.SmbFiles -> isSmbModeConnected
-        DashboardSourceMode.YouTube -> false
+    val isFileSourceDestination =
+        primaryDestination == PrimaryDestination.LocalFiles ||
+                primaryDestination == PrimaryDestination.SmbFiles
+    val isSelectedSourceModeConnected = when (primaryDestination) {
+        PrimaryDestination.LocalFiles -> isLocalModeConnected
+        PrimaryDestination.SmbFiles -> isSmbModeConnected
+        PrimaryDestination.YouTube,
+        PrimaryDestination.Settings -> false
     }
+    val sourceTitle = remember(primaryDestination, uiState.selectedServer?.id) {
+        resolveSourceTitle(primaryDestination, uiState.selectedServer)
+    }
+    val sourceBreadcrumb = remember(
+        primaryDestination,
+        uiState.selectedServer?.id,
+        uiState.currentPath,
+        localFolderName,
+    ) {
+        resolveSourceBreadcrumb(
+            destination = primaryDestination,
+            selectedServer = uiState.selectedServer,
+            currentPath = uiState.currentPath,
+            localRootLabel = localFolderName,
+        )
+    }
+    val showLibraryOrbiter =
+        isFileSourceDestination &&
+                isSelectedSourceModeConnected &&
+                fileWorkspaceMode == FileWorkspaceMode.Browser
     val density = LocalDensity.current
     val initialDashboardPanelSize = remember { AppState.dashboardPanelSize.value }
     var dashboardPanelWidth by remember {
@@ -1944,7 +2095,11 @@ fun MainDashboardScreen(
         val configuredTreeUri =
             AppSettingsStore.getLocalStorageTreeUri(context.applicationContext)
         if (forcePicker || configuredTreeUri.isNullOrBlank()) {
-            localStoragePickerLauncher.launch(null)
+            localStoragePickerLauncher.launch(
+                resolvePreferredLocalPickerInitialUri(
+                    configuredTreeUri = if (forcePicker) configuredTreeUri else null,
+                )
+            )
             return
         }
 
@@ -1955,7 +2110,7 @@ fun MainDashboardScreen(
 
     fun connectToSource(server: SavedServer) {
         dashboardPreviewItem = null
-        compactConnectedTab = ConnectedDashboardTab.Files
+        fileWorkspaceMode = FileWorkspaceMode.Browser
 
         if (server.isLocalStorage) {
             val shouldForcePicker = uiState.selectedServer?.isLocalStorage == true
@@ -1966,27 +2121,43 @@ fun MainDashboardScreen(
         viewModel.connectToServer(server)
     }
 
-    fun selectSourceMode(mode: DashboardSourceMode) {
-        if (dashboardSourceMode == mode) return
-
-        dashboardSourceMode = mode
+    fun disconnectActiveSource() {
         dashboardPreviewItem = null
-        compactConnectedTab = ConnectedDashboardTab.Files
+        fileWorkspaceMode = FileWorkspaceMode.Browser
+        viewModel.disconnect()
     }
 
-    LaunchedEffect(dashboardSourceMode) {
-        when (dashboardSourceMode) {
-            DashboardSourceMode.LocalFiles -> {
+    fun selectPrimaryDestination(destination: PrimaryDestination) {
+        if (primaryDestination == destination) return
+
+        primaryDestination = destination
+        dashboardPreviewItem = null
+        if (destination == PrimaryDestination.LocalFiles || destination == PrimaryDestination.SmbFiles) {
+            fileWorkspaceMode = FileWorkspaceMode.Browser
+        }
+    }
+
+    LaunchedEffect(primaryDestination, persistedLocalTreeUri, uiState.isConnected, uiState.selectedServer?.id) {
+        when (primaryDestination) {
+            PrimaryDestination.LocalFiles -> {
                 viewModel.switchToLocalSource(persistedLocalTreeUri)
+                if (
+                    persistedLocalTreeUri.isNullOrBlank() &&
+                    !uiState.isConnected &&
+                    !uiState.isConnecting &&
+                    !hasAttemptedInitialLocalPicker
+                ) {
+                    hasAttemptedInitialLocalPicker = true
+                    requestLocalStorageConnection(forcePicker = true)
+                }
             }
 
-            DashboardSourceMode.SmbFiles -> {
+            PrimaryDestination.SmbFiles -> {
                 viewModel.switchToSmbSource()
             }
 
-            DashboardSourceMode.YouTube -> {
-                viewModel.switchToExternalSource()
-            }
+            PrimaryDestination.YouTube,
+            PrimaryDestination.Settings -> Unit
         }
     }
 
@@ -2108,377 +2279,589 @@ fun MainDashboardScreen(
                     .padding(innerPadding)
                     .padding(horizontal = 16.dp, vertical = 12.dp)
             ) {
-                Row(modifier = Modifier.fillMaxSize()) {
-                    DashboardSourceRail(
-                        selectedMode = dashboardSourceMode,
-                        onModeSelected = ::selectSourceMode,
-                        modifier = Modifier.fillMaxHeight(),
-                    )
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize(),
+                ) {
+                    when (primaryDestination) {
+                        PrimaryDestination.YouTube -> {
+                            YouTubePanel(
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                        }
 
-                    Spacer(modifier = Modifier.width(12.dp))
+                        PrimaryDestination.Settings -> {
+                            SettingsPanel(
+                                versionInfo = appVersionInfo,
+                                isHandTrackingEnabled = uiState.isHandTrackingEnabled,
+                                isAvBackgroundIndexingEnabled = uiState.isAvBackgroundIndexingEnabled,
+                                activeAction = activeSettingsAction,
+                                onHandTrackingChange = viewModel::setHandTrackingEnabled,
+                                onAvBackgroundIndexingChange = viewModel::setAvBackgroundIndexingEnabled,
+                                onClearArtwork = {
+                                    pendingSettingsAction = SettingsAction.ClearArtwork
+                                },
+                                onClearThumbnails = {
+                                    pendingSettingsAction = SettingsAction.ClearThumbnails
+                                },
+                                onClearRecentHistory = {
+                                    pendingSettingsAction = SettingsAction.ClearRecentHistory
+                                },
+                                onClearFavorites = {
+                                    pendingSettingsAction = SettingsAction.ClearFavorites
+                                },
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                        }
 
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxHeight(),
-                    ) {
-                        when (dashboardSourceMode) {
-                            DashboardSourceMode.YouTube -> {
-                                YouTubePanel(
+                        PrimaryDestination.LocalFiles -> {
+                            if (!isLocalModeConnected) {
+                                LocalSourceLandingPanel(
+                                    folderName = localFolderName,
+                                    isConnecting = uiState.isConnecting,
+                                    onOpenLocalFiles = {
+                                        requestLocalStorageConnection()
+                                    },
+                                    onChangeFolder = {
+                                        requestLocalStorageConnection(forcePicker = true)
+                                    },
                                     modifier = Modifier.fillMaxSize(),
                                 )
-                            }
+                            } else if (fileWorkspaceMode == FileWorkspaceMode.Av) {
+                                AvWorkspacePanel(
+                                    sourceTitle = sourceTitle,
+                                    breadcrumb = sourceBreadcrumb,
+                                    sourceActionContent = {
+                                        DashboardHeaderChip(
+                                            text = stringResource(R.string.change_folder),
+                                            icon = Icons.Filled.FolderOpen,
+                                            onClick = {
+                                                requestLocalStorageConnection(forcePicker = true)
+                                            },
+                                        )
+                                        DashboardHeaderChip(
+                                            text = stringResource(R.string.disconnect),
+                                            icon = Icons.Filled.Close,
+                                            onClick = ::disconnectActiveSource,
+                                        )
+                                    },
+                                    onToggleAvMode = {
+                                        fileWorkspaceMode = FileWorkspaceMode.Browser
+                                    },
+                                    avLibrary = uiState.avLibrary,
+                                    isConnected = true,
+                                    backgroundIndexingEnabled = uiState.isAvBackgroundIndexingEnabled,
+                                    onSetFilterFamily = viewModel::setAvFilterFamily,
+                                    onStudioSelected = viewModel::selectAvStudio,
+                                    onCastToggled = viewModel::toggleAvCast,
+                                    onReleaseDateSelected = viewModel::selectAvReleaseDate,
+                                    onVrFilterSelected = viewModel::selectAvVrFilter,
+                                    onClearFilters = viewModel::clearAvFilters,
+                                    onPreviousMonth = viewModel::showPreviousAvMonth,
+                                    onNextMonth = viewModel::showNextAvMonth,
+                                    onWorkSelected = viewModel::selectAvWork,
+                                    onMergeCast = viewModel::mergeAvPerformers,
+                                    onAddCastAlias = viewModel::addAvPerformerAliases,
+                                    onSaveWorkMetadata = viewModel::saveAvWorkMetadata,
+                                    onPlayPart = { filePath, fileName ->
+                                        navController.navigate(
+                                            Screen.VideoPlayer.createRoute(filePath, fileName)
+                                        ) {
+                                            launchSingleTop = true
+                                        }
+                                    },
+                                    modifier = Modifier.fillMaxSize(),
+                                )
+                            } else {
+                                val previewDensity = LocalDensity.current
+                                val defaultPreviewWidth = when {
+                                    maxWidth >= 1500.dp -> 420.dp
+                                    maxWidth >= 1180.dp -> 360.dp
+                                    else -> 300.dp
+                                }
+                                val minPreviewWidth = 280.dp
+                                val minPrimaryPaneWidth = 460.dp
+                                val dividerWidth = 18.dp
+                                val maxPreviewWidth =
+                                    (maxWidth - dividerWidth - minPrimaryPaneWidth)
+                                        .coerceAtLeast(minPreviewWidth)
 
-                            DashboardSourceMode.LocalFiles,
-                            DashboardSourceMode.SmbFiles -> {
-                                Column(modifier = Modifier.fillMaxSize()) {
-                                    when {
-                                        dashboardSourceMode == DashboardSourceMode.LocalFiles &&
-                                                isLocalModeConnected -> {
-                                            LocalSourceHeader(
-                                                folderName = localFolderName,
-                                                onChangeFolder = {
+                                LaunchedEffect(
+                                    defaultPreviewWidth,
+                                    minPreviewWidth,
+                                    maxPreviewWidth,
+                                ) {
+                                    val currentWidth =
+                                        connectedPreviewWidthOverrideDp
+                                            ?: defaultPreviewWidth.value
+                                    val clampedWidth = currentWidth.coerceIn(
+                                        minPreviewWidth.value,
+                                        maxPreviewWidth.value,
+                                    )
+                                    if (connectedPreviewWidthOverrideDp != clampedWidth) {
+                                        connectedPreviewWidthOverrideDp = clampedWidth
+                                    }
+                                }
+
+                                val previewWidth = (
+                                        connectedPreviewWidthOverrideDp
+                                            ?: defaultPreviewWidth.value
+                                        ).coerceIn(
+                                        minPreviewWidth.value,
+                                        maxPreviewWidth.value,
+                                    ).dp
+
+                                Row(modifier = Modifier.fillMaxSize()) {
+                                    FileBrowserPanel(
+                                        files = files,
+                                        favoritePaths = favoritePaths,
+                                        currentPath = uiState.currentPath,
+                                        sourceTitle = sourceTitle,
+                                        breadcrumb = sourceBreadcrumb,
+                                        sourceScope = uiState.selectedServer?.let {
+                                            buildSourceScope(it.serverAddress, it.shareName)
+                                        },
+                                        metadataRefreshToken = uiState.fileMetadataRefreshToken,
+                                        isConnected = true,
+                                        isLoading = uiState.isLoadingFiles,
+                                        errorMessage = uiState.errorMessage,
+                                        viewMode = uiState.fileViewMode,
+                                        sortMode = uiState.fileSortMode,
+                                        currentPreviewKey = dashboardPreviewItem?.key,
+                                        onFileClick = { file ->
+                                            dashboardPreviewItem = null
+                                            viewModel.navigateToFile(file)
+                                        },
+                                        onBackClick = {
+                                            dashboardPreviewItem = null
+                                            viewModel.navigateBack()
+                                        },
+                                        onToggleViewMode = {
+                                            dashboardPreviewItem = null
+                                            viewModel.toggleFileViewMode()
+                                        },
+                                        onSortModeSelected = { sortMode ->
+                                            dashboardPreviewItem = null
+                                            viewModel.setFileSortMode(sortMode)
+                                        },
+                                        onDeleteFiles = { selectedFiles ->
+                                            viewModel.deleteFiles(selectedFiles)
+                                        },
+                                        onPlayVideo = { filePath, fileName ->
+                                            dashboardPreviewItem = null
+                                            navController.navigate(
+                                                Screen.VideoPlayer.createRoute(filePath, fileName)
+                                            ) {
+                                                launchSingleTop = true
+                                            }
+                                        },
+                                        onFavoriteToggle = { file, isFavorite ->
+                                            viewModel.toggleFavoriteForFile(file, isFavorite)
+                                        },
+                                        onPreviewFocused = { preview ->
+                                            dashboardPreviewItem = preview
+                                        },
+                                        onOpenAv = {
+                                            fileWorkspaceMode = FileWorkspaceMode.Av
+                                        },
+                                        headerActions = {
+                                            DashboardHeaderChip(
+                                                text = stringResource(R.string.change_folder),
+                                                icon = Icons.Filled.FolderOpen,
+                                                onClick = {
                                                     requestLocalStorageConnection(forcePicker = true)
                                                 },
-                                                onDisconnect = {
-                                                    dashboardPreviewItem = null
-                                                    compactConnectedTab = ConnectedDashboardTab.Files
-                                                    viewModel.disconnect()
-                                                },
-                                                modifier = Modifier.fillMaxWidth(),
                                             )
-                                            Spacer(modifier = Modifier.height(12.dp))
-                                        }
+                                            DashboardHeaderChip(
+                                                text = stringResource(R.string.disconnect),
+                                                icon = Icons.Filled.Close,
+                                                onClick = ::disconnectActiveSource,
+                                            )
+                                        },
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .fillMaxHeight(),
+                                    )
 
-                                        dashboardSourceMode == DashboardSourceMode.SmbFiles &&
-                                                isSmbModeConnected -> {
-                                            DashboardOrbitArea(
+                                    if (secondaryPaneMode == SecondaryPaneMode.Preview) {
+                                        ConnectedPaneResizeHandle(
+                                            onDragDeltaPx = { deltaPx ->
+                                                val deltaDp =
+                                                    with(previewDensity) { deltaPx.toDp().value }
+                                                val currentWidth =
+                                                    connectedPreviewWidthOverrideDp
+                                                        ?: defaultPreviewWidth.value
+                                                connectedPreviewWidthOverrideDp = (
+                                                        currentWidth - deltaDp
+                                                        ).coerceIn(
+                                                        minPreviewWidth.value,
+                                                        maxPreviewWidth.value,
+                                                    )
+                                            },
+                                            modifier = Modifier.fillMaxHeight(),
+                                        )
+                                    } else {
+                                        Spacer(modifier = Modifier.width(12.dp))
+                                    }
+
+                                    if (secondaryPaneMode == SecondaryPaneMode.Preview) {
+                                        DashboardPreviewPanel(
+                                            previewItem = dashboardPreviewItem,
+                                            modifier = Modifier
+                                                .width(previewWidth)
+                                                .fillMaxHeight(),
+                                        )
+                                    } else {
+                                        FavoritesPanel(
+                                            favorites = favorites,
+                                            recentVideos = recentVideos,
+                                            isConnected = true,
+                                            stateKey = uiState.selectedServer?.id,
+                                            currentPreviewKey = dashboardPreviewItem?.key,
+                                            onFavoriteClick = { video ->
+                                                dashboardPreviewItem = null
+                                                navController.navigate(
+                                                    Screen.VideoPlayer.createRoute(
+                                                        video.filePath,
+                                                        video.fileName
+                                                    )
+                                                ) {
+                                                    launchSingleTop = true
+                                                }
+                                            },
+                                            onRecentClick = { video ->
+                                                dashboardPreviewItem = null
+                                                navController.navigate(
+                                                    Screen.VideoPlayer.createRoute(
+                                                        video.filePath,
+                                                        video.fileName
+                                                    )
+                                                ) {
+                                                    launchSingleTop = true
+                                                }
+                                            },
+                                            onFavoriteToggle = { filePath, fileName, serverAddress, shareName, isFavorite ->
+                                                viewModel.toggleFavoriteEntry(
+                                                    filePath = filePath,
+                                                    fileName = fileName,
+                                                    serverAddress = serverAddress,
+                                                    shareName = shareName,
+                                                    currentIsFavorite = isFavorite,
+                                                )
+                                            },
+                                            onRecentRemove = { video ->
+                                                dashboardScope.launch {
+                                                    viewModel.removeFromRecent(video)
+                                                }
+                                            },
+                                            onPreviewFocused = { preview ->
+                                                dashboardPreviewItem = preview
+                                            },
+                                            modifier = Modifier
+                                                .width(previewWidth)
+                                                .fillMaxHeight(),
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        PrimaryDestination.SmbFiles -> {
+                            if (!isSmbModeConnected) {
+                                ServerListPanel(
+                                    servers = availableSmbSources,
+                                    isConnecting = uiState.isConnecting,
+                                    onServerClick = { server ->
+                                        connectToSource(server)
+                                    },
+                                    onServerEdit = { server ->
+                                        serverToEdit = server
+                                    },
+                                    onServerDelete = { server ->
+                                        viewModel.deleteServer(server)
+                                    },
+                                    onAddServerClick = {
+                                        showAddServerDialog = true
+                                    },
+                                    modifier = Modifier.fillMaxSize(),
+                                )
+                            } else if (fileWorkspaceMode == FileWorkspaceMode.Av) {
+                                AvWorkspacePanel(
+                                    sourceTitle = sourceTitle,
+                                    breadcrumb = sourceBreadcrumb,
+                                    sourceActionContent = {
+                                        CompactSourceSwitcherButton(
+                                            selectedSource = uiState.selectedServer,
+                                            availableSources = availableSmbSources,
+                                            onSourceSelected = { server ->
+                                                connectToSource(server)
+                                            },
+                                        )
+                                        DashboardHeaderChip(
+                                            text = stringResource(R.string.disconnect),
+                                            icon = Icons.Filled.Close,
+                                            onClick = ::disconnectActiveSource,
+                                        )
+                                    },
+                                    onToggleAvMode = {
+                                        fileWorkspaceMode = FileWorkspaceMode.Browser
+                                    },
+                                    avLibrary = uiState.avLibrary,
+                                    isConnected = true,
+                                    backgroundIndexingEnabled = uiState.isAvBackgroundIndexingEnabled,
+                                    onSetFilterFamily = viewModel::setAvFilterFamily,
+                                    onStudioSelected = viewModel::selectAvStudio,
+                                    onCastToggled = viewModel::toggleAvCast,
+                                    onReleaseDateSelected = viewModel::selectAvReleaseDate,
+                                    onVrFilterSelected = viewModel::selectAvVrFilter,
+                                    onClearFilters = viewModel::clearAvFilters,
+                                    onPreviousMonth = viewModel::showPreviousAvMonth,
+                                    onNextMonth = viewModel::showNextAvMonth,
+                                    onWorkSelected = viewModel::selectAvWork,
+                                    onMergeCast = viewModel::mergeAvPerformers,
+                                    onAddCastAlias = viewModel::addAvPerformerAliases,
+                                    onSaveWorkMetadata = viewModel::saveAvWorkMetadata,
+                                    onPlayPart = { filePath, fileName ->
+                                        navController.navigate(
+                                            Screen.VideoPlayer.createRoute(filePath, fileName)
+                                        ) {
+                                            launchSingleTop = true
+                                        }
+                                    },
+                                    modifier = Modifier.fillMaxSize(),
+                                )
+                            } else {
+                                val previewDensity = LocalDensity.current
+                                val defaultPreviewWidth = when {
+                                    maxWidth >= 1500.dp -> 420.dp
+                                    maxWidth >= 1180.dp -> 360.dp
+                                    else -> 300.dp
+                                }
+                                val minPreviewWidth = 280.dp
+                                val minPrimaryPaneWidth = 460.dp
+                                val dividerWidth = 18.dp
+                                val maxPreviewWidth =
+                                    (maxWidth - dividerWidth - minPrimaryPaneWidth)
+                                        .coerceAtLeast(minPreviewWidth)
+
+                                LaunchedEffect(
+                                    defaultPreviewWidth,
+                                    minPreviewWidth,
+                                    maxPreviewWidth,
+                                ) {
+                                    val currentWidth =
+                                        connectedPreviewWidthOverrideDp
+                                            ?: defaultPreviewWidth.value
+                                    val clampedWidth = currentWidth.coerceIn(
+                                        minPreviewWidth.value,
+                                        maxPreviewWidth.value,
+                                    )
+                                    if (connectedPreviewWidthOverrideDp != clampedWidth) {
+                                        connectedPreviewWidthOverrideDp = clampedWidth
+                                    }
+                                }
+
+                                val previewWidth = (
+                                        connectedPreviewWidthOverrideDp
+                                            ?: defaultPreviewWidth.value
+                                        ).coerceIn(
+                                        minPreviewWidth.value,
+                                        maxPreviewWidth.value,
+                                    ).dp
+
+                                Row(modifier = Modifier.fillMaxSize()) {
+                                    FileBrowserPanel(
+                                        files = files,
+                                        favoritePaths = favoritePaths,
+                                        currentPath = uiState.currentPath,
+                                        sourceTitle = sourceTitle,
+                                        breadcrumb = sourceBreadcrumb,
+                                        sourceScope = uiState.selectedServer?.let {
+                                            buildSourceScope(it.serverAddress, it.shareName)
+                                        },
+                                        metadataRefreshToken = uiState.fileMetadataRefreshToken,
+                                        isConnected = true,
+                                        isLoading = uiState.isLoadingFiles,
+                                        errorMessage = uiState.errorMessage,
+                                        viewMode = uiState.fileViewMode,
+                                        sortMode = uiState.fileSortMode,
+                                        currentPreviewKey = dashboardPreviewItem?.key,
+                                        onFileClick = { file ->
+                                            dashboardPreviewItem = null
+                                            viewModel.navigateToFile(file)
+                                        },
+                                        onBackClick = {
+                                            dashboardPreviewItem = null
+                                            viewModel.navigateBack()
+                                        },
+                                        onToggleViewMode = {
+                                            dashboardPreviewItem = null
+                                            viewModel.toggleFileViewMode()
+                                        },
+                                        onSortModeSelected = { sortMode ->
+                                            dashboardPreviewItem = null
+                                            viewModel.setFileSortMode(sortMode)
+                                        },
+                                        onDeleteFiles = { selectedFiles ->
+                                            viewModel.deleteFiles(selectedFiles)
+                                        },
+                                        onPlayVideo = { filePath, fileName ->
+                                            dashboardPreviewItem = null
+                                            navController.navigate(
+                                                Screen.VideoPlayer.createRoute(filePath, fileName)
+                                            ) {
+                                                launchSingleTop = true
+                                            }
+                                        },
+                                        onFavoriteToggle = { file, isFavorite ->
+                                            viewModel.toggleFavoriteForFile(file, isFavorite)
+                                        },
+                                        onPreviewFocused = { preview ->
+                                            dashboardPreviewItem = preview
+                                        },
+                                        onOpenAv = {
+                                            fileWorkspaceMode = FileWorkspaceMode.Av
+                                        },
+                                        headerActions = {
+                                            CompactSourceSwitcherButton(
                                                 selectedSource = uiState.selectedServer,
                                                 availableSources = availableSmbSources,
                                                 onSourceSelected = { server ->
                                                     connectToSource(server)
                                                 },
-                                                onDisconnect = {
-                                                    dashboardPreviewItem = null
-                                                    compactConnectedTab = ConnectedDashboardTab.Files
-                                                    viewModel.disconnect()
-                                                },
-                                                modifier = Modifier.fillMaxWidth(),
                                             )
-                                            Spacer(modifier = Modifier.height(12.dp))
-                                        }
-                                    }
+                                            DashboardHeaderChip(
+                                                text = stringResource(R.string.disconnect),
+                                                icon = Icons.Filled.Close,
+                                                onClick = ::disconnectActiveSource,
+                                            )
+                                        },
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .fillMaxHeight(),
+                                    )
 
-                                    Row(modifier = Modifier.fillMaxSize()) {
-                                        ConnectedSectionRail(
-                                            selectedTab = compactConnectedTab,
-                                            onTabSelected = {
-                                                dashboardPreviewItem = null
-                                                compactConnectedTab = it
+                                    if (secondaryPaneMode == SecondaryPaneMode.Preview) {
+                                        ConnectedPaneResizeHandle(
+                                            onDragDeltaPx = { deltaPx ->
+                                                val deltaDp =
+                                                    with(previewDensity) { deltaPx.toDp().value }
+                                                val currentWidth =
+                                                    connectedPreviewWidthOverrideDp
+                                                        ?: defaultPreviewWidth.value
+                                                connectedPreviewWidthOverrideDp = (
+                                                        currentWidth - deltaDp
+                                                        ).coerceIn(
+                                                        minPreviewWidth.value,
+                                                        maxPreviewWidth.value,
+                                                    )
                                             },
                                             modifier = Modifier.fillMaxHeight(),
                                         )
-
+                                    } else {
                                         Spacer(modifier = Modifier.width(12.dp))
+                                    }
 
-                                        if (compactConnectedTab == ConnectedDashboardTab.Settings) {
-                                            SettingsPanel(
-                                                versionInfo = appVersionInfo,
-                                                isHandTrackingEnabled = uiState.isHandTrackingEnabled,
-                                                isAvBackgroundIndexingEnabled = uiState.isAvBackgroundIndexingEnabled,
-                                                activeAction = activeSettingsAction,
-                                                onHandTrackingChange = viewModel::setHandTrackingEnabled,
-                                                onAvBackgroundIndexingChange = viewModel::setAvBackgroundIndexingEnabled,
-                                                onClearArtwork = {
-                                                    pendingSettingsAction = SettingsAction.ClearArtwork
-                                                },
-                                                onClearThumbnails = {
-                                                    pendingSettingsAction = SettingsAction.ClearThumbnails
-                                                },
-                                                onClearRecentHistory = {
-                                                    pendingSettingsAction = SettingsAction.ClearRecentHistory
-                                                },
-                                                onClearFavorites = {
-                                                    pendingSettingsAction = SettingsAction.ClearFavorites
-                                                },
-                                                modifier = Modifier
-                                                    .weight(1f)
-                                                    .fillMaxHeight(),
-                                            )
-                                        } else {
-                                            BoxWithConstraints(
-                                                modifier = Modifier
-                                                    .weight(1f)
-                                                    .fillMaxHeight(),
-                                            ) {
-                                                val showSourceLanding =
-                                                    compactConnectedTab == ConnectedDashboardTab.Files &&
-                                                            !isSelectedSourceModeConnected
-
-                                                if (compactConnectedTab == ConnectedDashboardTab.AV) {
-                                                    AvLibraryPanel(
-                                                        avLibrary = uiState.avLibrary,
-                                                        isConnected = isSelectedSourceModeConnected,
-                                                        backgroundIndexingEnabled = uiState.isAvBackgroundIndexingEnabled,
-                                                        onSetFilterFamily = viewModel::setAvFilterFamily,
-                                                        onStudioSelected = viewModel::selectAvStudio,
-                                                        onCastToggled = viewModel::toggleAvCast,
-                                                        onReleaseDateSelected = viewModel::selectAvReleaseDate,
-                                                        onVrFilterSelected = viewModel::selectAvVrFilter,
-                                                        onClearFilters = viewModel::clearAvFilters,
-                                                        onPreviousMonth = viewModel::showPreviousAvMonth,
-                                                        onNextMonth = viewModel::showNextAvMonth,
-                                                        onWorkSelected = viewModel::selectAvWork,
-                                                        onMergeCast = viewModel::mergeAvPerformers,
-                                                        onAddCastAlias = viewModel::addAvPerformerAliases,
-                                                        onSaveWorkMetadata = viewModel::saveAvWorkMetadata,
-                                                        onPlayPart = { filePath, fileName ->
-                                                            navController.navigate(
-                                                                Screen.VideoPlayer.createRoute(
-                                                                    filePath,
-                                                                    fileName
-                                                                )
-                                                            ) {
-                                                                launchSingleTop = true
-                                                            }
-                                                        },
-                                                        modifier = Modifier.fillMaxSize(),
+                                    if (secondaryPaneMode == SecondaryPaneMode.Preview) {
+                                        DashboardPreviewPanel(
+                                            previewItem = dashboardPreviewItem,
+                                            modifier = Modifier
+                                                .width(previewWidth)
+                                                .fillMaxHeight(),
+                                        )
+                                    } else {
+                                        FavoritesPanel(
+                                            favorites = favorites,
+                                            recentVideos = recentVideos,
+                                            isConnected = true,
+                                            stateKey = uiState.selectedServer?.id,
+                                            currentPreviewKey = dashboardPreviewItem?.key,
+                                            onFavoriteClick = { video ->
+                                                dashboardPreviewItem = null
+                                                navController.navigate(
+                                                    Screen.VideoPlayer.createRoute(
+                                                        video.filePath,
+                                                        video.fileName
                                                     )
-                                                } else if (
-                                                    showSourceLanding &&
-                                                    dashboardSourceMode == DashboardSourceMode.LocalFiles
                                                 ) {
-                                                    LocalSourceLandingPanel(
-                                                        folderName = localFolderName,
-                                                        isConnecting = uiState.isConnecting,
-                                                        onOpenLocalFiles = {
-                                                            requestLocalStorageConnection()
-                                                        },
-                                                        onChangeFolder = {
-                                                            requestLocalStorageConnection(forcePicker = true)
-                                                        },
-                                                        modifier = Modifier.fillMaxSize(),
-                                                    )
-                                                } else if (
-                                                    showSourceLanding &&
-                                                    dashboardSourceMode == DashboardSourceMode.SmbFiles
-                                                ) {
-                                                    ServerListPanel(
-                                                        servers = availableSmbSources,
-                                                        isConnecting = uiState.isConnecting,
-                                                        onServerClick = { server ->
-                                                            connectToSource(server)
-                                                        },
-                                                        onServerEdit = { server ->
-                                                            serverToEdit = server
-                                                        },
-                                                        onServerDelete = { server ->
-                                                            viewModel.deleteServer(server)
-                                                        },
-                                                        onAddServerClick = {
-                                                            showAddServerDialog = true
-                                                        },
-                                                        modifier = Modifier.fillMaxSize(),
-                                                    )
-                                                } else {
-                                                    val previewDensity = LocalDensity.current
-                                                    val defaultPreviewWidth = when {
-                                                        maxWidth >= 1500.dp -> 420.dp
-                                                        maxWidth >= 1180.dp -> 360.dp
-                                                        else -> 300.dp
-                                                    }
-                                                    val minPreviewWidth = 280.dp
-                                                    val minPrimaryPaneWidth = when (compactConnectedTab) {
-                                                        ConnectedDashboardTab.Files -> 460.dp
-                                                        ConnectedDashboardTab.Library -> 420.dp
-                                                        ConnectedDashboardTab.AV -> 420.dp
-                                                        ConnectedDashboardTab.Settings -> 420.dp
-                                                    }
-                                                    val dividerWidth = 18.dp
-                                                    val maxPreviewWidth =
-                                                        (maxWidth - dividerWidth - minPrimaryPaneWidth)
-                                                            .coerceAtLeast(minPreviewWidth)
-
-                                                    LaunchedEffect(
-                                                        defaultPreviewWidth,
-                                                        minPreviewWidth,
-                                                        maxPreviewWidth,
-                                                    ) {
-                                                        val currentWidth =
-                                                            connectedPreviewWidthOverrideDp
-                                                                ?: defaultPreviewWidth.value
-                                                        val clampedWidth = currentWidth.coerceIn(
-                                                            minPreviewWidth.value,
-                                                            maxPreviewWidth.value,
-                                                        )
-                                                        if (connectedPreviewWidthOverrideDp != clampedWidth) {
-                                                            connectedPreviewWidthOverrideDp = clampedWidth
-                                                        }
-                                                    }
-
-                                                    val previewWidth = (
-                                                            connectedPreviewWidthOverrideDp
-                                                                ?: defaultPreviewWidth.value
-                                                            ).coerceIn(
-                                                            minPreviewWidth.value,
-                                                            maxPreviewWidth.value,
-                                                        ).dp
-
-                                                    Row(modifier = Modifier.fillMaxSize()) {
-                                                        Column(
-                                                            modifier = Modifier
-                                                                .weight(1f)
-                                                                .fillMaxHeight(),
-                                                        ) {
-                                                            if (compactConnectedTab == ConnectedDashboardTab.Files) {
-                                                                FileBrowserPanel(
-                                                                    files = files,
-                                                                    favoritePaths = favoritePaths,
-                                                                    currentPath = uiState.currentPath,
-                                                                    sourceScope = uiState.selectedServer
-                                                                        ?.takeIf { isSelectedSourceModeConnected }
-                                                                        ?.let {
-                                                                            buildSourceScope(
-                                                                                it.serverAddress,
-                                                                                it.shareName
-                                                                            )
-                                                                        },
-                                                                    metadataRefreshToken = uiState.fileMetadataRefreshToken,
-                                                                    isConnected = isSelectedSourceModeConnected,
-                                                                    isLoading = uiState.isLoadingFiles,
-                                                                    errorMessage = uiState.errorMessage,
-                                                                    viewMode = uiState.fileViewMode,
-                                                                    sortMode = uiState.fileSortMode,
-                                                                    currentPreviewKey = dashboardPreviewItem?.key,
-                                                                    onFileClick = { file ->
-                                                                        dashboardPreviewItem = null
-                                                                        viewModel.navigateToFile(file)
-                                                                    },
-                                                                    onBackClick = {
-                                                                        dashboardPreviewItem = null
-                                                                        viewModel.navigateBack()
-                                                                    },
-                                                                    onToggleViewMode = {
-                                                                        dashboardPreviewItem = null
-                                                                        viewModel.toggleFileViewMode()
-                                                                    },
-                                                                    onSortModeSelected = { sortMode ->
-                                                                        dashboardPreviewItem = null
-                                                                        viewModel.setFileSortMode(sortMode)
-                                                                    },
-                                                                    onDeleteFiles = { selectedFiles ->
-                                                                        viewModel.deleteFiles(selectedFiles)
-                                                                    },
-                                                                    onPlayVideo = { filePath, fileName ->
-                                                                        dashboardPreviewItem = null
-                                                                        navController.navigate(
-                                                                            Screen.VideoPlayer.createRoute(
-                                                                                filePath,
-                                                                                fileName
-                                                                            )
-                                                                        ) {
-                                                                            launchSingleTop = true
-                                                                        }
-                                                                    },
-                                                                    onFavoriteToggle = { file, isFavorite ->
-                                                                        viewModel.toggleFavoriteForFile(
-                                                                            file,
-                                                                            isFavorite
-                                                                        )
-                                                                    },
-                                                                    onPreviewFocused = { preview ->
-                                                                        dashboardPreviewItem = preview
-                                                                    },
-                                                                    modifier = Modifier
-                                                                        .fillMaxWidth()
-                                                                        .weight(1f)
-                                                                )
-                                                            } else {
-                                                                FavoritesPanel(
-                                                                    favorites = favorites,
-                                                                    recentVideos = recentVideos,
-                                                                    isConnected = isSelectedSourceModeConnected,
-                                                                    stateKey = uiState.selectedServer?.id,
-                                                                    currentPreviewKey = dashboardPreviewItem?.key,
-                                                                    onFavoriteClick = { video ->
-                                                                        dashboardPreviewItem = null
-                                                                        navController.navigate(
-                                                                            Screen.VideoPlayer.createRoute(
-                                                                                video.filePath,
-                                                                                video.fileName
-                                                                            )
-                                                                        ) {
-                                                                            launchSingleTop = true
-                                                                        }
-                                                                    },
-                                                                    onRecentClick = { video ->
-                                                                        dashboardPreviewItem = null
-                                                                        navController.navigate(
-                                                                            Screen.VideoPlayer.createRoute(
-                                                                                video.filePath,
-                                                                                video.fileName
-                                                                            )
-                                                                        ) {
-                                                                            launchSingleTop = true
-                                                                        }
-                                                                    },
-                                                                    onFavoriteToggle = { filePath, fileName, serverAddress, shareName, isFavorite ->
-                                                                        viewModel.toggleFavoriteEntry(
-                                                                            filePath = filePath,
-                                                                            fileName = fileName,
-                                                                            serverAddress = serverAddress,
-                                                                            shareName = shareName,
-                                                                            currentIsFavorite = isFavorite,
-                                                                        )
-                                                                    },
-                                                                    onRecentRemove = { video ->
-                                                                        dashboardScope.launch {
-                                                                            viewModel.removeFromRecent(video)
-                                                                        }
-                                                                    },
-                                                                    onPreviewFocused = { preview ->
-                                                                        dashboardPreviewItem = preview
-                                                                    },
-                                                                    modifier = Modifier
-                                                                        .fillMaxWidth()
-                                                                        .weight(1f)
-                                                                )
-                                                            }
-                                                        }
-
-                                                        ConnectedPaneResizeHandle(
-                                                            onDragDeltaPx = { deltaPx ->
-                                                                val deltaDp =
-                                                                    with(previewDensity) { deltaPx.toDp().value }
-                                                                val currentWidth =
-                                                                    connectedPreviewWidthOverrideDp
-                                                                        ?: defaultPreviewWidth.value
-                                                                connectedPreviewWidthOverrideDp = (
-                                                                        currentWidth - deltaDp
-                                                                        ).coerceIn(
-                                                                        minPreviewWidth.value,
-                                                                        maxPreviewWidth.value,
-                                                                    )
-                                                            },
-                                                            modifier = Modifier.fillMaxHeight(),
-                                                        )
-
-                                                        DashboardPreviewPanel(
-                                                            previewItem = dashboardPreviewItem,
-                                                            modifier = Modifier
-                                                                .width(previewWidth)
-                                                                .fillMaxHeight(),
-                                                        )
-                                                    }
+                                                    launchSingleTop = true
                                                 }
-                                            }
-                                        }
+                                            },
+                                            onRecentClick = { video ->
+                                                dashboardPreviewItem = null
+                                                navController.navigate(
+                                                    Screen.VideoPlayer.createRoute(
+                                                        video.filePath,
+                                                        video.fileName
+                                                    )
+                                                ) {
+                                                    launchSingleTop = true
+                                                }
+                                            },
+                                            onFavoriteToggle = { filePath, fileName, serverAddress, shareName, isFavorite ->
+                                                viewModel.toggleFavoriteEntry(
+                                                    filePath = filePath,
+                                                    fileName = fileName,
+                                                    serverAddress = serverAddress,
+                                                    shareName = shareName,
+                                                    currentIsFavorite = isFavorite,
+                                                )
+                                            },
+                                            onRecentRemove = { video ->
+                                                dashboardScope.launch {
+                                                    viewModel.removeFromRecent(video)
+                                                }
+                                            },
+                                            onPreviewFocused = { preview ->
+                                                dashboardPreviewItem = preview
+                                            },
+                                            modifier = Modifier
+                                                .width(previewWidth)
+                                                .fillMaxHeight(),
+                                        )
                                     }
                                 }
                             }
                         }
                     }
                 }
+            }
+        }
+
+        Orbiter(
+            position = ContentEdge.Left,
+            offset = 28.dp,
+            offsetType = OrbiterOffsetType.OuterEdge,
+            alignment = Alignment.CenterVertically,
+            elevation = 20.dp,
+            shouldRenderInNonSpatial = true,
+        ) {
+            DashboardSourceRail(
+                selectedMode = primaryDestination,
+                onModeSelected = ::selectPrimaryDestination,
+            )
+        }
+
+        if (showLibraryOrbiter) {
+            Orbiter(
+                position = ContentEdge.Right,
+                offset = 28.dp,
+                offsetType = OrbiterOffsetType.OuterEdge,
+                alignment = Alignment.CenterVertically,
+                elevation = 20.dp,
+                shouldRenderInNonSpatial = true,
+            ) {
+                LibraryOrbiterRail(
+                    isSelected = secondaryPaneMode == SecondaryPaneMode.Library,
+                    onClick = {
+                        secondaryPaneMode =
+                            if (secondaryPaneMode == SecondaryPaneMode.Library) {
+                                SecondaryPaneMode.Preview
+                            } else {
+                                SecondaryPaneMode.Library
+                            }
+                    },
+                )
             }
         }
 
@@ -3053,6 +3436,108 @@ private fun ServerListPanel(
     }
 }
 
+@Composable
+private fun AvWorkspacePanel(
+    sourceTitle: String,
+    breadcrumb: String?,
+    sourceActionContent: @Composable RowScope.() -> Unit,
+    onToggleAvMode: () -> Unit,
+    avLibrary: AvLibraryState,
+    isConnected: Boolean,
+    backgroundIndexingEnabled: Boolean,
+    onSetFilterFamily: (AvFilterFamily) -> Unit,
+    onStudioSelected: (String?) -> Unit,
+    onCastToggled: (String) -> Unit,
+    onReleaseDateSelected: (LocalDate?) -> Unit,
+    onVrFilterSelected: (AvVrFilterOption) -> Unit,
+    onClearFilters: () -> Unit,
+    onPreviousMonth: () -> Unit,
+    onNextMonth: () -> Unit,
+    onWorkSelected: (String?) -> Unit,
+    onMergeCast: (String, String) -> Unit,
+    onAddCastAlias: (String, String?, String?) -> Unit,
+    onSaveWorkMetadata: (String, JvrMovieMetadata) -> Unit,
+    onPlayPart: (String, String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier,
+        color = CardBackground,
+        shape = RoundedCornerShape(20.dp),
+        tonalElevation = 4.dp,
+        shadowElevation = 10.dp,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(18.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = sourceTitle,
+                        style = MaterialTheme.typography.headlineSmall,
+                        color = TextPrimary,
+                    )
+                    breadcrumb?.takeIf { it.isNotBlank() }?.let { summary ->
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = summary,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TextTertiary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    sourceActionContent()
+                    DashboardHeaderChip(
+                        text = "AV",
+                        icon = Icons.Filled.MovieCreation,
+                        selected = true,
+                        onClick = onToggleAvMode,
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+            HorizontalDivider(color = DividerGray)
+            Spacer(modifier = Modifier.height(16.dp))
+
+            AvLibraryPanel(
+                avLibrary = avLibrary,
+                isConnected = isConnected,
+                backgroundIndexingEnabled = backgroundIndexingEnabled,
+                onSetFilterFamily = onSetFilterFamily,
+                onStudioSelected = onStudioSelected,
+                onCastToggled = onCastToggled,
+                onReleaseDateSelected = onReleaseDateSelected,
+                onVrFilterSelected = onVrFilterSelected,
+                onClearFilters = onClearFilters,
+                onPreviousMonth = onPreviousMonth,
+                onNextMonth = onNextMonth,
+                onWorkSelected = onWorkSelected,
+                onMergeCast = onMergeCast,
+                onAddCastAlias = onAddCastAlias,
+                onSaveWorkMetadata = onSaveWorkMetadata,
+                onPlayPart = onPlayPart,
+                showHeader = false,
+                showContainer = false,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+    }
+}
+
 /**
  * CENTER PANEL: File Browser
  */
@@ -3061,6 +3546,8 @@ private fun FileBrowserPanel(
     files: List<SMBFileItem>,
     favoritePaths: Set<String>,
     currentPath: String,
+    sourceTitle: String,
+    breadcrumb: String?,
     sourceScope: String?,
     metadataRefreshToken: Long,
     isConnected: Boolean,
@@ -3077,6 +3564,8 @@ private fun FileBrowserPanel(
     onPlayVideo: (String, String) -> Unit,
     onFavoriteToggle: (SMBFileItem, Boolean) -> Unit,
     onPreviewFocused: (DashboardPreviewItem?) -> Unit,
+    onOpenAv: () -> Unit,
+    headerActions: @Composable RowScope.() -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current.applicationContext
@@ -3126,6 +3615,17 @@ private fun FileBrowserPanel(
         } else {
             stringResource(R.string.back_to_parent_folder)
         }
+    val headerSummary = when {
+        isDeleteMode -> stringResource(
+            R.string.files_selected_count,
+            selectedPaths.size,
+        )
+
+        activeVirtualGroup != null && displayedPath.isNotBlank() -> displayedPath
+        !breadcrumb.isNullOrBlank() -> breadcrumb
+        isConnected && displayedPath.isNotBlank() -> displayedPath
+        else -> null
+    }
 
     LaunchedEffect(displayItems, isDeleteMode) {
         selectedPaths = if (isDeleteMode) {
@@ -3324,33 +3824,23 @@ private fun FileBrowserPanel(
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = stringResource(R.string.files),
+                        text = sourceTitle,
                         style = MaterialTheme.typography.headlineSmall,
                         color = TextPrimary
                     )
-                    when {
-                        isDeleteMode -> {
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = stringResource(
-                                    R.string.files_selected_count,
-                                    selectedPaths.size,
-                                ),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = if (selectedPaths.isEmpty()) TextTertiary else NetflixRed,
-                                maxLines = 1
-                            )
-                        }
-
-                        isConnected && displayedPath.isNotEmpty() -> {
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = displayedPath,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = TextTertiary,
-                                maxLines = 1
-                            )
-                        }
+                    headerSummary?.let { summary ->
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = summary,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (isDeleteMode && selectedPaths.isNotEmpty()) {
+                                NetflixRed
+                            } else {
+                                TextTertiary
+                            },
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
                     }
                 }
 
@@ -3358,6 +3848,19 @@ private fun FileBrowserPanel(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
+                    headerActions()
+
+                    DashboardHeaderChip(
+                        text = "AV",
+                        icon = Icons.Filled.MovieCreation,
+                        onClick = {
+                            if (!isDeleteMode && !isDeleteInProgress) {
+                                onPreviewFocused(null)
+                                onOpenAv()
+                            }
+                        },
+                    )
+
                     IconButton(
                         onClick = onToggleViewMode,
                         enabled = isConnected && !isLoading && !isDeleteMode && !isDeleteInProgress

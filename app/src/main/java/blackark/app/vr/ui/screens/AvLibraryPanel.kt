@@ -120,6 +120,8 @@ fun AvLibraryPanel(
     onAddCastAlias: (String, String?, String?) -> Unit,
     onSaveWorkMetadata: (String, JvrMovieMetadata) -> Unit,
     onPlayPart: (String, String) -> Unit,
+    showHeader: Boolean = true,
+    showContainer: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
     val selectedWork = remember(avLibrary.selectedAssetKey, avLibrary.snapshot.works) {
@@ -137,62 +139,61 @@ fun AvLibraryPanel(
         }
     }
 
-    Card(
-        modifier = modifier,
-        colors = CardDefaults.cardColors(containerColor = CardBackground),
-        shape = RoundedCornerShape(16.dp),
-    ) {
+    @Composable
+    fun PanelContent(contentModifier: Modifier = Modifier) {
         Column(
-            modifier = Modifier
+            modifier = contentModifier
                 .fillMaxSize()
                 .padding(16.dp),
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
+            if (showHeader) {
                 Row(
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Icon(
-                        imageVector = Icons.Filled.MovieCreation,
-                        contentDescription = null,
-                        tint = NetflixRed,
-                    )
-                    Column {
-                        Text(
-                            text = "AV",
-                            style = MaterialTheme.typography.headlineSmall,
-                            color = TextPrimary,
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.MovieCreation,
+                            contentDescription = null,
+                            tint = NetflixRed,
                         )
-                        val statusText = when {
-                            !backgroundIndexingEnabled -> "Background indexing is off"
-                            avLibrary.scan.isRunning -> "Scanning ${avLibrary.scan.scannedFileCount} files"
-                            avLibrary.scan.lastCompletedAt != null -> "Indexed ${avLibrary.snapshot.works.size} works"
-                            else -> "Metadata-driven library"
+                        Column {
+                            Text(
+                                text = "AV",
+                                style = MaterialTheme.typography.headlineSmall,
+                                color = TextPrimary,
+                            )
+                            val statusText = when {
+                                !backgroundIndexingEnabled -> "Background indexing is off"
+                                avLibrary.scan.isRunning -> "Scanning ${avLibrary.scan.scannedFileCount} files"
+                                avLibrary.scan.lastCompletedAt != null -> "Indexed ${avLibrary.snapshot.works.size} works"
+                                else -> "Metadata-driven library"
+                            }
+                            Text(
+                                text = statusText,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextTertiary,
+                            )
                         }
-                        Text(
-                            text = statusText,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = TextTertiary,
+                    }
+
+                    if (avLibrary.scan.isRunning) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(22.dp),
+                            color = NetflixRed,
+                            strokeWidth = 2.dp,
                         )
                     }
                 }
 
-                if (avLibrary.scan.isRunning) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(22.dp),
-                        color = NetflixRed,
-                        strokeWidth = 2.dp,
-                    )
-                }
+                Spacer(modifier = Modifier.height(16.dp))
+                HorizontalDivider(color = DividerGray)
+                Spacer(modifier = Modifier.height(12.dp))
             }
-
-            Spacer(modifier = Modifier.height(16.dp))
-            HorizontalDivider(color = DividerGray)
-            Spacer(modifier = Modifier.height(12.dp))
 
             when {
                 !isConnected -> {
@@ -290,6 +291,18 @@ fun AvLibraryPanel(
                 }
             }
         }
+    }
+
+    if (showContainer) {
+        Card(
+            modifier = modifier,
+            colors = CardDefaults.cardColors(containerColor = CardBackground),
+            shape = RoundedCornerShape(16.dp),
+        ) {
+            PanelContent()
+        }
+    } else {
+        PanelContent(modifier)
     }
 
     if (selectedWork != null) {
