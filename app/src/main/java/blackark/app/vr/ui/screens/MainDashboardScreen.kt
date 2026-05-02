@@ -3,9 +3,12 @@ package blackark.app.vr.ui.screens
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
+import android.content.Intent
 import android.util.Log
 import android.view.KeyEvent
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -172,6 +175,7 @@ import blackark.app.vr.ui.viewmodel.FileBrowserSortMode
 import blackark.app.vr.ui.viewmodel.FileBrowserViewMode
 import blackark.app.vr.ui.viewmodel.MainDashboardViewModel
 import blackark.app.vr.utils.ImageCacheVersionStore
+import blackark.app.vr.utils.AppSettingsStore
 import blackark.app.vr.utils.JvrCastMetadata
 import blackark.app.vr.utils.JvrLibraryMetadataProvider
 import blackark.app.vr.utils.JvrMovieMetadata
@@ -1004,14 +1008,47 @@ private fun ConnectedPaneResizeHandle(
     }
 }
 
-private fun resolveAppVersionLabel(context: Context): String {
-    return runCatching {
-        val packageInfo = context.packageManager.getPackageInfo(
+private data class AppVersionInfo(
+    val packageVersionName: String,
+    val versionCode: String,
+    val playStoreVersion: String,
+    val internalVersion: String,
+    val releaseChannel: String,
+    val gitSha: String,
+    val buildTimeUtc: String,
+)
+
+private fun resolveAppVersionInfo(context: Context): AppVersionInfo {
+    val packageInfo = runCatching {
+        context.packageManager.getPackageInfo(
             context.packageName,
             android.content.pm.PackageManager.PackageInfoFlags.of(0),
         )
-        packageInfo.versionName?.takeIf { it.isNotBlank() } ?: "Unknown"
-    }.getOrElse { "Unknown" }
+    }.getOrNull()
+
+    val packageVersionName = packageInfo?.versionName?.takeIf { it.isNotBlank() }
+        ?: BuildConfig.INTERNAL_VERSION_NAME.ifBlank { "Unknown" }
+    val versionCode = packageInfo?.longVersionCode?.toString()
+        ?: BuildConfig.INTERNAL_VERSION_CODE.takeIf { it > 0 }?.toString()
+        ?: "Unknown"
+    val playStoreVersion = BuildConfig.PLAY_STORE_VERSION.ifBlank {
+        packageVersionName.substringBefore('-')
+    }
+    val internalVersion = BuildConfig.INTERNAL_DISPLAY_VERSION.ifBlank {
+        val channel = BuildConfig.INTERNAL_RELEASE_CHANNEL.ifBlank { "internal" }
+        val minor = BuildConfig.INTERNAL_MINOR_VERSION.takeIf { it >= 0 } ?: 0
+        "$channel.$minor"
+    }
+
+    return AppVersionInfo(
+        packageVersionName = packageVersionName,
+        versionCode = versionCode,
+        playStoreVersion = playStoreVersion,
+        internalVersion = internalVersion,
+        releaseChannel = BuildConfig.INTERNAL_RELEASE_CHANNEL.ifBlank { "unknown" },
+        gitSha = BuildConfig.INTERNAL_GIT_SHA.ifBlank { "unknown" },
+        buildTimeUtc = BuildConfig.INTERNAL_BUILD_TIME_UTC.ifBlank { "unknown" },
+    )
 }
 
 private fun deleteTrackedThumbnailFiles(directory: File) {
@@ -1056,6 +1093,7 @@ private fun SourceSwitcherButton(
     selectedSource: SavedServer?,
     availableSources: List<SavedServer>,
     onSourceSelected: (SavedServer) -> Unit,
+    onLocalStorageSelected: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var expanded by remember { mutableStateOf(false) }
@@ -1158,7 +1196,7 @@ private fun SourceSwitcherButton(
                 },
                 onClick = {
                     expanded = false
-                    onSourceSelected(SavedServer.createLocalStorageServer())
+                    onLocalStorageSelected()
                 },
                 trailingIcon = {
                     if (selectedSource?.isLocalStorage == true) {
@@ -1222,7 +1260,7 @@ private fun SourceSwitcherButton(
 
 @Composable
 private fun SettingsPanel(
-    versionLabel: String,
+    versionInfo: AppVersionInfo,
     isHandTrackingEnabled: Boolean,
     isAvBackgroundIndexingEnabled: Boolean,
     activeAction: SettingsAction?,
@@ -1313,7 +1351,31 @@ private fun SettingsPanel(
             )
             SettingsValueRow(
                 title = stringResource(R.string.version),
-                value = versionLabel,
+                value = versionInfo.packageVersionName,
+            )
+            SettingsValueRow(
+                title = stringResource(R.string.play_store_version),
+                value = versionInfo.playStoreVersion,
+            )
+            SettingsValueRow(
+                title = stringResource(R.string.internal_version),
+                value = versionInfo.internalVersion,
+            )
+            SettingsValueRow(
+                title = stringResource(R.string.version_code),
+                value = versionInfo.versionCode,
+            )
+            SettingsValueRow(
+                title = stringResource(R.string.release_channel),
+                value = versionInfo.releaseChannel,
+            )
+            SettingsValueRow(
+                title = stringResource(R.string.git_commit),
+                value = versionInfo.gitSha,
+            )
+            SettingsValueRow(
+                title = stringResource(R.string.build_time_utc),
+                value = versionInfo.buildTimeUtc,
             )
         }
     }
@@ -1461,11 +1523,30 @@ fun MainDashboardScreen(
     var activeSettingsAction by remember { mutableStateOf<SettingsAction?>(null) }
     var settingsFeedback by remember { mutableStateOf<SettingsFeedback?>(null) }
     val dashboardScope = rememberCoroutineScope()
-    val appVersionLabel = remember(context) { resolveAppVersionLabel(context) }
+    val appVersionInfo = remember(context) { resolveAppVersionInfo(context) }
     val shouldShowControllerHandTrackingPrompt =
         hasControllerLikeInputDevice &&
                 uiState.isHandTrackingEnabled &&
                 !uiState.isControllerHandTrackingPromptHandled
+
+    val localStoragePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocumentTree(),
+        onResult = { treeUri ->
+            if (treeUri == null) {
+                return@rememberLauncherForActivityResult
+            }
+
+            val grantFlags =
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(treeUri, grantFlags)
+            }
+
+            dashboardPreviewItem = null
+            compactConnectedTab = ConnectedDashboardTab.Files
+            viewModel.connectToLocalTree(treeUri)
+        }
+    )
 
     val availableSources = remember(servers) {
         servers
@@ -1480,6 +1561,32 @@ fun MainDashboardScreen(
         mutableStateOf(initialDashboardPanelSize.heightDp.dp)
     }
     val initialDashboardPose = remember { AppState.dashboardPanelPose.value?.let { Pose(it) } }
+
+    fun requestLocalStorageConnection(forcePicker: Boolean = false) {
+        val configuredTreeUri =
+            AppSettingsStore.getLocalStorageTreeUri(context.applicationContext)
+        if (forcePicker || configuredTreeUri.isNullOrBlank()) {
+            localStoragePickerLauncher.launch(null)
+            return
+        }
+
+        viewModel.connectToServer(
+            SavedServer.createLocalStorageServer().copy(shareName = configuredTreeUri)
+        )
+    }
+
+    fun connectToSource(server: SavedServer) {
+        dashboardPreviewItem = null
+        compactConnectedTab = ConnectedDashboardTab.Files
+
+        if (server.isLocalStorage) {
+            val shouldForcePicker = uiState.selectedServer?.isLocalStorage == true
+            requestLocalStorageConnection(forcePicker = shouldForcePicker)
+            return
+        }
+
+        viewModel.connectToServer(server)
+    }
 
     fun launchSettingsAction(action: SettingsAction) {
         if (activeSettingsAction != null) return
@@ -1638,8 +1745,10 @@ fun MainDashboardScreen(
                                 selectedServer = uiState.selectedServer,
                                 isConnecting = uiState.isConnecting,
                                 onServerClick = { server ->
-                                    compactConnectedTab = ConnectedDashboardTab.Files
-                                    viewModel.connectToServer(server)
+                                    connectToSource(server)
+                                },
+                                onLocalStorageSelected = {
+                                    requestLocalStorageConnection()
                                 },
                                 onServerEdit = { server ->
                                     serverToEdit = server
@@ -1656,7 +1765,7 @@ fun MainDashboardScreen(
                             )
                         } else {
                             SettingsPanel(
-                                versionLabel = appVersionLabel,
+                                versionInfo = appVersionInfo,
                                 isHandTrackingEnabled = uiState.isHandTrackingEnabled,
                                 isAvBackgroundIndexingEnabled = uiState.isAvBackgroundIndexingEnabled,
                                 activeAction = activeSettingsAction,
@@ -1686,9 +1795,10 @@ fun MainDashboardScreen(
                             selectedSource = uiState.selectedServer,
                             availableSources = availableSources,
                             onSourceSelected = { server ->
-                                dashboardPreviewItem = null
-                                compactConnectedTab = ConnectedDashboardTab.Files
-                                viewModel.connectToServer(server)
+                                connectToSource(server)
+                            },
+                            onLocalStorageSelected = {
+                                requestLocalStorageConnection(forcePicker = true)
                             },
                             onDisconnect = {
                                 dashboardPreviewItem = null
@@ -1712,7 +1822,7 @@ fun MainDashboardScreen(
 
                             if (compactConnectedTab == ConnectedDashboardTab.Settings) {
                                 SettingsPanel(
-                                    versionLabel = appVersionLabel,
+                                    versionInfo = appVersionInfo,
                                     isHandTrackingEnabled = uiState.isHandTrackingEnabled,
                                     isAvBackgroundIndexingEnabled = uiState.isAvBackgroundIndexingEnabled,
                                     activeAction = activeSettingsAction,
@@ -2181,6 +2291,7 @@ private fun DashboardOrbitArea(
     selectedSource: SavedServer?,
     availableSources: List<SavedServer>,
     onSourceSelected: (SavedServer) -> Unit,
+    onLocalStorageSelected: () -> Unit,
     onDisconnect: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -2200,6 +2311,7 @@ private fun DashboardOrbitArea(
                 selectedSource = selectedSource,
                 availableSources = availableSources,
                 onSourceSelected = onSourceSelected,
+                onLocalStorageSelected = onLocalStorageSelected,
                 modifier = Modifier.weight(1f),
             )
 
@@ -2472,6 +2584,7 @@ private fun ServerListPanel(
     selectedServer: SavedServer?,
     isConnecting: Boolean,
     onServerClick: (SavedServer) -> Unit,
+    onLocalStorageSelected: () -> Unit,
     onServerEdit: (SavedServer) -> Unit,
     onServerDelete: (SavedServer) -> Unit,
     onAddServerClick: () -> Unit,
@@ -2526,7 +2639,7 @@ private fun ServerListPanel(
                 // Local Storage card (always first)
                 item {
                     LocalStorageCard(
-                        onClick = { onServerClick(SavedServer.createLocalStorageServer()) },
+                        onClick = onLocalStorageSelected,
                         isSelected = selectedServer?.isLocalStorage == true,
                         isConnecting = isConnecting
                     )

@@ -88,6 +88,7 @@ import androidx.xr.scenecore.InputEvent
 import blackark.app.vr.data.database.AppDatabase
 import blackark.app.vr.data.repository.VideoDisplaySettingsRepository
 import blackark.app.vr.data.repository.VideoRepository
+import blackark.app.vr.player.PlaybackSource
 import blackark.app.vr.ui.ApplyHandTrackingPreference
 import blackark.app.vr.ui.components.XRPlaybackControls
 import blackark.app.vr.ui.isSpatialInputSourceAllowed
@@ -304,8 +305,16 @@ fun VideoPlayerScreen(
     }
 
     LaunchedEffect(videoFilePath, videoFileName) {
-        val smbConfig = blackark.app.vr.AppState.smbConfig
-        if (videoFilePath.isNotEmpty() && smbConfig != null) {
+        val playbackSource =
+            if (videoFilePath.startsWith("smb://", ignoreCase = true)) {
+                blackark.app.vr.AppState.smbConfig?.let { PlaybackSource.Smb(it) }
+            } else {
+                PlaybackSource.Local(
+                    rootTreeUri = AppSettingsStore.getLocalStorageTreeUri(context.applicationContext)
+                )
+            }
+
+        if (videoFilePath.isNotEmpty() && playbackSource != null) {
             val videoFile = blackark.app.vr.network.SMBFileItem(
                 name = videoFileName,
                 path = videoFilePath,
@@ -313,7 +322,7 @@ fun VideoPlayerScreen(
                 size = 0,
                 lastModified = 0,
             )
-            videoPlayerViewModel.initializePlayer(context, smbConfig, videoFile)
+            videoPlayerViewModel.initializePlayer(context, playbackSource, videoFile)
         }
     }
 

@@ -143,6 +143,10 @@ object VideoFramePreviewExtractor {
                     retriever.setDataSource(uri.path ?: videoPath)
                 }
 
+                "content" -> {
+                    retriever.setDataSource(context, uri)
+                }
+
                 else -> {
                     retriever.setDataSource(videoPath)
                 }

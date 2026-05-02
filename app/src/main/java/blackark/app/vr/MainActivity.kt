@@ -69,16 +69,6 @@ class MainActivity : ComponentActivity() {
                     )
                 }
 
-                var hasStoragePermission by remember {
-                    val permission = "android.permission.READ_MEDIA_VIDEO"
-                    mutableStateOf(
-                        ContextCompat.checkSelfPermission(
-                            context,
-                            permission
-                        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
-                    )
-                }
-
                 val headTrackingLauncher =
                     androidx.activity.compose.rememberLauncherForActivityResult(
                         contract = androidx.activity.result.contract.ActivityResultContracts.RequestPermission(),
@@ -95,22 +85,12 @@ class MainActivity : ComponentActivity() {
                         }
                     )
 
-                val storageLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
-                    contract = androidx.activity.result.contract.ActivityResultContracts.RequestPermission(),
-                    onResult = { isGranted ->
-                        hasStoragePermission = isGranted
-                    }
-                )
-
                 LaunchedEffect(Unit) {
                     if (!hasHeadTrackingPermission) {
                         headTrackingLauncher.launch("android.permission.HEAD_TRACKING")
                     }
                     if (!hasHandTrackingPermission) {
                         handTrackingLauncher.launch("android.permission.HAND_TRACKING")
-                    }
-                    if (!hasStoragePermission) {
-                        storageLauncher.launch("android.permission.READ_MEDIA_VIDEO")
                     }
                 }
 

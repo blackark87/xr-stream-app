@@ -15,15 +15,19 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import blackark.app.vr.data.database.entity.RecentVideo
 import blackark.app.vr.data.repository.VideoDisplaySettingsRepository
 import blackark.app.vr.data.repository.VideoRepository
+import blackark.app.vr.network.LocalFileClient
 import blackark.app.vr.network.SMBClient
 import blackark.app.vr.network.SMBConfig
 import blackark.app.vr.network.SMBFileItem
+import blackark.app.vr.player.PlaybackSource
 import blackark.app.vr.player.SMBDataSource
+import blackark.app.vr.utils.AppSettingsStore
 import blackark.app.vr.utils.InferredDisplayProfile
 import blackark.app.vr.utils.VideoFramePreviewExtractor
 import blackark.app.vr.utils.inferDisplayProfileFromFrame
@@ -126,7 +130,7 @@ class VideoPlayerViewModel(
 
     // Store context and config for playlist navigation
     private var appContext: Context? = null
-    private var currentSmbConfig: SMBConfig? = null
+    private var currentPlaybackSource: PlaybackSource? = null
 
     private var controllerAxisMode = ControllerAxisMode.None
     private var seekDirection = 0
@@ -1013,7 +1017,7 @@ class VideoPlayerViewModel(
 
     fun initializePlayer(
         context: Context,
-        smbConfig: SMBConfig,
+        playbackSource: PlaybackSource,
         videoFile: SMBFileItem
     ) {
         val requestedPath = videoFile.path
@@ -1027,7 +1031,7 @@ class VideoPlayerViewModel(
 
         pendingInitializationPath = requestedPath
         this.appContext = context.applicationContext
-        this.currentSmbConfig = smbConfig
+        this.currentPlaybackSource = playbackSource
         audioManager =
             context.applicationContext.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
         registerVolumeObserverIfNeeded()
@@ -1095,7 +1099,7 @@ class VideoPlayerViewModel(
                 }
 
                 // Save to recent videos immediately to ensure we have an ID for updates.
-                saveToRecentVideos(videoFile, smbConfig, savedVideo)
+                saveToRecentVideos(videoFile, playbackSource, savedVideo)
 
                 // Create ExoPlayer instance with larger buffer for SMB streaming
                 // Use 1MB allocation size to match SMB buffer
@@ -1251,8 +1255,10 @@ class VideoPlayerViewModel(
                     }
                 syncVolumeStateFromSystem(reason = "initializePlayer-player-created")
 
-                // Create SMB data source
-                val dataSourceFactory = SMBDataSource.Factory(smbConfig)
+                val dataSourceFactory = when (playbackSource) {
+                    is PlaybackSource.Smb -> SMBDataSource.Factory(playbackSource.config)
+                    is PlaybackSource.Local -> DefaultDataSource.Factory(context)
+                }
 
                 // videoFile.path is already a complete SMB URL from jcifs (e.g., smb://192.168.1.105:445/downloads/file.mp4)
                 val uri = videoFile.path.toUri()
@@ -1288,7 +1294,7 @@ class VideoPlayerViewModel(
                 startPositionTracking()
 
                 // Always refresh playlist for current file to keep index/order in sync with file screen.
-                refreshPlaylist(videoFile, smbConfig)
+                refreshPlaylist(videoFile, playbackSource)
 
             } catch (e: Exception) {
                 _state.value = _state.value.copy(
@@ -1337,6 +1343,16 @@ class VideoPlayerViewModel(
     }
 
     private suspend fun refreshPlaylist(
+        currentFile: SMBFileItem,
+        playbackSource: PlaybackSource,
+    ): Pair<List<SMBFileItem>, Int>? {
+        return when (playbackSource) {
+            is PlaybackSource.Smb -> refreshSmbPlaylist(currentFile, playbackSource.config)
+            is PlaybackSource.Local -> refreshLocalPlaylist(currentFile, playbackSource)
+        }
+    }
+
+    private suspend fun refreshSmbPlaylist(
         currentFile: SMBFileItem,
         smbConfig: SMBConfig,
     ): Pair<List<SMBFileItem>, Int>? {
@@ -1394,6 +1410,64 @@ class VideoPlayerViewModel(
         }
     }
 
+    private suspend fun refreshLocalPlaylist(
+        currentFile: SMBFileItem,
+        playbackSource: PlaybackSource.Local,
+    ): Pair<List<SMBFileItem>, Int>? {
+        return try {
+            val context = appContext ?: return null
+            val rootTreeUri = playbackSource.rootTreeUri
+                ?: AppSettingsStore.getLocalStorageTreeUri(context)
+                ?: return null
+
+            val parentPath = LocalFileClient.resolveParentDirectoryUri(
+                rootTreeUri = rootTreeUri,
+                childDocumentUri = currentFile.path,
+            ) ?: ""
+
+            val client = LocalFileClient(context, rootTreeUri)
+            val connectResult = client.connect()
+            if (connectResult.isFailure) {
+                Log.w(
+                    "VideoPlayerViewModel",
+                    "Failed to connect local storage while fetching playlist: ${connectResult.exceptionOrNull()?.message}"
+                )
+                return null
+            }
+
+            val listResult = client.listFiles(parentPath)
+            client.disconnect()
+
+            if (listResult.isFailure) {
+                Log.w(
+                    "VideoPlayerViewModel",
+                    "Failed to list local files for playlist: ${listResult.exceptionOrNull()?.message}"
+                )
+                return null
+            }
+
+            val allFiles = listResult.getOrNull().orEmpty()
+            val sortedFiles = allFiles
+                .filter { it.isDirectory || SMBClient.isVideoFile(it.name) }
+                .sortedWith(
+                    compareByDescending<SMBFileItem> { it.isDirectory }
+                        .thenBy { it.name.lowercase() }
+                )
+            val videoFiles = sortedFiles.filter { !it.isDirectory && SMBClient.isVideoFile(it.name) }
+            val currentIndex = resolveCurrentPlaylistIndex(videoFiles, currentFile)
+
+            _state.value = _state.value.copy(
+                playlist = videoFiles,
+                currentPlaylistIndex = currentIndex,
+            )
+
+            videoFiles to currentIndex
+        } catch (e: Exception) {
+            Log.e("VideoPlayerViewModel", "Failed to fetch local playlist: ${e.message}", e)
+            null
+        }
+    }
+
     private fun resolveRelativeParentPath(currentPath: String, smbConfig: SMBConfig): String {
         return try {
             val uriPath = java.net.URI(currentPath).path.orEmpty().trimStart('/')
@@ -1446,7 +1520,7 @@ class VideoPlayerViewModel(
 
     private suspend fun ensurePlaylistReady(): Pair<List<SMBFileItem>, Int>? {
         val currentFile = _state.value.videoFile ?: return null
-        val smbConfig = currentSmbConfig ?: return null
+        val playbackSource = currentPlaybackSource ?: return null
 
         val currentPlaylist = _state.value.playlist
         val currentIndex = resolveCurrentPlaylistIndex(currentPlaylist, currentFile)
@@ -1458,7 +1532,7 @@ class VideoPlayerViewModel(
             return currentPlaylist to currentIndex
         }
 
-        return refreshPlaylist(currentFile, smbConfig)
+        return refreshPlaylist(currentFile, playbackSource)
     }
 
     fun playNextVideo() {
@@ -1468,13 +1542,13 @@ class VideoPlayerViewModel(
             if (currentIndex < 0 || currentIndex >= playlist.lastIndex) return@launch
 
             val ctx = appContext ?: return@launch
-            val config = currentSmbConfig ?: return@launch
+            val playbackSource = currentPlaybackSource ?: return@launch
 
             val nextIndex = currentIndex + 1
             val nextFile = playlist[nextIndex]
 
             _state.value = _state.value.copy(currentPlaylistIndex = nextIndex)
-            initializePlayer(ctx, config, nextFile)
+            initializePlayer(ctx, playbackSource, nextFile)
             scheduleControlsAutoHideIfNeeded()
         }
     }
@@ -1486,22 +1560,31 @@ class VideoPlayerViewModel(
             if (currentIndex <= 0 || currentIndex >= playlist.size) return@launch
 
             val ctx = appContext ?: return@launch
-            val config = currentSmbConfig ?: return@launch
+            val playbackSource = currentPlaybackSource ?: return@launch
 
             val prevIndex = currentIndex - 1
             val prevFile = playlist[prevIndex]
 
             _state.value = _state.value.copy(currentPlaylistIndex = prevIndex)
-            initializePlayer(ctx, config, prevFile)
+            initializePlayer(ctx, playbackSource, prevFile)
             scheduleControlsAutoHideIfNeeded()
         }
     }
 
     private suspend fun saveToRecentVideos(
         videoFile: SMBFileItem,
-        smbConfig: SMBConfig,
+        playbackSource: PlaybackSource,
         existingVideo: RecentVideo?
     ) {
+        val serverAddress = when (playbackSource) {
+            is PlaybackSource.Smb -> playbackSource.config.serverAddress
+            is PlaybackSource.Local -> LocalFileClient.LOCAL_STORAGE_ADDRESS
+        }
+        val shareName = when (playbackSource) {
+            is PlaybackSource.Smb -> playbackSource.config.shareName
+            is PlaybackSource.Local -> playbackSource.rootTreeUri.orEmpty()
+        }
+
         if (existingVideo != null) {
             // Update existing history row while preserving resume state.
             val updatedVideo = existingVideo.copy(
@@ -1519,8 +1602,8 @@ class VideoPlayerViewModel(
             val recentVideo = RecentVideo(
                 fileName = videoFile.name,
                 filePath = videoFile.path,
-                serverAddress = smbConfig.serverAddress,
-                shareName = smbConfig.shareName,
+                serverAddress = serverAddress,
+                shareName = shareName,
                 lastPlayed = System.currentTimeMillis(),
                 lastPosition = 0,
                 duration = 0,
@@ -1668,10 +1751,11 @@ class VideoPlayerViewModel(
         _state.value = _state.value.copy(error = null)
     }
 
-    fun retry(context: Context, smbConfig: SMBConfig) {
+    fun retry(context: Context) {
         val currentFile = _state.value.videoFile
+        val playbackSource = currentPlaybackSource ?: return
         if (currentFile != null) {
-            initializePlayer(context, smbConfig, currentFile)
+            initializePlayer(context, playbackSource, currentFile)
         }
     }
 
@@ -1719,6 +1803,7 @@ class VideoPlayerViewModel(
             audioManager = null
             _state.value = VideoPlayerState()
             currentVideoId = null
+            currentPlaybackSource = null
             pendingVideoFormatToPersist = null
             pendingStereoModeToPersist = null
             autoDisplayInferencePending = false
@@ -1770,6 +1855,7 @@ class VideoPlayerViewModel(
 
         _state.value = VideoPlayerState()
         currentVideoId = null
+        currentPlaybackSource = null
         pendingVideoFormatToPersist = null
         pendingStereoModeToPersist = null
         autoDisplayInferencePending = false

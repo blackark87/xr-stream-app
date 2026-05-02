@@ -110,6 +110,12 @@
     <string name="toggle_pane_layout">Toggle pane layout</string>
     <string name="username">Username</string>
     <string name="version">Version</string>
+    <string name="play_store_version">Play Store version</string>
+    <string name="internal_version">Internal version</string>
+    <string name="version_code">Version code</string>
+    <string name="release_channel">Release channel</string>
+    <string name="git_commit">Git commit</string>
+    <string name="build_time_utc">Build time (UTC)</string>
     <string name="video_thumbnail">Video thumbnail</string>
     <string name="watched_progress_percent">%1$d%% watched</string>
 </resources>

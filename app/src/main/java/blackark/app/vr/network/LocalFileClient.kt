@@ -1,211 +1,208 @@
 package blackark.app.vr.network
 
 import android.content.Context
-import android.os.Environment
+import android.net.Uri
+import android.provider.DocumentsContract
+import android.provider.DocumentsContract.Document
+import androidx.documentfile.provider.DocumentFile
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import java.io.File
 import java.io.InputStream
 
 /**
- * Local file system client for browsing device storage
+ * Local storage client backed by SAF tree/document URIs.
  */
-class LocalFileClient(private val context: Context) {
+class LocalFileClient(
+    private val context: Context,
+    private val rootTreeUri: String,
+) {
 
     companion object {
         const val LOCAL_STORAGE_ADDRESS = "local://storage"
+
+        fun resolveParentDirectoryUri(
+            rootTreeUri: String,
+            childDocumentUri: String,
+        ): String? {
+            return runCatching {
+                val treeUri = Uri.parse(rootTreeUri)
+                val childUri = Uri.parse(childDocumentUri)
+
+                val treeDocumentId = DocumentsContract.getTreeDocumentId(treeUri)
+                val childDocumentId = DocumentsContract.getDocumentId(childUri)
+
+                if (childDocumentId == treeDocumentId) {
+                    return null
+                }
+
+                val parentDocumentId = childDocumentId.substringBeforeLast(
+                    delimiter = "/",
+                    missingDelimiterValue = treeDocumentId,
+                )
+
+                DocumentsContract.buildDocumentUriUsingTree(treeUri, parentDocumentId).toString()
+            }.getOrNull()
+        }
     }
 
-    /**
-     * Connect to local storage (always succeeds if storage is available)
-     */
+    private val appContext: Context = context.applicationContext
+    private val rootUri: Uri = Uri.parse(rootTreeUri)
+
+    private val documentProjection = arrayOf(
+        Document.COLUMN_DOCUMENT_ID,
+        Document.COLUMN_DISPLAY_NAME,
+        Document.COLUMN_MIME_TYPE,
+        Document.COLUMN_SIZE,
+        Document.COLUMN_LAST_MODIFIED,
+    )
+
     suspend fun connect(): Result<Unit> = withContext(Dispatchers.IO) {
         try {
-            // Check if external storage is available
-            val state = Environment.getExternalStorageState()
-            if (Environment.MEDIA_MOUNTED == state || Environment.MEDIA_MOUNTED_READ_ONLY == state) {
-                Result.success(Unit)
-            } else {
-                Result.failure(IllegalStateException("External storage not available"))
+            val root = DocumentFile.fromTreeUri(appContext, rootUri)
+                ?: return@withContext Result.failure(
+                    IllegalStateException("Unable to open local root tree URI")
+                )
+
+            if (!root.exists()) {
+                return@withContext Result.failure(
+                    IllegalStateException("Local root folder is not accessible")
+                )
             }
+
+            if (!root.isDirectory) {
+                return@withContext Result.failure(
+                    IllegalStateException("Selected local root is not a directory")
+                )
+            }
+
+            Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
         }
     }
 
-    /**
-     * List files in the given directory path
-     * @param path Relative path from the root directory, empty for common directories
-     */
     suspend fun listFiles(path: String = ""): Result<List<SMBFileItem>> =
         withContext(Dispatchers.IO) {
             try {
-                val directory = if (path.isEmpty()) {
-                    // Return common root directories
-                    return@withContext Result.success(getCommonDirectories())
-                } else {
-                    File(path)
-                }
-
-                if (!directory.exists()) {
-                    return@withContext Result.failure(
-                        IllegalArgumentException("Directory does not exist: $path")
+                val parentDocumentId = resolveDocumentId(path)
+                    ?: return@withContext Result.failure(
+                        IllegalArgumentException("Directory does not exist or cannot be opened")
                     )
-                }
+                val childrenUri =
+                    DocumentsContract.buildChildDocumentsUriUsingTree(rootUri, parentDocumentId)
 
-                if (!directory.isDirectory) {
-                    return@withContext Result.failure(
-                        IllegalArgumentException("Path is not a directory: $path")
-                    )
-                }
+                val files = mutableListOf<SMBFileItem>()
+                appContext.contentResolver.query(
+                    childrenUri,
+                    documentProjection,
+                    null,
+                    null,
+                    null,
+                )?.use { cursor ->
+                    val idIndex = cursor.getColumnIndex(Document.COLUMN_DOCUMENT_ID)
+                    val nameIndex = cursor.getColumnIndex(Document.COLUMN_DISPLAY_NAME)
+                    val mimeIndex = cursor.getColumnIndex(Document.COLUMN_MIME_TYPE)
+                    val sizeIndex = cursor.getColumnIndex(Document.COLUMN_SIZE)
+                    val modifiedIndex = cursor.getColumnIndex(Document.COLUMN_LAST_MODIFIED)
 
-                val files = directory.listFiles()?.mapNotNull { file ->
-                    try {
-                        // Skip hidden files
-                        if (file.isHidden) return@mapNotNull null
+                    while (cursor.moveToNext()) {
+                        val documentId =
+                            cursor.getStringIfPresent(idIndex)?.takeIf { it.isNotBlank() }
+                                ?: continue
+                        val documentUri =
+                            DocumentsContract.buildDocumentUriUsingTree(rootUri, documentId)
+                        val displayName = cursor.getStringIfPresent(nameIndex)?.trim().orEmpty()
+                        val resolvedName =
+                            if (displayName.isNotBlank()) {
+                                displayName
+                            } else {
+                                documentUri.lastPathSegment.orEmpty()
+                            }
 
-                        SMBFileItem(
-                            name = file.name,
-                            path = file.absolutePath,
-                            isDirectory = file.isDirectory,
-                            size = if (file.isDirectory) 0 else file.length(),
-                            lastModified = file.lastModified()
+                        if (resolvedName.startsWith('.')) {
+                            continue
+                        }
+
+                        val mimeType = cursor.getStringIfPresent(mimeIndex).orEmpty()
+                        val isDirectory = mimeType == Document.MIME_TYPE_DIR
+                        val size = cursor.getLongIfPresent(sizeIndex).coerceAtLeast(0L)
+                        val lastModified = cursor.getLongIfPresent(modifiedIndex).coerceAtLeast(0L)
+
+                        files += SMBFileItem(
+                            name = resolvedName,
+                            path = documentUri.toString(),
+                            isDirectory = isDirectory,
+                            size = if (isDirectory) 0L else size,
+                            lastModified = lastModified,
                         )
-                    } catch (e: Exception) {
-                        println("LocalFileClient: Error accessing file: ${e.message}")
-                        null // Skip files that can't be accessed
                     }
-                } ?: emptyList()
+                } ?: return@withContext Result.failure(
+                    IllegalStateException("Directory query failed")
+                )
 
                 Result.success(files)
             } catch (e: Exception) {
-                println("LocalFileClient: Error listing files: ${e.message}")
                 Result.failure(e)
             }
         }
 
-    /**
-     * Get common root directories accessible to the app
-     */
-    private fun getCommonDirectories(): List<SMBFileItem> {
-        val directories = mutableListOf<SMBFileItem>()
-
-        // Add Movies directory
-        val moviesDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES)
-        if (moviesDir.exists()) {
-            directories.add(
-                SMBFileItem(
-                    name = "Movies",
-                    path = moviesDir.absolutePath,
-                    isDirectory = true,
-                    size = 0,
-                    lastModified = moviesDir.lastModified()
-                )
-            )
-        }
-
-        // Add DCIM directory (camera recordings)
-        val dcimDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM)
-        if (dcimDir.exists()) {
-            directories.add(
-                SMBFileItem(
-                    name = "DCIM",
-                    path = dcimDir.absolutePath,
-                    isDirectory = true,
-                    size = 0,
-                    lastModified = dcimDir.lastModified()
-                )
-            )
-        }
-
-        // Add Downloads directory
-        val downloadsDir =
-            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-        if (downloadsDir.exists()) {
-            directories.add(
-                SMBFileItem(
-                    name = "Downloads",
-                    path = downloadsDir.absolutePath,
-                    isDirectory = true,
-                    size = 0,
-                    lastModified = downloadsDir.lastModified()
-                )
-            )
-        }
-
-        // Add Documents directory
-        val documentsDir =
-            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
-        if (documentsDir != null && documentsDir.exists()) {
-            directories.add(
-                SMBFileItem(
-                    name = "Documents",
-                    path = documentsDir.absolutePath,
-                    isDirectory = true,
-                    size = 0,
-                    lastModified = documentsDir.lastModified()
-                )
-            )
-        }
-
-        // Add external storage root
-        val externalStorageDir = Environment.getExternalStorageDirectory()
-        if (externalStorageDir.exists()) {
-            directories.add(
-                SMBFileItem(
-                    name = "Internal Storage",
-                    path = externalStorageDir.absolutePath,
-                    isDirectory = true,
-                    size = 0,
-                    lastModified = externalStorageDir.lastModified()
-                )
-            )
-        }
-
-        return directories
-    }
-
-    /**
-     * Get input stream for a file
-     */
     suspend fun getInputStream(path: String): Result<InputStream> = withContext(Dispatchers.IO) {
         try {
-            val file = File(path)
-
-            if (!file.exists()) {
-                return@withContext Result.failure(IllegalArgumentException("File does not exist: $path"))
-            }
-
-            if (file.isDirectory) {
-                return@withContext Result.failure(IllegalArgumentException("Path is a directory, not a file: $path"))
-            }
-
-            Result.success(file.inputStream())
+            val uri = Uri.parse(path)
+            val stream = appContext.contentResolver.openInputStream(uri)
+                ?: return@withContext Result.failure(
+                    IllegalArgumentException("Unable to open local file input stream")
+                )
+            Result.success(stream)
         } catch (e: Exception) {
             Result.failure(e)
         }
     }
 
-    /**
-     * Get file info for a specific path
-     */
     suspend fun getFileInfo(path: String): Result<SMBFileItem> = withContext(Dispatchers.IO) {
         try {
-            val file = File(path)
+            val documentUri = resolveDocumentUri(path)
+                ?: return@withContext Result.failure(
+                    IllegalArgumentException("File does not exist")
+                )
+            val resolver = appContext.contentResolver
+            val info = resolver.query(
+                documentUri,
+                documentProjection,
+                null,
+                null,
+                null,
+            )?.use { cursor ->
+                if (!cursor.moveToFirst()) {
+                    return@use null
+                }
 
-            if (!file.exists()) {
-                return@withContext Result.failure(IllegalArgumentException("File does not exist: $path"))
+                val name = cursor.getStringIfPresent(cursor.getColumnIndex(Document.COLUMN_DISPLAY_NAME))
+                    ?.trim()
+                    .orEmpty()
+                val mimeType = cursor.getStringIfPresent(cursor.getColumnIndex(Document.COLUMN_MIME_TYPE))
+                    .orEmpty()
+                val isDirectory = mimeType == Document.MIME_TYPE_DIR
+                val size = cursor.getLongIfPresent(cursor.getColumnIndex(Document.COLUMN_SIZE))
+                    .coerceAtLeast(0L)
+                val lastModified =
+                    cursor.getLongIfPresent(cursor.getColumnIndex(Document.COLUMN_LAST_MODIFIED))
+                        .coerceAtLeast(0L)
+
+                SMBFileItem(
+                    name = if (name.isNotBlank()) name else documentUri.lastPathSegment.orEmpty(),
+                    path = documentUri.toString(),
+                    isDirectory = isDirectory,
+                    size = if (isDirectory) 0L else size,
+                    lastModified = lastModified,
+                )
             }
 
-            val fileItem = SMBFileItem(
-                name = file.name,
-                path = file.absolutePath,
-                isDirectory = file.isDirectory,
-                size = if (file.isDirectory) 0 else file.length(),
-                lastModified = file.lastModified()
-            )
-
-            Result.success(fileItem)
+            if (info != null) {
+                Result.success(info)
+            } else {
+                Result.failure(IllegalArgumentException("File does not exist"))
+            }
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -213,23 +210,22 @@ class LocalFileClient(private val context: Context) {
 
     suspend fun deleteFile(path: String): Result<Unit> = withContext(Dispatchers.IO) {
         try {
-            val file = File(path)
+            val documentUri = resolveDocumentUri(path)
+                ?: return@withContext Result.failure(
+                    IllegalArgumentException("File does not exist")
+                )
 
-            if (!file.exists()) {
+            val fileInfo = getFileInfo(path).getOrNull()
+                ?: return@withContext Result.failure(IllegalArgumentException("File does not exist"))
+            if (fileInfo.isDirectory) {
                 return@withContext Result.failure(
-                    IllegalArgumentException("File does not exist: $path")
+                    IllegalArgumentException("Directory deletion is not supported")
                 )
             }
 
-            if (file.isDirectory) {
+            if (!DocumentsContract.deleteDocument(appContext.contentResolver, documentUri)) {
                 return@withContext Result.failure(
-                    IllegalArgumentException("Directory deletion is not supported: $path")
-                )
-            }
-
-            if (!file.delete()) {
-                return@withContext Result.failure(
-                    IllegalStateException("Failed to delete file: $path")
+                    IllegalStateException("Failed to delete local file")
                 )
             }
 
@@ -240,6 +236,32 @@ class LocalFileClient(private val context: Context) {
     }
 
     fun disconnect() {
-        // Nothing to disconnect for local storage
+        // No connection state for SAF documents.
+    }
+
+    private fun resolveDocumentId(path: String): String? {
+        if (path.isBlank()) {
+            return runCatching { DocumentsContract.getTreeDocumentId(rootUri) }.getOrNull()
+        }
+
+        val uri = Uri.parse(path)
+        return runCatching { DocumentsContract.getDocumentId(uri) }
+            .recoverCatching { DocumentsContract.getTreeDocumentId(uri) }
+            .getOrNull()
+    }
+
+    private fun resolveDocumentUri(path: String): Uri? {
+        val documentId = resolveDocumentId(path) ?: return null
+        return DocumentsContract.buildDocumentUriUsingTree(rootUri, documentId)
+    }
+
+    private fun android.database.Cursor.getStringIfPresent(index: Int): String? {
+        if (index < 0 || isNull(index)) return null
+        return getString(index)
+    }
+
+    private fun android.database.Cursor.getLongIfPresent(index: Int): Long {
+        if (index < 0 || isNull(index)) return 0L
+        return getLong(index)
     }
 }

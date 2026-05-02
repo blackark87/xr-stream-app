@@ -9,6 +9,7 @@ object AppSettingsStore {
     private const val KEY_HAND_TRACKING_ENABLED = "hand_tracking_enabled"
     private const val KEY_CONTROLLER_HAND_TRACKING_PROMPT_HANDLED =
         "controller_hand_tracking_prompt_handled"
+    private const val KEY_LOCAL_STORAGE_TREE_URI = "local_storage_tree_uri"
 
     private fun prefs(context: Context) =
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -43,6 +44,25 @@ object AppSettingsStore {
         prefs(context)
             .edit()
             .putBoolean(KEY_CONTROLLER_HAND_TRACKING_PROMPT_HANDLED, handled)
+            .apply()
+    }
+
+    fun getLocalStorageTreeUri(context: Context): String? {
+        return prefs(context).getString(KEY_LOCAL_STORAGE_TREE_URI, null)
+            ?.takeIf { it.isNotBlank() }
+    }
+
+    fun setLocalStorageTreeUri(context: Context, treeUri: String) {
+        prefs(context)
+            .edit()
+            .putString(KEY_LOCAL_STORAGE_TREE_URI, treeUri)
+            .apply()
+    }
+
+    fun clearLocalStorageTreeUri(context: Context) {
+        prefs(context)
+            .edit()
+            .remove(KEY_LOCAL_STORAGE_TREE_URI)
             .apply()
     }
 }

@@ -3,6 +3,7 @@ package blackark.app.vr.utils
 import android.graphics.Bitmap
 import android.media.MediaDataSource
 import android.media.MediaMetadataRetriever
+import android.net.Uri
 import android.util.Log
 import androidx.core.net.toUri
 import blackark.app.vr.data.database.AppDatabase
@@ -57,6 +58,10 @@ class VideoThumbnailFetcher(
                     extractSMBThumbnail(data)
                 }
 
+                "content" -> {
+                    extractContentThumbnail(uri)
+                }
+
                 "file", null -> {
                     // For local files, use standard MediaMetadataRetriever
                     extractLocalThumbnail(data)
@@ -67,6 +72,36 @@ class VideoThumbnailFetcher(
         } catch (e: Exception) {
             Log.e("VideoThumbnailFetcher", "Error fetching thumbnail for $data", e)
             null
+        }
+    }
+
+    private fun extractContentThumbnail(uri: Uri): FetchResult? {
+        inferredDisplayProfile = null
+        val retriever = MediaMetadataRetriever()
+        return try {
+            retriever.setDataSource(options.context, uri)
+            val durationMs =
+                retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+                    ?.toLongOrNull() ?: 0L
+            val bitmap = extractBestThumbnailFrame(retriever, durationMs) ?: return null
+
+            val buffer = Buffer()
+            bitmap.compress(Bitmap.CompressFormat.JPEG, 85, buffer.outputStream())
+
+            SourceFetchResult(
+                source = ImageSource(buffer, FileSystem.SYSTEM),
+                mimeType = "image/jpeg",
+                dataSource = DataSource.DISK
+            )
+        } catch (e: Exception) {
+            Log.e("VideoThumbnailFetcher", "Error extracting content thumbnail", e)
+            null
+        } finally {
+            try {
+                retriever.release()
+            } catch (e: Exception) {
+                Log.e("VideoThumbnailFetcher", "Error releasing retriever", e)
+            }
         }
     }
 

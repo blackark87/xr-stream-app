@@ -1,6 +1,7 @@
 package blackark.app.vr.ui.viewmodel
 
 import android.content.Context
+import android.net.Uri
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -336,13 +337,24 @@ class MainDashboardViewModel(
                 avCastRepairAttemptedCacheKeys.clear()
                 AppState.clear()
 
+                var connectedServer = server
                 val result = if (server.isLocalStorage) {
-                    val client = LocalFileClient(context)
-                    val connectionResult = client.connect()
-                    if (connectionResult.isSuccess) {
-                        localClient = client
+                    val localTreeUri = resolveConfiguredLocalTreeUri(server)
+                    if (localTreeUri.isNullOrBlank()) {
+                        Result.failure(
+                            IllegalStateException("Select a local folder first.")
+                        )
+                    } else {
+                        connectedServer = server.copy(shareName = localTreeUri)
+                        val client = LocalFileClient(context, localTreeUri)
+                        val connectionResult = client.connect()
+                        if (connectionResult.isSuccess) {
+                            localClient = client
+                        } else {
+                            AppSettingsStore.clearLocalStorageTreeUri(context.applicationContext)
+                        }
+                        connectionResult
                     }
-                    connectionResult
                 } else {
                     val config = SMBConfig(
                         serverAddress = server.serverAddress,
@@ -363,12 +375,14 @@ class MainDashboardViewModel(
                 }
 
                 if (result.isSuccess) {
-                    serverRepository.updateLastConnected(server.id)
+                    if (!connectedServer.isLocalStorage) {
+                        serverRepository.updateLastConnected(connectedServer.id)
+                    }
 
                     _uiState.value = _uiState.value.copy(
                         isConnecting = false,
                         isConnected = true,
-                        selectedServer = server,
+                        selectedServer = connectedServer,
                         currentPath = "",
                         pathHistory = emptyList(),
                         errorMessage = null,
@@ -379,8 +393,13 @@ class MainDashboardViewModel(
                     )
 
                     loadFiles("")
-                    refreshAvSnapshot(buildSourceScope(server.serverAddress, server.shareName))
-                    startAvLibraryIndexingIfEnabled(server)
+                    refreshAvSnapshot(
+                        buildSourceScope(
+                            connectedServer.serverAddress,
+                            connectedServer.shareName,
+                        )
+                    )
+                    startAvLibraryIndexingIfEnabled(connectedServer)
                 } else {
                     _uiState.value = _uiState.value.copy(
                         isConnecting = false,
@@ -396,6 +415,14 @@ class MainDashboardViewModel(
                 )
             }
         }
+    }
+
+    fun connectToLocalTree(treeUri: Uri) {
+        val uriString = treeUri.toString()
+        AppSettingsStore.setLocalStorageTreeUri(context.applicationContext, uriString)
+        connectToServer(
+            SavedServer.createLocalStorageServer().copy(shareName = uriString)
+        )
     }
 
     fun disconnect() {
@@ -479,14 +506,27 @@ class MainDashboardViewModel(
         val newHistory = _uiState.value.pathHistory + _uiState.value.currentPath
         _uiState.value = _uiState.value.copy(pathHistory = newHistory)
 
-        val dirName = file.name.removeSuffix("/")
-        val newPath = if (_uiState.value.currentPath.isEmpty()) {
-            dirName
+        val newPath = if (localClient != null) {
+            file.path
         } else {
-            "${_uiState.value.currentPath}/$dirName"
+            val dirName = file.name.removeSuffix("/")
+            if (_uiState.value.currentPath.isEmpty()) {
+                dirName
+            } else {
+                "${_uiState.value.currentPath}/$dirName"
+            }
         }
 
         loadFiles(newPath)
+    }
+
+    private fun resolveConfiguredLocalTreeUri(server: SavedServer): String? {
+        val provided = server.shareName.takeIf { it.isNotBlank() }
+        if (provided != null) {
+            return provided
+        }
+
+        return AppSettingsStore.getLocalStorageTreeUri(context.applicationContext)
     }
 
     fun navigateBack() {
