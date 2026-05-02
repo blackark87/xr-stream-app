@@ -139,7 +139,6 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupPositionProvider
 import androidx.compose.ui.window.PopupProperties
-import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavController
 import androidx.xr.compose.spatial.ContentEdge
@@ -303,26 +302,34 @@ private fun PrimaryDestination.icon(): ImageVector = when (this) {
     PrimaryDestination.Settings -> Icons.Filled.Settings
 }
 
-private fun resolveLocalFolderDisplayName(context: Context, treeUri: String?): String? {
+private fun resolveLocalFolderDisplayName(treeUri: String?): String? {
     if (treeUri.isNullOrBlank()) return null
 
-    return runCatching<String?> {
-        DocumentFile.fromTreeUri(context.applicationContext, Uri.parse(treeUri))
-            ?.name
-            ?.takeIf { it.isNotBlank() }
-            ?: Uri.parse(treeUri).lastPathSegment
+    val tree = Uri.parse(treeUri)
+
+    return try {
+        DocumentsContract.getTreeDocumentId(tree)
+            .substringAfter(':', tree.lastPathSegment.orEmpty())
+            .takeIf { it.isNotBlank() }
+            ?: tree.lastPathSegment
                 ?.substringAfterLast(':')
                 ?.takeIf { it.isNotBlank() }
-    }.getOrNull()
+    } catch (_: Throwable) {
+        tree.lastPathSegment
+            ?.substringAfterLast(':')
+            ?.takeIf { it.isNotBlank() }
+    }
 }
 
 private fun buildLocalPickerInitialUri(pathSegment: String): Uri? {
-    return runCatching {
+    return try {
         DocumentsContract.buildDocumentUri(
             "com.android.externalstorage.documents",
             "primary:$pathSegment",
         )
-    }.getOrNull()
+    } catch (_: Throwable) {
+        null
+    }
 }
 
 private fun resolvePreferredLocalPickerInitialUri(configuredTreeUri: String?): Uri? {
@@ -339,11 +346,14 @@ private fun resolveLocalBreadcrumbLabel(
         return rootLabel
     }
 
-    return runCatching {
+    return try {
         DocumentsContract.getDocumentId(Uri.parse(currentPath))
             .substringAfter(':', currentPath)
             .takeIf { it.isNotBlank() }
-    }.getOrNull() ?: rootLabel
+            ?: rootLabel
+    } catch (_: Throwable) {
+        rootLabel
+    }
 }
 
 private fun resolveSourceTitle(
@@ -2081,7 +2091,7 @@ fun MainDashboardScreen(
             ?.shareName
             ?: AppSettingsStore.getLocalStorageTreeUri(context.applicationContext)
     val localFolderName = remember(persistedLocalTreeUri) {
-        resolveLocalFolderDisplayName(context, persistedLocalTreeUri)
+        resolveLocalFolderDisplayName(persistedLocalTreeUri)
     }
     val isLocalModeConnected =
         uiState.isConnected && uiState.selectedServer?.isLocalStorage == true
