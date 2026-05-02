@@ -653,22 +653,29 @@ private fun DashboardSourceRail(
     modifier: Modifier = Modifier,
 ) {
     Surface(
-        modifier = modifier.clip(RoundedCornerShape(22.dp)),
+        modifier = modifier
+            .width(108.dp)
+            .clip(RoundedCornerShape(22.dp)),
         color = CardBackground.copy(alpha = 0.92f),
         shape = RoundedCornerShape(22.dp),
         tonalElevation = 10.dp,
         shadowElevation = 18.dp,
     ) {
         Column(
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 12.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 10.dp, vertical = 12.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text(
                 text = selectedMode.label,
+                modifier = Modifier.fillMaxWidth(),
                 style = MaterialTheme.typography.labelMedium,
                 color = TextPrimary,
                 maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center,
             )
 
             HorizontalDivider(
@@ -2038,9 +2045,16 @@ fun MainDashboardScreen(
     var secondaryPaneMode by rememberSaveable {
         mutableStateOf(SecondaryPaneMode.Preview)
     }
-    val previewResetKey =
+    val browserPreviewResetKey =
         "preview:${primaryDestination.name}:${uiState.selectedServer?.id}:${uiState.currentPath}"
-    var dashboardPreviewItem by remember(previewResetKey) {
+    val libraryPreviewResetKey =
+        "library-preview:${primaryDestination.name}:${uiState.selectedServer?.id}"
+    var browserPreviewItem by remember(browserPreviewResetKey) {
+        mutableStateOf<DashboardPreviewItem?>(
+            null
+        )
+    }
+    var libraryPreviewItem by remember(libraryPreviewResetKey) {
         mutableStateOf<DashboardPreviewItem?>(
             null
         )
@@ -2069,7 +2083,7 @@ fun MainDashboardScreen(
                 context.contentResolver.takePersistableUriPermission(treeUri, grantFlags)
             }
 
-            dashboardPreviewItem = null
+            clearAllPreviewItems()
             fileWorkspaceMode = FileWorkspaceMode.Browser
             viewModel.connectToLocalTree(treeUri)
         }
@@ -2131,6 +2145,11 @@ fun MainDashboardScreen(
     }
     val initialDashboardPose = remember { AppState.dashboardPanelPose.value?.let { Pose(it) } }
 
+    fun clearAllPreviewItems() {
+        browserPreviewItem = null
+        libraryPreviewItem = null
+    }
+
     fun requestLocalStorageConnection(forcePicker: Boolean = false) {
         val configuredTreeUri =
             AppSettingsStore.getLocalStorageTreeUri(context.applicationContext)
@@ -2149,7 +2168,7 @@ fun MainDashboardScreen(
     }
 
     fun connectToSource(server: SavedServer) {
-        dashboardPreviewItem = null
+        clearAllPreviewItems()
         fileWorkspaceMode = FileWorkspaceMode.Browser
 
         if (server.isLocalStorage) {
@@ -2162,7 +2181,7 @@ fun MainDashboardScreen(
     }
 
     fun disconnectActiveSource() {
-        dashboardPreviewItem = null
+        clearAllPreviewItems()
         fileWorkspaceMode = FileWorkspaceMode.Browser
         viewModel.disconnect()
     }
@@ -2171,7 +2190,7 @@ fun MainDashboardScreen(
         if (primaryDestination == destination) return
 
         primaryDestination = destination
-        dashboardPreviewItem = null
+        clearAllPreviewItems()
         if (destination == PrimaryDestination.LocalFiles || destination == PrimaryDestination.SmbFiles) {
             fileWorkspaceMode = FileWorkspaceMode.Browser
         }
@@ -2204,12 +2223,12 @@ fun MainDashboardScreen(
                     SettingsAction.ClearArtwork -> {
                         resetArtworkState(context)
                         viewModel.clearAvMetadataLinks()
-                        dashboardPreviewItem = null
+                        clearAllPreviewItems()
                     }
 
                     SettingsAction.ClearThumbnails -> {
                         resetThumbnailState(context)
-                        dashboardPreviewItem = null
+                        clearAllPreviewItems()
                     }
 
                     SettingsAction.ClearRecentHistory -> {
@@ -2459,28 +2478,28 @@ fun MainDashboardScreen(
                                         errorMessage = uiState.errorMessage,
                                         viewMode = uiState.fileViewMode,
                                         sortMode = uiState.fileSortMode,
-                                        currentPreviewKey = dashboardPreviewItem?.key,
+                                        currentPreviewKey = browserPreviewItem?.key,
                                         onFileClick = { file ->
-                                            dashboardPreviewItem = null
+                                            browserPreviewItem = null
                                             viewModel.navigateToFile(file)
                                         },
                                         onBackClick = {
-                                            dashboardPreviewItem = null
+                                            browserPreviewItem = null
                                             viewModel.navigateBack()
                                         },
                                         onToggleViewMode = {
-                                            dashboardPreviewItem = null
+                                            browserPreviewItem = null
                                             viewModel.toggleFileViewMode()
                                         },
                                         onSortModeSelected = { sortMode ->
-                                            dashboardPreviewItem = null
+                                            browserPreviewItem = null
                                             viewModel.setFileSortMode(sortMode)
                                         },
                                         onDeleteFiles = { selectedFiles ->
                                             viewModel.deleteFiles(selectedFiles)
                                         },
                                         onPlayVideo = { filePath, fileName ->
-                                            dashboardPreviewItem = null
+                                            browserPreviewItem = null
                                             navController.navigate(
                                                 Screen.VideoPlayer.createRoute(filePath, fileName)
                                             ) {
@@ -2491,7 +2510,7 @@ fun MainDashboardScreen(
                                             viewModel.toggleFavoriteForFile(file, isFavorite)
                                         },
                                         onPreviewFocused = { preview ->
-                                            dashboardPreviewItem = preview
+                                            browserPreviewItem = preview
                                         },
                                         onOpenAv = {
                                             fileWorkspaceMode = FileWorkspaceMode.Av
@@ -2538,7 +2557,7 @@ fun MainDashboardScreen(
 
                                     if (secondaryPaneMode == SecondaryPaneMode.Preview) {
                                         DashboardPreviewPanel(
-                                            previewItem = dashboardPreviewItem,
+                                            previewItem = browserPreviewItem,
                                             modifier = Modifier
                                                 .width(previewWidth)
                                                 .fillMaxHeight(),
@@ -2549,9 +2568,9 @@ fun MainDashboardScreen(
                                             recentVideos = recentVideos,
                                             isConnected = true,
                                             stateKey = uiState.selectedServer?.id,
-                                            currentPreviewKey = dashboardPreviewItem?.key,
+                                            currentPreviewKey = libraryPreviewItem?.key,
                                             onFavoriteClick = { video ->
-                                                dashboardPreviewItem = null
+                                                libraryPreviewItem = null
                                                 navController.navigate(
                                                     Screen.VideoPlayer.createRoute(
                                                         video.filePath,
@@ -2562,7 +2581,7 @@ fun MainDashboardScreen(
                                                 }
                                             },
                                             onRecentClick = { video ->
-                                                dashboardPreviewItem = null
+                                                libraryPreviewItem = null
                                                 navController.navigate(
                                                     Screen.VideoPlayer.createRoute(
                                                         video.filePath,
@@ -2587,7 +2606,7 @@ fun MainDashboardScreen(
                                                 }
                                             },
                                             onPreviewFocused = { preview ->
-                                                dashboardPreviewItem = preview
+                                                libraryPreviewItem = preview
                                             },
                                             modifier = Modifier
                                                 .width(previewWidth)
@@ -2717,28 +2736,28 @@ fun MainDashboardScreen(
                                         errorMessage = uiState.errorMessage,
                                         viewMode = uiState.fileViewMode,
                                         sortMode = uiState.fileSortMode,
-                                        currentPreviewKey = dashboardPreviewItem?.key,
+                                        currentPreviewKey = browserPreviewItem?.key,
                                         onFileClick = { file ->
-                                            dashboardPreviewItem = null
+                                            browserPreviewItem = null
                                             viewModel.navigateToFile(file)
                                         },
                                         onBackClick = {
-                                            dashboardPreviewItem = null
+                                            browserPreviewItem = null
                                             viewModel.navigateBack()
                                         },
                                         onToggleViewMode = {
-                                            dashboardPreviewItem = null
+                                            browserPreviewItem = null
                                             viewModel.toggleFileViewMode()
                                         },
                                         onSortModeSelected = { sortMode ->
-                                            dashboardPreviewItem = null
+                                            browserPreviewItem = null
                                             viewModel.setFileSortMode(sortMode)
                                         },
                                         onDeleteFiles = { selectedFiles ->
                                             viewModel.deleteFiles(selectedFiles)
                                         },
                                         onPlayVideo = { filePath, fileName ->
-                                            dashboardPreviewItem = null
+                                            browserPreviewItem = null
                                             navController.navigate(
                                                 Screen.VideoPlayer.createRoute(filePath, fileName)
                                             ) {
@@ -2749,7 +2768,7 @@ fun MainDashboardScreen(
                                             viewModel.toggleFavoriteForFile(file, isFavorite)
                                         },
                                         onPreviewFocused = { preview ->
-                                            dashboardPreviewItem = preview
+                                            browserPreviewItem = preview
                                         },
                                         onOpenAv = {
                                             fileWorkspaceMode = FileWorkspaceMode.Av
@@ -2796,7 +2815,7 @@ fun MainDashboardScreen(
 
                                     if (secondaryPaneMode == SecondaryPaneMode.Preview) {
                                         DashboardPreviewPanel(
-                                            previewItem = dashboardPreviewItem,
+                                            previewItem = browserPreviewItem,
                                             modifier = Modifier
                                                 .width(previewWidth)
                                                 .fillMaxHeight(),
@@ -2807,9 +2826,9 @@ fun MainDashboardScreen(
                                             recentVideos = recentVideos,
                                             isConnected = true,
                                             stateKey = uiState.selectedServer?.id,
-                                            currentPreviewKey = dashboardPreviewItem?.key,
+                                            currentPreviewKey = libraryPreviewItem?.key,
                                             onFavoriteClick = { video ->
-                                                dashboardPreviewItem = null
+                                                libraryPreviewItem = null
                                                 navController.navigate(
                                                     Screen.VideoPlayer.createRoute(
                                                         video.filePath,
@@ -2820,7 +2839,7 @@ fun MainDashboardScreen(
                                                 }
                                             },
                                             onRecentClick = { video ->
-                                                dashboardPreviewItem = null
+                                                libraryPreviewItem = null
                                                 navController.navigate(
                                                     Screen.VideoPlayer.createRoute(
                                                         video.filePath,
@@ -2845,7 +2864,7 @@ fun MainDashboardScreen(
                                                 }
                                             },
                                             onPreviewFocused = { preview ->
-                                                dashboardPreviewItem = preview
+                                                libraryPreviewItem = preview
                                             },
                                             modifier = Modifier
                                                 .width(previewWidth)
