@@ -2071,6 +2071,10 @@ fun MainDashboardScreen(
         hasControllerLikeInputDevice &&
                 uiState.isHandTrackingEnabled &&
                 !uiState.isControllerHandTrackingPromptHandled
+    fun clearAllPreviewItems() {
+        browserPreviewItem = null
+        libraryPreviewItem = null
+    }
 
     val localStoragePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocumentTree(),
@@ -2146,11 +2150,6 @@ fun MainDashboardScreen(
         mutableStateOf(initialDashboardPanelSize.heightDp.dp)
     }
     val initialDashboardPose = remember { AppState.dashboardPanelPose.value?.let { Pose(it) } }
-
-    fun clearAllPreviewItems() {
-        browserPreviewItem = null
-        libraryPreviewItem = null
-    }
 
     fun requestLocalStorageConnection(forcePicker: Boolean = false) {
         val configuredTreeUri =
