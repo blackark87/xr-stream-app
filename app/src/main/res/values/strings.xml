@@ -53,6 +53,7 @@
     <string name="connect_to_view_library">Connect to view library</string>
     <string name="connecting_to_server">Connecting to server...</string>
     <string name="connecting_to_source">Connecting to source...</string>
+    <string name="connection_failed_prefix">Connection failed:</string>
     <string name="connection_failed_message">Connection failed: %1$s</string>
     <string name="controller_detected_hand_tracking_message">A controller was detected. Disable hand tracking to reduce accidental playback gestures? You can change this later in Settings.</string>
     <string name="controller_detected_hand_tracking_title">Controller detected</string>
