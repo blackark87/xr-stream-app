@@ -361,16 +361,17 @@ class VideoThumbnailFetcher(
             return null
         }
 
-        val localPosterFile = metadata.posterUrl?.let(::resolveLocalPosterFile)
-        if (localPosterFile == null) {
+        val posterUrl = metadata.posterUrl
+        val posterInput = posterUrl?.let(::openPosterInputStream)
+        if (posterInput == null) {
             logMetadataTrace(
-                "Metadata resolved for code=$code but poster is not a valid local file: ${metadata.posterUrl ?: "<none>"}"
+                "Metadata resolved for code=$code but poster is not readable: ${posterUrl ?: "<none>"}"
             )
             return null
         }
 
         try {
-            localPosterFile.inputStream().use { input ->
+            posterInput.use { input ->
                 targetThumbnailFile.outputStream().use { output ->
                     input.copyTo(output)
                 }
@@ -378,7 +379,7 @@ class VideoThumbnailFetcher(
         } catch (e: Exception) {
             Log.w(
                 tag,
-                "Failed to copy poster thumbnail for code=$code from ${localPosterFile.absolutePath}: ${e.message}"
+                "Failed to copy poster thumbnail for code=$code from $posterUrl: ${e.message}"
             )
             return null
         }
@@ -523,20 +524,31 @@ class VideoThumbnailFetcher(
         return avLibraryRepository.getLinkedPathsForAsset(asset.assetKey)
     }
 
-    private fun resolveLocalPosterFile(posterUrl: String): java.io.File? {
+    private fun openPosterInputStream(posterUrl: String): java.io.InputStream? {
         val normalized = posterUrl.trim()
         if (normalized.isBlank()) return null
 
-        val localFile = when {
-            normalized.startsWith("file:", ignoreCase = true) -> {
-                runCatching { java.io.File(URI(normalized)) }.getOrNull()
+        return runCatching {
+            when {
+                normalized.startsWith("smb://", ignoreCase = true) -> {
+                    blackark.app.vr.AppState.smbClient?.getSmbFile(normalized)?.inputStream
+                }
+
+                normalized.startsWith("content:", ignoreCase = true) -> {
+                    options.context.contentResolver.openInputStream(Uri.parse(normalized))
+                }
+
+                normalized.startsWith("file:", ignoreCase = true) -> {
+                    java.io.File(URI(normalized)).takeIf { it.exists() && it.length() > 0L }?.inputStream()
+                }
+
+                normalized.startsWith("/") -> {
+                    java.io.File(normalized).takeIf { it.exists() && it.length() > 0L }?.inputStream()
+                }
+
+                else -> null
             }
-
-            normalized.startsWith("/") -> java.io.File(normalized)
-            else -> null
-        } ?: return null
-
-        return localFile.takeIf { it.exists() && it.length() > 0L }
+        }.getOrNull()
     }
 
     private fun extractFolderPath(path: String): String {

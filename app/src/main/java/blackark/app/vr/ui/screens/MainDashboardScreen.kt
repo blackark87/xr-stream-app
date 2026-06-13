@@ -2420,6 +2420,7 @@ fun MainDashboardScreen(
                                     onMergeCast = viewModel::mergeAvPerformers,
                                     onAddCastAlias = viewModel::addAvPerformerAliases,
                                     onSaveWorkMetadata = viewModel::saveAvWorkMetadata,
+                                    onRefreshMetadata = viewModel::rescanAvMetadata,
                                     onPlayPart = { filePath, fileName ->
                                         navController.navigate(
                                             Screen.VideoPlayer.createRoute(filePath, fileName)
@@ -2678,6 +2679,7 @@ fun MainDashboardScreen(
                                     onMergeCast = viewModel::mergeAvPerformers,
                                     onAddCastAlias = viewModel::addAvPerformerAliases,
                                     onSaveWorkMetadata = viewModel::saveAvWorkMetadata,
+                                    onRefreshMetadata = viewModel::rescanAvMetadata,
                                     onPlayPart = { filePath, fileName ->
                                         navController.navigate(
                                             Screen.VideoPlayer.createRoute(filePath, fileName)
@@ -3407,6 +3409,7 @@ private fun AvWorkspacePanel(
     onMergeCast: (String, String) -> Unit,
     onAddCastAlias: (String, String?, String?) -> Unit,
     onSaveWorkMetadata: (String, JvrMovieMetadata) -> Unit,
+    onRefreshMetadata: () -> Unit,
     onPlayPart: (String, String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -3479,6 +3482,7 @@ private fun AvWorkspacePanel(
                 onMergeCast = onMergeCast,
                 onAddCastAlias = onAddCastAlias,
                 onSaveWorkMetadata = onSaveWorkMetadata,
+                onRefreshMetadata = onRefreshMetadata,
                 onPlayPart = onPlayPart,
                 showHeader = false,
                 showContainer = false,

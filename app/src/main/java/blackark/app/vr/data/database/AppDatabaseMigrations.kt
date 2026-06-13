@@ -13,7 +13,15 @@ object AppDatabaseMigrations {
             }
         }
 
+    val MIGRATION_14_15 =
+        object : Migration(14, 15) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE virtual_group_metadata ADD COLUMN description TEXT")
+            }
+        }
+
     val ALL: Array<Migration> = arrayOf(
         MIGRATION_13_14,
+        MIGRATION_14_15,
     )
 }

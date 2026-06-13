@@ -21,6 +21,8 @@ import blackark.app.vr.network.SMBFileItem
 import blackark.app.vr.utils.AppSettingsStore
 import blackark.app.vr.utils.JvrLibraryMetadataProvider
 import blackark.app.vr.utils.JvrMovieMetadata
+import blackark.app.vr.utils.LocalNfoMetadataResolver
+import blackark.app.vr.utils.mergeLocalFirst
 import blackark.app.vr.utils.buildAssetKey
 import blackark.app.vr.utils.buildSourceScope
 import blackark.app.vr.utils.extractFileName
@@ -835,6 +837,28 @@ class MainDashboardViewModel(
         val sourceScope = currentSourceScope() ?: return
         viewModelScope.launch {
             refreshAvSnapshot(sourceScope)
+            bumpFileMetadataRefreshToken()
+        }
+    }
+
+    fun rescanAvMetadata() {
+        val server = _uiState.value.selectedServer ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            val sourceScope = buildSourceScope(server.serverAddress, server.shareName)
+            val scanStartedAt = System.currentTimeMillis()
+            _files.value
+                .filter { !it.isDirectory && SMBClient.isVideoFile(it.name) }
+                .forEach { file ->
+                    processScannedVideo(
+                        sourceScope = sourceScope,
+                        file = file,
+                        scanStartedAt = scanStartedAt,
+                        allowFingerprint = false,
+                        forceMetadataRefresh = true,
+                    )
+                }
+            refreshAvSnapshot(sourceScope)
+            bumpFileMetadataRefreshToken()
         }
     }
 
@@ -1269,10 +1293,67 @@ class MainDashboardViewModel(
         var cachedReleaseDateEpochDay = asset?.cachedReleaseDateEpochDay
         var hasMetadata = asset?.hasMetadata ?: false
         var metadataResolvedAt = asset?.metadataResolvedAt
-        val resolvedSource =
-            JvrLibraryMetadataProvider.resolveMetadataSource(extractFolderPath(file.path))
+        val folderPath = extractFolderPath(file.path)
+        val resolvedSource = JvrLibraryMetadataProvider.resolveMetadataSource(folderPath)
+        val localSidecar = LocalNfoMetadataResolver(
+            smbClient = smbClient,
+            localClient = localClient,
+            localRootTreeUri = _uiState.value.selectedServer?.shareName?.takeIf {
+                _uiState.value.selectedServer?.isLocalStorage == true
+            },
+        ).resolve(video = file, fallbackCode = normalizedCode)
+        val localMetadata = localSidecar.metadata
+        val localPosterUrl = localSidecar.posterUrl
+
+        if (localMetadata != null) {
+            val remoteMetadata = resolvedSource?.let { source ->
+                val remoteCacheKey = JvrLibraryMetadataProvider.buildMetadataCacheKey(
+                    rawCode = normalizedCode,
+                    source = source,
+                )
+                if (forceMetadataRefresh) {
+                    JvrLibraryMetadataProvider.refreshByCacheKey(
+                        context = context.applicationContext,
+                        cacheKey = remoteCacheKey,
+                        fallbackFolderPath = folderPath,
+                    )
+                } else {
+                    JvrLibraryMetadataProvider.getByCacheKey(
+                        context = context.applicationContext,
+                        cacheKey = remoteCacheKey,
+                    ) ?: JvrLibraryMetadataProvider.getByCode(
+                        context = context.applicationContext,
+                        rawCode = normalizedCode,
+                        folderPath = folderPath,
+                    )
+                }
+            }
+            val mergedMetadata = localMetadata.mergeLocalFirst(remoteMetadata)
+            metadataSource = LocalNfoMetadataResolver.SOURCE
+            val localMetadataCacheKey = JvrLibraryMetadataProvider.buildMetadataCacheKey(
+                rawCode = normalizedCode,
+                source = LocalNfoMetadataResolver.SOURCE,
+            )
+            metadataCacheKey = localMetadataCacheKey
+            JvrLibraryMetadataProvider.saveManualMetadata(
+                context = context.applicationContext,
+                cacheKey = localMetadataCacheKey,
+                source = LocalNfoMetadataResolver.SOURCE,
+                metadata = mergedMetadata,
+            )
+            representativePath = file.path
+            representativeFileName = file.name
+            representativeFolderPath = folderPath
+            cachedTitle = mergedMetadata.title
+            cachedPosterUrl = mergedMetadata.posterUrl
+            cachedStudio = mergedMetadata.studio
+            cachedReleaseDateEpochDay = mergedMetadata.releaseDate?.toEpochDay()
+            hasMetadata = true
+            metadataResolvedAt = scanStartedAt
+        }
 
         if (
+            localMetadata == null &&
             forceMetadataRefresh &&
             resolvedSource != null &&
             (!hasMetadata || metadataSource != resolvedSource)
@@ -1283,7 +1364,7 @@ class MainDashboardViewModel(
                     rawCode = normalizedCode,
                     source = resolvedSource,
                 ),
-                fallbackFolderPath = extractFolderPath(file.path),
+                fallbackFolderPath = folderPath,
             )
 
             metadataSource = resolvedSource
@@ -1295,9 +1376,9 @@ class MainDashboardViewModel(
             if (refreshedMetadata != null) {
                 representativePath = file.path
                 representativeFileName = file.name
-                representativeFolderPath = extractFolderPath(file.path)
+                representativeFolderPath = folderPath
                 cachedTitle = refreshedMetadata.title
-                cachedPosterUrl = refreshedMetadata.posterUrl
+                cachedPosterUrl = localPosterUrl ?: refreshedMetadata.posterUrl
                 cachedStudio = refreshedMetadata.studio
                 cachedReleaseDateEpochDay = refreshedMetadata.releaseDate?.toEpochDay()
                 hasMetadata = true
@@ -1312,7 +1393,7 @@ class MainDashboardViewModel(
             val promotedMetadata = JvrLibraryMetadataProvider.getByCode(
                 context = context.applicationContext,
                 rawCode = normalizedCode,
-                folderPath = extractFolderPath(file.path),
+                folderPath = folderPath,
             )
             if (promotedMetadata != null) {
                 metadataSource = promotedSource
@@ -1322,9 +1403,9 @@ class MainDashboardViewModel(
                 )
                 representativePath = file.path
                 representativeFileName = file.name
-                representativeFolderPath = extractFolderPath(file.path)
+                representativeFolderPath = folderPath
                 cachedTitle = promotedMetadata.title
-                cachedPosterUrl = promotedMetadata.posterUrl
+                cachedPosterUrl = localPosterUrl ?: promotedMetadata.posterUrl
                 cachedStudio = promotedMetadata.studio
                 cachedReleaseDateEpochDay = promotedMetadata.releaseDate?.toEpochDay()
                 hasMetadata = true
@@ -1342,11 +1423,11 @@ class MainDashboardViewModel(
                 val metadata = JvrLibraryMetadataProvider.getByCode(
                     context = context.applicationContext,
                     rawCode = normalizedCode,
-                    folderPath = extractFolderPath(file.path),
+                    folderPath = folderPath,
                 )
                 if (metadata != null) {
                     cachedTitle = metadata.title
-                    cachedPosterUrl = metadata.posterUrl
+                    cachedPosterUrl = localPosterUrl ?: metadata.posterUrl
                     cachedStudio = metadata.studio
                     cachedReleaseDateEpochDay = metadata.releaseDate?.toEpochDay()
                     hasMetadata = true
@@ -1360,11 +1441,39 @@ class MainDashboardViewModel(
             )
             if (metadata != null) {
                 cachedTitle = metadata.title
-                cachedPosterUrl = metadata.posterUrl
+                cachedPosterUrl = localPosterUrl ?: metadata.posterUrl
                 cachedStudio = metadata.studio
                 cachedReleaseDateEpochDay = metadata.releaseDate?.toEpochDay()
                 hasMetadata = true
                 metadataResolvedAt = metadataResolvedAt ?: scanStartedAt
+            }
+        }
+
+        if (
+            localMetadata == null &&
+            localPosterUrl != null &&
+            hasMetadata &&
+            metadataSource != LocalNfoMetadataResolver.SOURCE &&
+            !metadataCacheKey.isNullOrBlank()
+        ) {
+            val existingMetadataCacheKey = metadataCacheKey.orEmpty()
+            JvrLibraryMetadataProvider.getByCacheKey(
+                context = context.applicationContext,
+                cacheKey = existingMetadataCacheKey,
+            )?.copy(posterUrl = localPosterUrl)?.let { posterPreferredMetadata ->
+                metadataSource = LocalNfoMetadataResolver.SOURCE
+                val posterMetadataCacheKey = JvrLibraryMetadataProvider.buildMetadataCacheKey(
+                    rawCode = normalizedCode,
+                    source = LocalNfoMetadataResolver.SOURCE,
+                )
+                metadataCacheKey = posterMetadataCacheKey
+                JvrLibraryMetadataProvider.saveManualMetadata(
+                    context = context.applicationContext,
+                    cacheKey = posterMetadataCacheKey,
+                    source = LocalNfoMetadataResolver.SOURCE,
+                    metadata = posterPreferredMetadata,
+                )
+                cachedPosterUrl = localPosterUrl
             }
         }
 
@@ -1451,6 +1560,7 @@ class MainDashboardViewModel(
 
     private fun metadataSourcePriority(source: String?): Int {
         return when (source?.lowercase()) {
+            LocalNfoMetadataResolver.SOURCE -> 3
             "avwiki" -> 2
             "jvr" -> 1
             else -> 0

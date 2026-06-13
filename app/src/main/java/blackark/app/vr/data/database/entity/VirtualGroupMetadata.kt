@@ -23,4 +23,5 @@ data class VirtualGroupMetadata(
     val studio: String?,
     val isMiss: Boolean,
     val updatedAt: Long,
+    val description: String? = null,
 )

@@ -38,6 +38,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.MovieCreation
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -119,6 +120,7 @@ fun AvLibraryPanel(
     onMergeCast: (String, String) -> Unit,
     onAddCastAlias: (String, String?, String?) -> Unit,
     onSaveWorkMetadata: (String, JvrMovieMetadata) -> Unit,
+    onRefreshMetadata: () -> Unit,
     onPlayPart: (String, String) -> Unit,
     showHeader: Boolean = true,
     showContainer: Boolean = true,
@@ -181,12 +183,27 @@ fun AvLibraryPanel(
                         }
                     }
 
-                    if (avLibrary.scan.isRunning) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(22.dp),
-                            color = NetflixRed,
-                            strokeWidth = 2.dp,
-                        )
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        IconButton(
+                            onClick = onRefreshMetadata,
+                            enabled = isConnected && !avLibrary.scan.isRunning,
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Refresh,
+                                contentDescription = "Rescan local metadata",
+                                tint = TextSecondary,
+                            )
+                        }
+                        if (avLibrary.scan.isRunning) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(22.dp),
+                                color = NetflixRed,
+                                strokeWidth = 2.dp,
+                            )
+                        }
                     }
                 }
 
@@ -1604,6 +1621,7 @@ private fun EditAvMetadataDialog(
                                     studio = studio.trim().takeIf { it.isNotBlank() },
                                     genres = work.metadata?.genres.orEmpty(),
                                     casts = editableCasts,
+                                    description = work.metadata?.description,
                                 )
                             )
                         },

@@ -43,6 +43,7 @@ data class JvrMovieMetadata(
     val studio: String? = null,
     val genres: List<String> = emptyList(),
     val casts: List<JvrCastMetadata> = emptyList(),
+    val description: String? = null,
 )
 
 object JvrLibraryMetadataProvider {
@@ -490,6 +491,7 @@ object JvrLibraryMetadataProvider {
                 posterUrl = metadata.posterUrl,
                 releaseDateEpochDay = metadata.releaseDate?.toEpochDay(),
                 studio = metadata.studio?.trim()?.takeIf { it.isNotBlank() },
+                description = metadata.description?.trim()?.takeIf { it.isNotBlank() },
                 isMiss = isMiss,
                 updatedAt = updatedAt,
             ),
@@ -526,6 +528,7 @@ object JvrLibraryMetadataProvider {
             posterUrl = record.metadata.posterUrl,
             releaseDate = record.metadata.releaseDateEpochDay?.let(LocalDate::ofEpochDay),
             studio = record.metadata.studio?.trim()?.takeIf { it.isNotBlank() },
+            description = record.metadata.description?.trim()?.takeIf { it.isNotBlank() },
             genres = record.genres
                 .sortedBy { it.position }
                 .map { it.genre }
