@@ -38,7 +38,7 @@ import blackark.app.vr.data.database.entity.VirtualGroupMetadataPerformerCrossRe
         JvrPerformerMergeRule::class,
         VirtualGroupMetadataPerformerCrossRef::class,
     ],
-    version = 14,
+    version = 15,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
