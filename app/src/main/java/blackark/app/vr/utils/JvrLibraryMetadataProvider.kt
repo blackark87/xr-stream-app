@@ -46,6 +46,13 @@ data class JvrMovieMetadata(
     val description: String? = null,
 )
 
+data class PersistedMetadataLookup(
+    val cacheKey: String,
+    val source: String,
+    val metadata: JvrMovieMetadata?,
+    val isMiss: Boolean,
+)
+
 object JvrLibraryMetadataProvider {
 
     private const val TAG = "JvrLibraryMetadata"
@@ -317,6 +324,91 @@ object JvrLibraryMetadataProvider {
         metadataCache[normalizedCacheKey] = persistedMetadata
         missCache.remove(normalizedCacheKey)
         return persistedMetadata
+    }
+
+    suspend fun getPersistedLookupByCacheKey(
+        context: Context,
+        cacheKey: String,
+    ): PersistedMetadataLookup? {
+        val normalizedCacheKey = cacheKey.trim()
+        if (normalizedCacheKey.isBlank()) return null
+
+        val separatorIndex = normalizedCacheKey.indexOf(':')
+        if (separatorIndex <= 0 || separatorIndex == normalizedCacheKey.lastIndex) {
+            return null
+        }
+
+        val source = normalizedCacheKey.substring(0, separatorIndex)
+        val code = normalizedCacheKey.substring(separatorIndex + 1).uppercase()
+
+        metadataCache[normalizedCacheKey]?.let { cached ->
+            val normalized = normalizeCachedMetadata(cached)
+            metadataCache[normalizedCacheKey] = normalized
+            return PersistedMetadataLookup(
+                cacheKey = normalizedCacheKey,
+                source = source,
+                metadata = normalized,
+                isMiss = false,
+            )
+        }
+
+        if (normalizedCacheKey in missCache) {
+            return PersistedMetadataLookup(
+                cacheKey = normalizedCacheKey,
+                source = source,
+                metadata = null,
+                isMiss = true,
+            )
+        }
+
+        loadPersistedMetadata(context.applicationContext, normalizedCacheKey)?.let { persisted ->
+            if (persisted.metadata.isMiss) {
+                missCache += normalizedCacheKey
+                return PersistedMetadataLookup(
+                    cacheKey = normalizedCacheKey,
+                    source = persisted.metadata.source,
+                    metadata = null,
+                    isMiss = true,
+                )
+            }
+
+            val persistedMetadata = normalizeCachedMetadata(
+                toMovieMetadata(record = persisted, fallbackCode = code)
+            )
+            metadataCache[normalizedCacheKey] = persistedMetadata
+            missCache.remove(normalizedCacheKey)
+            return PersistedMetadataLookup(
+                cacheKey = normalizedCacheKey,
+                source = persisted.metadata.source,
+                metadata = persistedMetadata,
+                isMiss = false,
+            )
+        }
+
+        return null
+    }
+
+    suspend fun getLatestPersistedHitByCode(
+        context: Context,
+        rawCode: String,
+    ): PersistedMetadataLookup? {
+        val normalizedCode = rawCode.trim().uppercase()
+        if (normalizedCode.isBlank()) return null
+
+        val persisted = loadPersistedMetadataByCode(context.applicationContext, normalizedCode)
+            ?: return null
+        val persistedMetadata = normalizeCachedMetadata(
+            toMovieMetadata(record = persisted, fallbackCode = normalizedCode)
+        )
+        val cacheKey = persisted.metadata.cacheKey
+        metadataCache[cacheKey] = persistedMetadata
+        missCache.remove(cacheKey)
+        return PersistedMetadataLookup(
+            cacheKey = cacheKey,
+            source = persisted.metadata.source,
+            metadata = persistedMetadata,
+            isMiss = false,
+        )
     }
 
     suspend fun refreshByCacheKey(

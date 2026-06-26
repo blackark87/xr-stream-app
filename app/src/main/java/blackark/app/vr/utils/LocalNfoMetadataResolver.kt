@@ -15,18 +15,55 @@ import java.util.Locale
 
 private const val LOCAL_NFO_SOURCE = "local_nfo"
 private const val TAG = "LocalNfoMetadata"
+private val localNfoImageExtensions = listOf("jpg", "jpeg", "png", "webp")
 
-/** Metadata discovered from files stored next to a video. */
 data class LocalNfoMetadataResult(
     val metadata: JvrMovieMetadata?,
     val posterUrl: String?,
     val nfoPath: String?,
 )
 
-/**
- * Resolves sidecar .nfo metadata and poster images from the same directory as a video.
- * All SMB/SAF reads are performed on Dispatchers.IO by this resolver.
- */
+internal fun buildNfoCandidateNames(videoName: String): List<String> {
+    val stem = videoName.substringBeforeLast('.', videoName)
+    val multipartBaseStem = extractVirtualGroupKey(videoName)
+    return buildList {
+        add("$stem.nfo")
+        if (!multipartBaseStem.isNullOrBlank() && !multipartBaseStem.equals(stem, ignoreCase = true)) {
+            add("$multipartBaseStem.nfo")
+        }
+        add("movie.nfo")
+        add("info.nfo")
+    }.distinctBy { it.lowercase(Locale.US) }
+}
+
+internal fun buildPosterCandidateNames(videoName: String): List<String> {
+    val stem = videoName.substringBeforeLast('.', videoName)
+    val multipartBaseStem = extractVirtualGroupKey(videoName)
+    return buildList {
+        for (extension in localNfoImageExtensions) {
+            add("$stem.$extension")
+        }
+        if (!multipartBaseStem.isNullOrBlank() && !multipartBaseStem.equals(stem, ignoreCase = true)) {
+            for (extension in localNfoImageExtensions) {
+                add("$multipartBaseStem.$extension")
+            }
+        }
+        addAll(
+            listOf(
+                "poster.jpg",
+                "poster.png",
+                "poster.webp",
+                "fanart.jpg",
+                "fanart.png",
+                "fanart.webp",
+                "cover.jpg",
+                "cover.png",
+                "cover.webp",
+            )
+        )
+    }.distinctBy { it.lowercase(Locale.US) }
+}
+
 class LocalNfoMetadataResolver(
     private val smbClient: SMBClient?,
     private val localClient: LocalFileClient?,
@@ -120,19 +157,18 @@ class LocalNfoMetadataResolver(
     }
 
     private fun findNfoCandidate(videoName: String, siblings: List<SMBFileItem>): SMBFileItem? {
-        val stem = videoName.substringBeforeLast('.', videoName)
-        val candidates = listOf("$stem.nfo", "movie.nfo", "info.nfo")
-        return findFirstNamedCandidate(candidates, siblings) { it.endsWith(".nfo", ignoreCase = true) }
+        return findFirstNamedCandidate(
+            candidates = buildNfoCandidateNames(videoName),
+            siblings = siblings,
+        ) { it.endsWith(".nfo", ignoreCase = true) }
     }
 
     private fun findPosterCandidate(videoName: String, siblings: List<SMBFileItem>): SMBFileItem? {
-        val stem = videoName.substringBeforeLast('.', videoName)
-        val candidates = buildList {
-            for (extension in imageExtensions) add("$stem.$extension")
-            addAll(listOf("poster.jpg", "poster.png", "poster.webp", "fanart.jpg", "fanart.png", "fanart.webp", "cover.jpg", "cover.png", "cover.webp"))
-        }
-        return findFirstNamedCandidate(candidates, siblings) { name ->
-            imageExtensions.any { name.endsWith(".$it", ignoreCase = true) }
+        return findFirstNamedCandidate(
+            candidates = buildPosterCandidateNames(videoName),
+            siblings = siblings,
+        ) { name ->
+            localNfoImageExtensions.any { name.endsWith(".$it", ignoreCase = true) }
         }
     }
 
@@ -251,7 +287,6 @@ class LocalNfoMetadataResolver(
             try {
                 return LocalDate.parse(trimmed.take(10), formatter)
             } catch (_: DateTimeParseException) {
-                // Try next supported sidecar date format.
             }
         }
         return Regex("(?:19|20)\\d{2}").find(trimmed)?.value?.toIntOrNull()?.let { year ->
@@ -261,7 +296,6 @@ class LocalNfoMetadataResolver(
 
     companion object {
         const val SOURCE = LOCAL_NFO_SOURCE
-        private val imageExtensions = listOf("jpg", "jpeg", "png", "webp")
     }
 }
 

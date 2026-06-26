@@ -22,6 +22,7 @@ import blackark.app.vr.utils.AppSettingsStore
 import blackark.app.vr.utils.JvrLibraryMetadataProvider
 import blackark.app.vr.utils.JvrMovieMetadata
 import blackark.app.vr.utils.LocalNfoMetadataResolver
+import blackark.app.vr.utils.PersistedMetadataLookup
 import blackark.app.vr.utils.mergeLocalFirst
 import blackark.app.vr.utils.buildAssetKey
 import blackark.app.vr.utils.buildSourceScope
@@ -157,6 +158,17 @@ class MainDashboardViewModel(
     private var avCastRepairSourceScope: String? = null
     private val avCastRepairAttemptedCacheKeys = mutableSetOf<String>()
     private val systemZoneId: ZoneId = ZoneId.systemDefault()
+
+    private data class IndexedMetadataResolution(
+        val lookup: PersistedMetadataLookup?,
+        val hasPersistedMiss: Boolean,
+    )
+
+    private data class MetadataChainResolution(
+        val metadata: JvrMovieMetadata?,
+        val metadataSource: String?,
+        val metadataCacheKey: String?,
+    )
 
     private fun filterAndSortBrowsableFiles(fileList: List<SMBFileItem>): List<SMBFileItem> {
         val browsableFiles = fileList.filter { it.isDirectory || SMBClient.isVideoFile(it.name) }
@@ -939,6 +951,50 @@ class MainDashboardViewModel(
         }
     }
 
+    suspend fun resolveBrowserFileMetadata(file: SMBFileItem): JvrMovieMetadata? {
+        if (file.isDirectory || !SMBClient.isVideoFile(file.name)) return null
+
+        val normalizedCode = extractNormalizedCodeFromFileName(file.name) ?: return null
+        val sourceScope = currentSourceScope()
+        val asset = sourceScope?.let { scope ->
+            avLibraryRepository.findAssetForPathOrCode(
+                filePath = file.path,
+                sourceScope = scope,
+                normalizedCode = normalizedCode,
+            )
+        }
+
+        return resolveMetadataChain(
+            file = file,
+            normalizedCode = normalizedCode,
+            resolvedAsset = asset,
+            forceMetadataRefresh = false,
+            persistLocalComposite = false,
+        ).metadata
+    }
+
+    suspend fun resolveBrowserGroupMetadata(
+        groupKey: String,
+        representativeFile: SMBFileItem?,
+    ): JvrMovieMetadata? {
+        val file = representativeFile ?: return null
+        val normalizedCode = extractNormalizedCodeFromFileName(groupKey)
+            ?: extractNormalizedCodeFromFileName(file.name)
+            ?: groupKey.trim().uppercase().takeIf { it.isNotBlank() }
+            ?: return null
+        val asset = currentSourceScope()?.let { scope ->
+            avLibraryRepository.getAssetBySourceAndCode(scope, normalizedCode)
+        }
+
+        return resolveMetadataChain(
+            file = file,
+            normalizedCode = normalizedCode,
+            resolvedAsset = asset,
+            forceMetadataRefresh = false,
+            persistLocalComposite = false,
+        ).metadata
+    }
+
     fun setAvBackgroundIndexingEnabled(enabled: Boolean) {
         AppSettingsStore.setBackgroundIndexingEnabled(context.applicationContext, enabled)
         _uiState.value = _uiState.value.copy(isAvBackgroundIndexingEnabled = enabled)
@@ -1239,6 +1295,191 @@ class MainDashboardViewModel(
         }
     }
 
+    private fun createLocalNfoMetadataResolver(): LocalNfoMetadataResolver {
+        val selectedServer = _uiState.value.selectedServer
+        return LocalNfoMetadataResolver(
+            smbClient = smbClient,
+            localClient = localClient,
+            localRootTreeUri = selectedServer?.shareName?.takeIf {
+                selectedServer.isLocalStorage
+            },
+        )
+    }
+
+    private suspend fun resolveIndexedMetadata(
+        normalizedCode: String,
+        resolvedAsset: AvLibraryAsset?,
+        resolvedSource: String?,
+    ): IndexedMetadataResolution {
+        val candidateCacheKeys = linkedSetOf<String>()
+        resolvedAsset?.metadataCacheKey
+            ?.takeIf { it.isNotBlank() }
+            ?.let(candidateCacheKeys::add)
+        resolvedSource?.let { source ->
+            candidateCacheKeys += JvrLibraryMetadataProvider.buildMetadataCacheKey(
+                rawCode = normalizedCode,
+                source = source,
+            )
+        }
+
+        var hasPersistedMiss = false
+        for (cacheKey in candidateCacheKeys) {
+            val lookup = JvrLibraryMetadataProvider.getPersistedLookupByCacheKey(
+                context = context.applicationContext,
+                cacheKey = cacheKey,
+            ) ?: continue
+            if (lookup.isMiss) {
+                hasPersistedMiss = true
+                continue
+            }
+            return IndexedMetadataResolution(
+                lookup = lookup,
+                hasPersistedMiss = hasPersistedMiss,
+            )
+        }
+
+        val codeLookup = JvrLibraryMetadataProvider.getLatestPersistedHitByCode(
+            context = context.applicationContext,
+            rawCode = normalizedCode,
+        )
+        return IndexedMetadataResolution(
+            lookup = codeLookup,
+            hasPersistedMiss = hasPersistedMiss,
+        )
+    }
+
+    private suspend fun resolveRemoteMetadata(
+        normalizedCode: String,
+        folderPath: String,
+        resolvedSource: String,
+        forceMetadataRefresh: Boolean,
+    ): JvrMovieMetadata? {
+        val remoteCacheKey = JvrLibraryMetadataProvider.buildMetadataCacheKey(
+            rawCode = normalizedCode,
+            source = resolvedSource,
+        )
+        return if (forceMetadataRefresh) {
+            JvrLibraryMetadataProvider.refreshByCacheKey(
+                context = context.applicationContext,
+                cacheKey = remoteCacheKey,
+                fallbackFolderPath = folderPath,
+            )
+        } else {
+            JvrLibraryMetadataProvider.getByCode(
+                context = context.applicationContext,
+                rawCode = normalizedCode,
+                folderPath = folderPath,
+            )
+        }
+    }
+
+    private suspend fun resolveMetadataChain(
+        file: SMBFileItem,
+        normalizedCode: String,
+        resolvedAsset: AvLibraryAsset?,
+        forceMetadataRefresh: Boolean,
+        persistLocalComposite: Boolean,
+    ): MetadataChainResolution {
+        val folderPath = extractFolderPath(file.path)
+        val resolvedSource = JvrLibraryMetadataProvider.resolveMetadataSource(folderPath)
+        val localSidecar = createLocalNfoMetadataResolver().resolve(
+            video = file,
+            fallbackCode = normalizedCode,
+        )
+        val localMetadata = localSidecar.metadata
+        val localPosterUrl = localSidecar.posterUrl?.takeIf { it.isNotBlank() }
+        val indexedResolution = resolveIndexedMetadata(
+            normalizedCode = normalizedCode,
+            resolvedAsset = resolvedAsset,
+            resolvedSource = resolvedSource,
+        )
+
+        val shouldAttemptRemoteLookup =
+            localMetadata == null &&
+                    indexedResolution.lookup?.metadata == null &&
+                    resolvedSource != null &&
+                    (forceMetadataRefresh || !indexedResolution.hasPersistedMiss)
+
+        val remoteMetadata = if (shouldAttemptRemoteLookup) {
+            resolveRemoteMetadata(
+                normalizedCode = normalizedCode,
+                folderPath = folderPath,
+                resolvedSource = resolvedSource.orEmpty(),
+                forceMetadataRefresh = forceMetadataRefresh,
+            )
+        } else {
+            null
+        }
+
+        val downstreamMetadata = indexedResolution.lookup?.metadata ?: remoteMetadata
+        val finalMetadata = when {
+            localMetadata != null -> localMetadata.mergeLocalFirst(downstreamMetadata)
+            localPosterUrl != null && downstreamMetadata != null -> {
+                downstreamMetadata.copy(posterUrl = localPosterUrl)
+            }
+            else -> downstreamMetadata
+        }
+
+        val localCompositeMetadata =
+            localMetadata != null || (localPosterUrl != null && downstreamMetadata != null)
+        if (finalMetadata != null && localCompositeMetadata) {
+            val localCacheKey = JvrLibraryMetadataProvider.buildMetadataCacheKey(
+                rawCode = normalizedCode,
+                source = LocalNfoMetadataResolver.SOURCE,
+            )
+            if (persistLocalComposite) {
+                JvrLibraryMetadataProvider.saveManualMetadata(
+                    context = context.applicationContext,
+                    cacheKey = localCacheKey,
+                    source = LocalNfoMetadataResolver.SOURCE,
+                    metadata = finalMetadata,
+                )
+            }
+            return MetadataChainResolution(
+                metadata = finalMetadata,
+                metadataSource = LocalNfoMetadataResolver.SOURCE,
+                metadataCacheKey = localCacheKey,
+            )
+        }
+
+        if (finalMetadata != null) {
+            val resolvedLookup = indexedResolution.lookup
+            val metadataSource = resolvedLookup?.source ?: resolvedSource
+            val metadataCacheKey = resolvedLookup?.cacheKey ?: resolvedSource?.let { source ->
+                JvrLibraryMetadataProvider.buildMetadataCacheKey(
+                    rawCode = normalizedCode,
+                    source = source,
+                )
+            }
+            return MetadataChainResolution(
+                metadata = finalMetadata,
+                metadataSource = metadataSource,
+                metadataCacheKey = metadataCacheKey,
+            )
+        }
+
+        val unresolvedCacheKey = when {
+            indexedResolution.lookup != null -> indexedResolution.lookup.cacheKey
+            resolvedSource != null && (indexedResolution.hasPersistedMiss || shouldAttemptRemoteLookup) -> {
+                JvrLibraryMetadataProvider.buildMetadataCacheKey(
+                    rawCode = normalizedCode,
+                    source = resolvedSource,
+                )
+            }
+            else -> null
+        }
+        val unresolvedSource = when {
+            indexedResolution.lookup != null -> indexedResolution.lookup.source
+            unresolvedCacheKey != null -> resolvedSource
+            else -> null
+        }
+        return MetadataChainResolution(
+            metadata = null,
+            metadataSource = unresolvedSource,
+            metadataCacheKey = unresolvedCacheKey,
+        )
+    }
+
     private suspend fun processScannedVideo(
         sourceScope: String,
         file: SMBFileItem,
@@ -1294,187 +1535,29 @@ class MainDashboardViewModel(
         var hasMetadata = asset?.hasMetadata ?: false
         var metadataResolvedAt = asset?.metadataResolvedAt
         val folderPath = extractFolderPath(file.path)
-        val resolvedSource = JvrLibraryMetadataProvider.resolveMetadataSource(folderPath)
-        val localSidecar = LocalNfoMetadataResolver(
-            smbClient = smbClient,
-            localClient = localClient,
-            localRootTreeUri = _uiState.value.selectedServer?.shareName?.takeIf {
-                _uiState.value.selectedServer?.isLocalStorage == true
-            },
-        ).resolve(video = file, fallbackCode = normalizedCode)
-        val localMetadata = localSidecar.metadata
-        val localPosterUrl = localSidecar.posterUrl
+        val metadataResolution = resolveMetadataChain(
+            file = file,
+            normalizedCode = normalizedCode,
+            resolvedAsset = asset,
+            forceMetadataRefresh = forceMetadataRefresh,
+            persistLocalComposite = true,
+        )
 
-        if (localMetadata != null) {
-            val remoteMetadata = resolvedSource?.let { source ->
-                val remoteCacheKey = JvrLibraryMetadataProvider.buildMetadataCacheKey(
-                    rawCode = normalizedCode,
-                    source = source,
-                )
-                if (forceMetadataRefresh) {
-                    JvrLibraryMetadataProvider.refreshByCacheKey(
-                        context = context.applicationContext,
-                        cacheKey = remoteCacheKey,
-                        fallbackFolderPath = folderPath,
-                    )
-                } else {
-                    JvrLibraryMetadataProvider.getByCacheKey(
-                        context = context.applicationContext,
-                        cacheKey = remoteCacheKey,
-                    ) ?: JvrLibraryMetadataProvider.getByCode(
-                        context = context.applicationContext,
-                        rawCode = normalizedCode,
-                        folderPath = folderPath,
-                    )
-                }
-            }
-            val mergedMetadata = localMetadata.mergeLocalFirst(remoteMetadata)
-            metadataSource = LocalNfoMetadataResolver.SOURCE
-            val localMetadataCacheKey = JvrLibraryMetadataProvider.buildMetadataCacheKey(
-                rawCode = normalizedCode,
-                source = LocalNfoMetadataResolver.SOURCE,
-            )
-            metadataCacheKey = localMetadataCacheKey
-            JvrLibraryMetadataProvider.saveManualMetadata(
-                context = context.applicationContext,
-                cacheKey = localMetadataCacheKey,
-                source = LocalNfoMetadataResolver.SOURCE,
-                metadata = mergedMetadata,
-            )
+        metadataSource = metadataResolution.metadataSource
+        metadataCacheKey = metadataResolution.metadataCacheKey
+
+        if (metadataResolution.metadata != null) {
             representativePath = file.path
             representativeFileName = file.name
             representativeFolderPath = folderPath
-            cachedTitle = mergedMetadata.title
-            cachedPosterUrl = mergedMetadata.posterUrl
-            cachedStudio = mergedMetadata.studio
-            cachedReleaseDateEpochDay = mergedMetadata.releaseDate?.toEpochDay()
+            cachedTitle = metadataResolution.metadata.title
+            cachedPosterUrl = metadataResolution.metadata.posterUrl
+            cachedStudio = metadataResolution.metadata.studio
+            cachedReleaseDateEpochDay = metadataResolution.metadata.releaseDate?.toEpochDay()
             hasMetadata = true
             metadataResolvedAt = scanStartedAt
-        }
-
-        if (
-            localMetadata == null &&
-            forceMetadataRefresh &&
-            resolvedSource != null &&
-            (!hasMetadata || metadataSource != resolvedSource)
-        ) {
-            val refreshedMetadata = JvrLibraryMetadataProvider.refreshByCacheKey(
-                context = context.applicationContext,
-                cacheKey = JvrLibraryMetadataProvider.buildMetadataCacheKey(
-                    rawCode = normalizedCode,
-                    source = resolvedSource,
-                ),
-                fallbackFolderPath = folderPath,
-            )
-
-            metadataSource = resolvedSource
-            metadataCacheKey = JvrLibraryMetadataProvider.buildMetadataCacheKey(
-                rawCode = normalizedCode,
-                source = resolvedSource,
-            )
-
-            if (refreshedMetadata != null) {
-                representativePath = file.path
-                representativeFileName = file.name
-                representativeFolderPath = folderPath
-                cachedTitle = refreshedMetadata.title
-                cachedPosterUrl = localPosterUrl ?: refreshedMetadata.posterUrl
-                cachedStudio = refreshedMetadata.studio
-                cachedReleaseDateEpochDay = refreshedMetadata.releaseDate?.toEpochDay()
-                hasMetadata = true
-                metadataResolvedAt = scanStartedAt
-            } else {
-                hasMetadata = false
-            }
-        }
-
-        if (shouldPromoteMetadataSource(current = metadataSource, candidate = resolvedSource)) {
-            val promotedSource = resolvedSource.orEmpty()
-            val promotedMetadata = JvrLibraryMetadataProvider.getByCode(
-                context = context.applicationContext,
-                rawCode = normalizedCode,
-                folderPath = folderPath,
-            )
-            if (promotedMetadata != null) {
-                metadataSource = promotedSource
-                metadataCacheKey = JvrLibraryMetadataProvider.buildMetadataCacheKey(
-                    rawCode = normalizedCode,
-                    source = promotedSource,
-                )
-                representativePath = file.path
-                representativeFileName = file.name
-                representativeFolderPath = folderPath
-                cachedTitle = promotedMetadata.title
-                cachedPosterUrl = localPosterUrl ?: promotedMetadata.posterUrl
-                cachedStudio = promotedMetadata.studio
-                cachedReleaseDateEpochDay = promotedMetadata.releaseDate?.toEpochDay()
-                hasMetadata = true
-                metadataResolvedAt = scanStartedAt
-            }
-        }
-
-        if (metadataCacheKey.isNullOrBlank()) {
-            if (resolvedSource != null) {
-                metadataSource = resolvedSource
-                metadataCacheKey = JvrLibraryMetadataProvider.buildMetadataCacheKey(
-                    rawCode = normalizedCode,
-                    source = resolvedSource,
-                )
-                val metadata = JvrLibraryMetadataProvider.getByCode(
-                    context = context.applicationContext,
-                    rawCode = normalizedCode,
-                    folderPath = folderPath,
-                )
-                if (metadata != null) {
-                    cachedTitle = metadata.title
-                    cachedPosterUrl = localPosterUrl ?: metadata.posterUrl
-                    cachedStudio = metadata.studio
-                    cachedReleaseDateEpochDay = metadata.releaseDate?.toEpochDay()
-                    hasMetadata = true
-                    metadataResolvedAt = scanStartedAt
-                }
-            }
         } else {
-            val metadata = JvrLibraryMetadataProvider.getByCacheKey(
-                context = context.applicationContext,
-                cacheKey = metadataCacheKey,
-            )
-            if (metadata != null) {
-                cachedTitle = metadata.title
-                cachedPosterUrl = localPosterUrl ?: metadata.posterUrl
-                cachedStudio = metadata.studio
-                cachedReleaseDateEpochDay = metadata.releaseDate?.toEpochDay()
-                hasMetadata = true
-                metadataResolvedAt = metadataResolvedAt ?: scanStartedAt
-            }
-        }
-
-        if (
-            localMetadata == null &&
-            localPosterUrl != null &&
-            hasMetadata &&
-            metadataSource != LocalNfoMetadataResolver.SOURCE &&
-            !metadataCacheKey.isNullOrBlank()
-        ) {
-            val existingMetadataCacheKey = metadataCacheKey.orEmpty()
-            JvrLibraryMetadataProvider.getByCacheKey(
-                context = context.applicationContext,
-                cacheKey = existingMetadataCacheKey,
-            )?.copy(posterUrl = localPosterUrl)?.let { posterPreferredMetadata ->
-                metadataSource = LocalNfoMetadataResolver.SOURCE
-                val posterMetadataCacheKey = JvrLibraryMetadataProvider.buildMetadataCacheKey(
-                    rawCode = normalizedCode,
-                    source = LocalNfoMetadataResolver.SOURCE,
-                )
-                metadataCacheKey = posterMetadataCacheKey
-                JvrLibraryMetadataProvider.saveManualMetadata(
-                    context = context.applicationContext,
-                    cacheKey = posterMetadataCacheKey,
-                    source = LocalNfoMetadataResolver.SOURCE,
-                    metadata = posterPreferredMetadata,
-                )
-                cachedPosterUrl = localPosterUrl
-            }
+            hasMetadata = false
         }
 
         avLibraryRepository.upsertAsset(
@@ -1547,23 +1630,6 @@ class MainDashboardViewModel(
                     candidatePartNumber < currentPartNumber -> candidate.path
 
             else -> currentRepresentativePath
-        }
-    }
-
-    private fun shouldPromoteMetadataSource(
-        current: String?,
-        candidate: String?,
-    ): Boolean {
-        if (candidate.isNullOrBlank()) return false
-        return metadataSourcePriority(candidate) > metadataSourcePriority(current)
-    }
-
-    private fun metadataSourcePriority(source: String?): Int {
-        return when (source?.lowercase()) {
-            LocalNfoMetadataResolver.SOURCE -> 3
-            "avwiki" -> 2
-            "jvr" -> 1
-            else -> 0
         }
     }
 

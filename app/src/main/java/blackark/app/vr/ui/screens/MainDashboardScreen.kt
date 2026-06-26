@@ -190,9 +190,8 @@ import blackark.app.vr.utils.JvrMovieMetadata
 import blackark.app.vr.utils.ServerCredentialAutofillStore
 import blackark.app.vr.utils.ThumbnailImageLoaderProvider
 import blackark.app.vr.utils.VideoThumbnailFetcher
-import blackark.app.vr.utils.buildSourceScope
-import blackark.app.vr.utils.resolveLinkedMetadataForGroup
-import blackark.app.vr.utils.resolveLinkedMetadataForVideoPath
+import blackark.app.vr.utils.extractVirtualGroupKey
+import blackark.app.vr.utils.extractVirtualGroupPart
 import coil3.compose.AsyncImage
 import coil3.compose.rememberAsyncImagePainter
 import coil3.request.CachePolicy
@@ -2476,10 +2475,8 @@ fun MainDashboardScreen(
                                         currentPath = uiState.currentPath,
                                         sourceTitle = sourceTitle,
                                         breadcrumb = sourceBreadcrumb,
-                                        sourceScope = uiState.selectedServer?.let {
-                                            buildSourceScope(it.serverAddress, it.shareName)
-                                        },
                                         metadataRefreshToken = uiState.fileMetadataRefreshToken,
+                                        viewModel = viewModel,
                                         isConnected = true,
                                         isLoading = uiState.isLoadingFiles,
                                         errorMessage = uiState.errorMessage,
@@ -2735,10 +2732,8 @@ fun MainDashboardScreen(
                                         currentPath = uiState.currentPath,
                                         sourceTitle = sourceTitle,
                                         breadcrumb = sourceBreadcrumb,
-                                        sourceScope = uiState.selectedServer?.let {
-                                            buildSourceScope(it.serverAddress, it.shareName)
-                                        },
                                         metadataRefreshToken = uiState.fileMetadataRefreshToken,
+                                        viewModel = viewModel,
                                         isConnected = true,
                                         isLoading = uiState.isLoadingFiles,
                                         errorMessage = uiState.errorMessage,
@@ -3218,44 +3213,35 @@ private fun buildVideoMetadataLookupRequest(filePath: String): VideoMetadataLook
 
 @Composable
 private fun rememberVideoFileMetadata(
+    viewModel: MainDashboardViewModel,
     file: SMBFileItem,
     isVideoFile: Boolean,
     refreshToken: Long,
 ): JvrMovieMetadata? {
     if (!isVideoFile) return null
 
-    val context = LocalContext.current.applicationContext
     val lookupRequest = remember(file.path) {
         buildVideoMetadataLookupRequest(file.path)
     } ?: return null
 
-    val cachedMetadata =
-        remember(context, lookupRequest.code, lookupRequest.folderPath, refreshToken) {
-            JvrLibraryMetadataProvider.peekCached(
-                context,
-                lookupRequest.code,
-                lookupRequest.folderPath
-            )
-        }
-
     val metadataState = produceState<JvrMovieMetadata?>(
-        initialValue = cachedMetadata,
-        lookupRequest.code,
-        lookupRequest.folderPath,
+        initialValue = null,
+        file.path,
         refreshToken,
     ) {
-        if (cachedMetadata != null) {
+        value = viewModel.resolveBrowserFileMetadata(file)
+        val resolvedMetadata = value
+        if (resolvedMetadata == null) {
             logMetadataTrace(
                 FILE_THUMBNAIL_LOG_TAG,
-                "Metadata immediate cache hit for file=${file.path} code=${lookupRequest.code}"
+                "No metadata for file=${file.path} code=${lookupRequest.code}. Falling back to generated video thumbnail."
             )
-            return@produceState
+        } else {
+            logMetadataTrace(
+                FILE_THUMBNAIL_LOG_TAG,
+                "Metadata loaded for file=${file.path} code=${lookupRequest.code} posterUrl=${resolvedMetadata.posterUrl ?: "<none>"}"
+            )
         }
-
-        value = resolveLinkedMetadataForVideoPath(
-            context = context,
-            videoPath = file.path,
-        )
     }
 
     return metadataState.value
@@ -3263,44 +3249,28 @@ private fun rememberVideoFileMetadata(
 
 @Composable
 private fun rememberGroupMetadata(
-    groupCode: String,
-    folderPath: String,
-    sourceScope: String?,
+    viewModel: MainDashboardViewModel,
+    group: VirtualVideoGroup,
     refreshToken: Long,
 ): JvrMovieMetadata? {
-    val context = LocalContext.current.applicationContext
-    val normalizedCode = remember(groupCode) { groupCode.trim().uppercase() }
-    val normalizedFolderPath = remember(folderPath) { folderPath.trim() }
-    val cachedMetadata = remember(context, normalizedCode, normalizedFolderPath, refreshToken) {
-        JvrLibraryMetadataProvider.peekCached(context, normalizedCode, normalizedFolderPath)
-    }
+    val normalizedCode = remember(group.key) { group.key.trim().uppercase() }
+    val representativePath = group.representativeFile?.path
 
     val metadataState = produceState<JvrMovieMetadata?>(
-        initialValue = cachedMetadata,
-        normalizedCode,
-        normalizedFolderPath,
-        sourceScope,
+        initialValue = null,
+        group.key,
+        representativePath,
         refreshToken,
     ) {
-        if (cachedMetadata != null) {
-            logMetadataTrace(
-                GROUP_THUMBNAIL_LOG_TAG,
-                "Metadata immediate cache hit for group=$normalizedCode path='$normalizedFolderPath' (title='${cachedMetadata.title}')"
-            )
-            return@produceState
-        }
-
-        val metadata = resolveLinkedMetadataForGroup(
-            context = context,
-            sourceScope = sourceScope,
-            normalizedCode = normalizedCode,
-            folderPath = normalizedFolderPath,
+        val metadata = viewModel.resolveBrowserGroupMetadata(
+            groupKey = group.key,
+            representativeFile = group.representativeFile,
         )
 
         if (metadata == null) {
             logMetadataTrace(
                 GROUP_THUMBNAIL_LOG_TAG,
-                "No remote metadata for group=$normalizedCode. Falling back to generated video thumbnail."
+                "No metadata for group=$normalizedCode. Falling back to generated video thumbnail."
             )
         } else {
             logMetadataTrace(
@@ -3502,8 +3472,8 @@ private fun FileBrowserPanel(
     currentPath: String,
     sourceTitle: String,
     breadcrumb: String?,
-    sourceScope: String?,
     metadataRefreshToken: Long,
+    viewModel: MainDashboardViewModel,
     isConnected: Boolean,
     isLoading: Boolean,
     errorMessage: String?,
@@ -4018,9 +3988,8 @@ private fun FileBrowserPanel(
                                         is FileBrowserDisplayItem.Group -> {
                                             val groupMetadata =
                                                 rememberGroupMetadata(
-                                                    groupCode = item.virtualGroup.key,
-                                                    folderPath = currentPath,
-                                                    sourceScope = sourceScope,
+                                                    viewModel = viewModel,
+                                                    group = item.virtualGroup,
                                                     refreshToken = metadataRefreshToken,
                                                 )
                                             VirtualGroupListCard(
@@ -4046,6 +4015,7 @@ private fun FileBrowserPanel(
                                                 file = file,
                                                 isVideoFile = isVideoFile,
                                                 metadataRefreshToken = metadataRefreshToken,
+                                                viewModel = viewModel,
                                                 allowJvrMetadata = !item.isVirtualGroupMember,
                                                 isFavorite = isFavorite,
                                                 isSelectionMode = isDeleteMode,
@@ -4104,9 +4074,8 @@ private fun FileBrowserPanel(
                                         is FileBrowserDisplayItem.Group -> {
                                             val groupMetadata =
                                                 rememberGroupMetadata(
-                                                    groupCode = item.virtualGroup.key,
-                                                    folderPath = currentPath,
-                                                    sourceScope = sourceScope,
+                                                    viewModel = viewModel,
+                                                    group = item.virtualGroup,
                                                     refreshToken = metadataRefreshToken,
                                                 )
                                             VirtualGroupThumbnailCard(
@@ -4132,6 +4101,7 @@ private fun FileBrowserPanel(
                                                 file = file,
                                                 isVideoFile = isVideoFile,
                                                 metadataRefreshToken = metadataRefreshToken,
+                                                viewModel = viewModel,
                                                 allowJvrMetadata = !item.isVirtualGroupMember,
                                                 isFavorite = isFavorite,
                                                 isSelectionMode = isDeleteMode,
@@ -5100,6 +5070,7 @@ private fun FileListEntryCard(
     file: SMBFileItem,
     isVideoFile: Boolean,
     metadataRefreshToken: Long,
+    viewModel: MainDashboardViewModel,
     allowJvrMetadata: Boolean,
     isFavorite: Boolean,
     isSelectionMode: Boolean,
@@ -5113,6 +5084,7 @@ private fun FileListEntryCard(
 ) {
     val metadata = if (allowJvrMetadata) {
         rememberVideoFileMetadata(
+            viewModel = viewModel,
             file = file,
             isVideoFile = isVideoFile,
             refreshToken = metadataRefreshToken,
@@ -5283,6 +5255,7 @@ private fun FileThumbnailCard(
     file: SMBFileItem,
     isVideoFile: Boolean,
     metadataRefreshToken: Long,
+    viewModel: MainDashboardViewModel,
     allowJvrMetadata: Boolean,
     isFavorite: Boolean,
     isSelectionMode: Boolean,
@@ -5297,6 +5270,7 @@ private fun FileThumbnailCard(
     val context = LocalContext.current
     val metadata = if (allowJvrMetadata) {
         rememberVideoFileMetadata(
+            viewModel = viewModel,
             file = file,
             isVideoFile = isVideoFile,
             refreshToken = metadataRefreshToken,
@@ -6122,8 +6096,6 @@ private fun buildFilePosterCacheKey(fileName: String, posterUrl: String): String
 
 private val fileBrowserZoneId: ZoneId = ZoneId.systemDefault()
 
-private val multipartVideoPattern = Regex("""^(.+)-(\d{1,2})$""")
-
 private fun buildVirtualVideoGroups(files: List<SMBFileItem>): Map<String, VirtualVideoGroup> {
     val groupedCandidates = files
         .asSequence()
@@ -6198,19 +6170,6 @@ private fun buildFileBrowserDisplayItems(
     }
 
     return displayItems
-}
-
-private fun extractVirtualGroupKey(fileName: String): String? {
-    val stem = fileName.substringBeforeLast('.', fileName)
-    val match = multipartVideoPattern.matchEntire(stem) ?: return null
-    val baseName = match.groupValues[1].trimEnd('-', '_', ' ')
-    return baseName.takeIf { it.isNotBlank() }
-}
-
-private fun extractVirtualGroupPart(fileName: String): Int? {
-    val stem = fileName.substringBeforeLast('.', fileName)
-    val match = multipartVideoPattern.matchEntire(stem) ?: return null
-    return match.groupValues[2].toIntOrNull()
 }
 
 private fun resolveDisplayDate(file: SMBFileItem, metadata: JvrMovieMetadata?): LocalDate? {

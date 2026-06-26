@@ -1,23 +1,39 @@
 package blackark.app.vr.utils
 
-private val videoFileCodePattern = Regex("(?i)([a-z]{2,10})[-_](\\d{2,5})(?!\\d)")
-private val multipartVideoPattern = Regex("""^(.+)-(\d{1,2})$""")
+private val videoFileCodePattern = Regex("""(?i)([a-z]{2,10})[-_](\d{2,5})(?!\d)""")
+private val multipartVideoPattern = Regex(
+    """^(.*?)(?:[ _-](?:(cd|pt|part)?(\d{1,2})))$""",
+    RegexOption.IGNORE_CASE,
+)
+
+internal data class MultipartVideoMatch(
+    val baseName: String,
+    val partNumber: Int,
+)
+
+internal fun parseMultipartVideoName(fileName: String): MultipartVideoMatch? {
+    val stem = fileName.substringBeforeLast('.', fileName).trim()
+    val match = multipartVideoPattern.matchEntire(stem) ?: return null
+    val baseName = match.groupValues[1].trimEnd('-', '_', ' ')
+    val partNumber = match.groupValues[3].toIntOrNull() ?: return null
+    return baseName.takeIf { it.isNotBlank() }?.let { normalizedBaseName ->
+        MultipartVideoMatch(
+            baseName = normalizedBaseName,
+            partNumber = partNumber,
+        )
+    }
+}
 
 fun sanitizeNormalizedCode(code: String): String {
     return code.trim().uppercase()
 }
 
 fun extractVirtualGroupKey(fileName: String): String? {
-    val stem = fileName.substringBeforeLast('.', fileName)
-    val match = multipartVideoPattern.matchEntire(stem) ?: return null
-    val baseName = match.groupValues[1].trimEnd('-', '_', ' ')
-    return baseName.takeIf { it.isNotBlank() }
+    return parseMultipartVideoName(fileName)?.baseName
 }
 
 fun extractVirtualGroupPart(fileName: String): Int? {
-    val stem = fileName.substringBeforeLast('.', fileName)
-    val match = multipartVideoPattern.matchEntire(stem) ?: return null
-    return match.groupValues[2].toIntOrNull()
+    return parseMultipartVideoName(fileName)?.partNumber
 }
 
 fun extractNormalizedCodeFromFileName(fileName: String): String? {
