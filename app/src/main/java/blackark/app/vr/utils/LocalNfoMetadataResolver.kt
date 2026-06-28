@@ -95,22 +95,24 @@ class LocalNfoMetadataResolver(
         }
 
     private suspend fun listSiblingFiles(video: SMBFileItem): Result<List<SMBFileItem>> {
+        val local = localClient
+        val smb = smbClient
         return when {
-            localClient != null -> {
+            local != null -> {
                 val rootTreeUri = localRootTreeUri.orEmpty()
                 val parentUri = LocalFileClient.resolveParentDirectoryUri(rootTreeUri, video.path)
                     ?: return Result.success(emptyList())
-                localClient.listFiles(parentUri)
+                local.listFiles(parentUri)
             }
 
-            smbClient != null -> {
+            smb != null -> {
                 val parentUrl = video.path.substringBeforeLast('/', missingDelimiterValue = "")
                 if (parentUrl.isBlank()) {
                     Result.success(emptyList())
                 } else {
                     runCatching {
                         val directoryUrl = parentUrl.trimEnd('/') + "/"
-                        smbClient.getSmbFile(directoryUrl).listFiles()?.mapNotNull { file ->
+                        smb.getSmbFile(directoryUrl).listFiles()?.mapNotNull { file ->
                             try {
                                 SMBFileItem(
                                     name = file.name.removeSuffix("/"),
@@ -149,9 +151,11 @@ class LocalNfoMetadataResolver(
     }
 
     private suspend fun openInputStream(path: String): InputStream {
+        val local = localClient
+        val smb = smbClient
         return when {
-            localClient != null -> localClient.getInputStream(path).getOrThrow()
-            smbClient != null -> smbClient.getSmbFile(path).inputStream
+            local != null -> local.getInputStream(path).getOrThrow()
+            smb != null -> smb.getSmbFile(path).inputStream
             else -> error("No active file client")
         }
     }
@@ -223,15 +227,7 @@ class LocalNfoMetadataResolver(
             keyValue(text, "date"),
         )?.let(::parseDate)
         val genres = tagValues(text, "genre") + tagValues(text, "tag") + keyValues(text, "genre")
-        val casts = (tagValues(text, "actor") + tagValues(text, "name") + keyValues(text, "actor") + keyValues(text, "actors"))
-            .flatMap { splitPeople(it) }
-            .distinctBy { it.lowercase(Locale.US) }
-            .map { actor ->
-                JvrCastMetadata(
-                    performerId = "local:${actor.lowercase(Locale.US).replace(Regex("[^a-z0-9가-힣ぁ-んァ-ン一-龥]+"), "_").trim('_')}",
-                    englishName = actor,
-                )
-            }
+        val casts = parseActors(text)
 
         return JvrMovieMetadata(
             code = code,
@@ -243,6 +239,35 @@ class LocalNfoMetadataResolver(
             casts = casts,
             description = description,
         )
+    }
+
+    private fun parseActors(text: String): List<JvrCastMetadata> {
+        val actorRegex = Regex("<(?:actor|performer)>(.*?)</(?:actor|performer)>", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
+        val actors = actorRegex.findAll(text).mapNotNull { match ->
+            val content = match.groupValues[1]
+            val name = tagValue(content, "name") ?: return@mapNotNull null
+            val thumb = tagValue(content, "thumb")
+
+            JvrCastMetadata(
+                performerId = "local:${name.lowercase(Locale.US).replace(Regex("[^a-z0-9가-힣ぁ-んァ-ン一-龥]+"), "_").trim('_')}",
+                englishName = name,
+                profileImageUrl = thumb,
+                remoteProfileImageUrl = thumb,
+            )
+        }.toList()
+
+        if (actors.isNotEmpty()) return actors
+
+        // Fallback for simple NFOs where actors are just a list of names
+        return (tagValues(text, "actor") + tagValues(text, "name") + keyValues(text, "actor") + keyValues(text, "actors"))
+            .flatMap { splitPeople(it) }
+            .distinctBy { it.lowercase(Locale.US) }
+            .map { actor ->
+                JvrCastMetadata(
+                    performerId = "local:${actor.lowercase(Locale.US).replace(Regex("[^a-z0-9가-힣ぁ-んァ-ン一-龥]+"), "_").trim('_')}",
+                    englishName = actor,
+                )
+            }
     }
 
     private fun tagValue(text: String, tag: String): String? = tagValues(text, tag).firstOrNull()

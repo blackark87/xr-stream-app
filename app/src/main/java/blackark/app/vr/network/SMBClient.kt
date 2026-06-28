@@ -86,8 +86,13 @@ class SMBClient(private val config: SMBConfig) {
 
                 val files = smbFile.listFiles()?.mapNotNull { file ->
                     try {
+                        val name = file.name.removeSuffix("/")
+                        if (name.startsWith('.') || name.equals("extrafanart", ignoreCase = true)) {
+                            return@mapNotNull null
+                        }
+
                         SMBFileItem(
-                            name = file.name.removeSuffix("/"),
+                            name = name,
                             path = file.path,
                             isDirectory = file.isDirectory,
                             size = if (file.isDirectory) 0 else file.length(),

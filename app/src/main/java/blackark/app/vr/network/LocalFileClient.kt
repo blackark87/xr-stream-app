@@ -126,7 +126,7 @@ class LocalFileClient(
                                 documentUri.lastPathSegment.orEmpty()
                             }
 
-                        if (resolvedName.startsWith('.')) {
+                        if (resolvedName.startsWith('.') || resolvedName.equals("extrafanart", ignoreCase = true)) {
                             continue
                         }
 

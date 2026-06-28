@@ -197,16 +197,21 @@ private fun PlaybackScrollInputOverlay(
                 state = horizontalScrollState,
                 orientation = Orientation.Horizontal,
                 enabled = !inputLocked,
-            )
-            .clickable(
-                enabled = !inputLocked,
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-            ) {
-                onToggleControls()
-            },
+            ),
         contentAlignment = Alignment.Center,
     ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .clickable(
+                    enabled = !inputLocked,
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                ) {
+                    onToggleControls()
+                },
+        )
+
         if (showControls && controlsContent != null) {
             Box(
                 modifier = controlsModifier
@@ -555,17 +560,21 @@ fun SpatialVideoPlayerContent(
                     ),
                 ) {
                     Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .clickable(
-                                enabled = !playerState.controlsInputLocked && !playerState.seekPreviewActive,
-                                interactionSource = remember { MutableInteractionSource() },
-                                indication = null,
-                            ) {
-                                videoPlayerViewModel.toggleControls()
-                            },
+                        modifier = Modifier.fillMaxSize(),
                         contentAlignment = Alignment.Center,
                     ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .clickable(
+                                    enabled = !playerState.controlsInputLocked && !playerState.seekPreviewActive,
+                                    interactionSource = remember { MutableInteractionSource() },
+                                    indication = null,
+                                ) {
+                                    videoPlayerViewModel.toggleControls()
+                                },
+                        )
+
                         Box(
                             modifier = Modifier.fillMaxWidth(),
                         ) {

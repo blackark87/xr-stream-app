@@ -167,6 +167,7 @@ class VideoPlayerViewModel(
     private var lastPlaybackVerticalDirection = 0
     private var playbackHorizontalRepeatJob: Job? = null
     private var controlsAutoHideJob: Job? = null
+    private var suppressControlsToggleUntilMs = 0L
     private var pendingInitializationPath: String? = null
     private var pendingVideoFormatToPersist: VideoFormat? = null
     private var pendingStereoModeToPersist: StereoMode? = null
@@ -175,6 +176,7 @@ class VideoPlayerViewModel(
     private var hasDispatchedNavigateBack = false
     private val releaseMutex = Mutex()
     private val controlsAutoHideDelayMs = 3_500L
+    private val controlsToggleSuppressAfterInputMs = 300L
 
     init {
         // Observe global key events.
@@ -241,7 +243,6 @@ class VideoPlayerViewModel(
     }
 
     fun beginControlsInputLock() {
-        finishSeekPreviewSession(commit = true, restorePlayback = false)
         controlsInputLockCount += 1
         cancelControlsAutoHide()
 
@@ -261,6 +262,8 @@ class VideoPlayerViewModel(
         val stillLocked = controlsInputLockCount > 0
         if (_state.value.controlsInputLocked == stillLocked) {
             if (!stillLocked) {
+                suppressControlsToggleUntilMs =
+                    SystemClock.elapsedRealtime() + controlsToggleSuppressAfterInputMs
                 scheduleControlsAutoHideIfNeeded()
             }
             return
@@ -268,6 +271,8 @@ class VideoPlayerViewModel(
 
         _state.value = _state.value.copy(controlsInputLocked = stillLocked)
         if (!stillLocked) {
+            suppressControlsToggleUntilMs =
+                SystemClock.elapsedRealtime() + controlsToggleSuppressAfterInputMs
             scheduleControlsAutoHideIfNeeded()
         }
     }
@@ -308,6 +313,12 @@ class VideoPlayerViewModel(
         if (currentState.controlsInputLocked || currentState.seekPreviewActive) {
             return
         }
+        if (
+            currentState.showControls &&
+            SystemClock.elapsedRealtime() < suppressControlsToggleUntilMs
+        ) {
+            return
+        }
         val nextVisible = !currentState.showControls
         _state.value = currentState.copy(
             showControls = nextVisible,
@@ -338,6 +349,7 @@ class VideoPlayerViewModel(
 
     private fun resetControlsInputLock() {
         controlsInputLockCount = 0
+        suppressControlsToggleUntilMs = 0L
         if (_state.value.controlsInputLocked) {
             _state.value = _state.value.copy(controlsInputLocked = false)
         }
