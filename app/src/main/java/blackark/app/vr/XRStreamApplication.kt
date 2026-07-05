@@ -41,8 +41,11 @@ class XRStreamApplication : Application(), SingletonImageLoader.Factory {
             .components {
                 // Add video frame decoder for extracting frames from videos.
                 add(VideoFrameDecoder.Factory())
-                // Add custom fetcher only for explicit video thumbnail model requests.
+                // Add custom fetchers for video thumbnails and SMB resources.
                 add(VideoThumbnailFetcher.ModelFactory())
+                add(VideoThumbnailFetcher.StringFactory())
+                add(VideoThumbnailFetcher.UriFactory())
+                add(VideoThumbnailFetcher.CoilUriFactory())
             }
             .memoryCache {
                 MemoryCache.Builder()

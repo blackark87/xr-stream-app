@@ -19,9 +19,12 @@ import coil3.request.Options
 import jcifs.smb.SmbFile
 import jcifs.smb.SmbRandomAccessFile
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import okio.Buffer
 import okio.FileSystem
 import okio.Path.Companion.toOkioPath
+import okio.source
 import java.net.URI
 
 /**
@@ -52,27 +55,59 @@ class VideoThumbnailFetcher(
         return try {
             val uri = data.toUri()
 
-            when (uri.scheme) {
-                "smb" -> {
-                    // For SMB videos, extract thumbnail using MediaMetadataRetriever with custom data source
-                    extractSMBThumbnail(data)
-                }
+            if (isDirectImageFile(data)) {
+                fetchDirectImage(data)
+            } else {
+                when (uri.scheme) {
+                    "smb" -> {
+                        // For SMB videos, extract thumbnail using MediaMetadataRetriever with custom data source
+                        extractSMBThumbnail(data)
+                    }
 
-                "content" -> {
-                    extractContentThumbnail(uri)
-                }
+                    "content" -> {
+                        extractContentThumbnail(uri)
+                    }
 
-                "file", null -> {
-                    // For local files, use standard MediaMetadataRetriever
-                    extractLocalThumbnail(data)
-                }
+                    "file", null -> {
+                        // For local files, use standard MediaMetadataRetriever
+                        extractLocalThumbnail(data)
+                    }
 
-                else -> null
+                    else -> null
+                }
             }
         } catch (e: Exception) {
             Log.e("VideoThumbnailFetcher", "Error fetching thumbnail for $data", e)
             null
         }
+    }
+
+    private fun isDirectImageFile(path: String): Boolean {
+        val sanitizedPath = path.substringBefore('?').substringBefore('#').trim().lowercase()
+        return listOf("jpg", "jpeg", "png", "webp").any { sanitizedPath.endsWith(".$it") }
+    }
+
+    private suspend fun fetchDirectImage(smbUrl: String): FetchResult? {
+        Log.d("VideoThumbnailFetcher", "Fetching SMB direct image: $smbUrl")
+        val inputStream = openPosterInputStream(smbUrl) ?: return null
+        val buffer = Buffer()
+        withContext(Dispatchers.IO) {
+            inputStream.use { input ->
+                buffer.writeAll(input.source())
+            }
+        }
+        val extension = smbUrl.substringBefore('?').substringBefore('#').substringAfterLast('.', "").lowercase()
+        val mimeType = when (extension) {
+            "jpg", "jpeg" -> "image/jpeg"
+            "png" -> "image/png"
+            "webp" -> "image/webp"
+            else -> null
+        }
+        return SourceFetchResult(
+            source = ImageSource(buffer, FileSystem.SYSTEM),
+            mimeType = mimeType,
+            dataSource = DataSource.NETWORK
+        )
     }
 
     private fun extractContentThumbnail(uri: Uri): FetchResult? {
@@ -591,7 +626,13 @@ class VideoThumbnailFetcher(
         }
 
         val stem = fileName.substringBeforeLast('.', fileName)
-        val identity = stem.trim().lowercase().ifBlank { fileName.lowercase() }
+        val stemLower = stem.trim().lowercase()
+        val genericNames = setOf("movie", "info", "poster", "cover", "fanart", "folder")
+        val identity = if (stemLower in genericNames) {
+            path.substringBefore('?').substringBefore('#').trim().lowercase()
+        } else {
+            stemLower.ifBlank { fileName.lowercase() }
+        }
         return "$THUMBNAIL_CACHE_VERSION:$generation:$modeKey:$identity"
     }
 
