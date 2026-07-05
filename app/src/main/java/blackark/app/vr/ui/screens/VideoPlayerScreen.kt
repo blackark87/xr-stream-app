@@ -11,12 +11,10 @@ import androidx.activity.compose.BackHandler
 import androidx.annotation.OptIn
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.rememberScrollableState
 import androidx.compose.foundation.gestures.scrollable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
@@ -146,7 +144,6 @@ private fun PlaybackScrollInputOverlay(
     showControls: Boolean,
     controlsInputLocked: Boolean,
     seekPreviewActive: Boolean,
-    onToggleControls: () -> Unit,
     onKeyUp: ((android.view.KeyEvent) -> Boolean)? = null,
     onHorizontalScrollDelta: (Float) -> Unit = {},
     onVerticalScrollDelta: (Float) -> Unit = {},
@@ -191,27 +188,15 @@ private fun PlaybackScrollInputOverlay(
             .scrollable(
                 state = verticalScrollState,
                 orientation = Orientation.Vertical,
-                enabled = !inputLocked,
+                enabled = !inputLocked && !showControls,
             )
             .scrollable(
                 state = horizontalScrollState,
                 orientation = Orientation.Horizontal,
-                enabled = !inputLocked,
+                enabled = !inputLocked && !showControls,
             ),
         contentAlignment = Alignment.Center,
     ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .clickable(
-                    enabled = !inputLocked,
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null,
-                ) {
-                    onToggleControls()
-                },
-        )
-
         if (showControls && controlsContent != null) {
             Box(
                 modifier = controlsModifier
@@ -525,27 +510,28 @@ fun SpatialVideoPlayerContent(
         )
 
         if (isSurfaceReady) {
-            SpatialPanel(
-                modifier = SubspaceModifier.fillMaxSize(),
-                interactionPolicy = clickInteractionPolicy(
-                    isHandTrackingEnabled = isHandTrackingEnabled,
-                ),
-            ) {
-                PlaybackScrollInputOverlay(
-                    showControls = false,
-                    onKeyUp = { event ->
-                        videoPlayerViewModel.dispatchPlaybackKeyEvent(event)
-                    },
-                    controlsInputLocked = playerState.controlsInputLocked,
-                    seekPreviewActive = playerState.seekPreviewActive,
-                    onToggleControls = { videoPlayerViewModel.toggleControls() },
-                    onHorizontalScrollDelta = { delta ->
-                        videoPlayerViewModel.handlePlaybackHorizontalScroll(delta)
-                    },
-                    onVerticalScrollDelta = { delta ->
-                        videoPlayerViewModel.handlePlaybackVerticalScroll(delta)
-                    },
-                )
+            if (!showControls) {
+                SpatialPanel(
+                    modifier = SubspaceModifier.fillMaxSize(),
+                    interactionPolicy = clickInteractionPolicy(
+                        isHandTrackingEnabled = isHandTrackingEnabled,
+                    ),
+                ) {
+                    PlaybackScrollInputOverlay(
+                        showControls = false,
+                        onKeyUp = { event ->
+                            videoPlayerViewModel.dispatchPlaybackKeyEvent(event)
+                        },
+                        controlsInputLocked = playerState.controlsInputLocked,
+                        seekPreviewActive = playerState.seekPreviewActive,
+                        onHorizontalScrollDelta = { delta ->
+                            videoPlayerViewModel.handlePlaybackHorizontalScroll(delta)
+                        },
+                        onVerticalScrollDelta = { delta ->
+                            videoPlayerViewModel.handlePlaybackVerticalScroll(delta)
+                        },
+                    )
+                }
             }
 
             if (showControls) {
@@ -563,17 +549,6 @@ fun SpatialVideoPlayerContent(
                         modifier = Modifier.fillMaxSize(),
                         contentAlignment = Alignment.Center,
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .clickable(
-                                    enabled = !playerState.controlsInputLocked && !playerState.seekPreviewActive,
-                                    interactionSource = remember { MutableInteractionSource() },
-                                    indication = null,
-                                ) {
-                                    videoPlayerViewModel.toggleControls()
-                                },
-                        )
 
                         Box(
                             modifier = Modifier.fillMaxWidth(),
@@ -711,9 +686,6 @@ private fun Standard2DPlayer(
                 if (isSurfaceReady) {
                     SpatialPanel(
                         modifier = SubspaceModifier.fillMaxSize(),
-                        interactionPolicy = clickInteractionPolicy(
-                            isHandTrackingEnabled = isHandTrackingEnabled,
-                        ),
                     ) {
                         PlaybackScrollInputOverlay(
                             showControls = showControls,
@@ -731,7 +703,6 @@ private fun Standard2DPlayer(
                             controlsModifier = Modifier
                                 .fillMaxWidth(0.92f)
                                 .widthIn(max = 1080.dp),
-                            onToggleControls = { videoPlayerViewModel.toggleControls() },
                             onHorizontalScrollDelta = { delta ->
                                 videoPlayerViewModel.handlePlaybackHorizontalScroll(delta)
                             },
