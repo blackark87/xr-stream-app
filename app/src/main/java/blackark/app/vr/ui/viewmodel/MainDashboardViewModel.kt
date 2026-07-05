@@ -31,6 +31,7 @@ import blackark.app.vr.utils.extractFolderPath
 import blackark.app.vr.utils.extractNormalizedCodeFromFileName
 import blackark.app.vr.utils.extractVirtualGroupKey
 import blackark.app.vr.utils.extractVirtualGroupPart
+import blackark.app.vr.utils.isTrailerFile
 import jcifs.smb.SmbRandomAccessFile
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -171,7 +172,9 @@ class MainDashboardViewModel(
     )
 
     private fun filterAndSortBrowsableFiles(fileList: List<SMBFileItem>): List<SMBFileItem> {
-        val browsableFiles = fileList.filter { it.isDirectory || SMBClient.isVideoFile(it.name) }
+        val browsableFiles = fileList.filter { 
+            it.isDirectory || (SMBClient.isVideoFile(it.name) && !isTrailerFile(it.name)) 
+        }
         val nameAscendingComparator =
             compareBy<SMBFileItem, String>(String.CASE_INSENSITIVE_ORDER) { it.name }
                 .thenBy { it.name }
@@ -859,7 +862,7 @@ class MainDashboardViewModel(
             val sourceScope = buildSourceScope(server.serverAddress, server.shareName)
             val scanStartedAt = System.currentTimeMillis()
             _files.value
-                .filter { !it.isDirectory && SMBClient.isVideoFile(it.name) }
+                .filter { !it.isDirectory && SMBClient.isVideoFile(it.name) && !isTrailerFile(it.name) }
                 .forEach { file ->
                     processScannedVideo(
                         sourceScope = sourceScope,
@@ -1144,7 +1147,9 @@ class MainDashboardViewModel(
 
     private fun syncCurrentListingForAv(files: List<SMBFileItem>) {
         val sourceScope = currentSourceScope() ?: return
-        val visibleVideos = files.filter { !it.isDirectory && SMBClient.isVideoFile(it.name) }
+        val visibleVideos = files.filter { 
+            !it.isDirectory && SMBClient.isVideoFile(it.name) && !isTrailerFile(it.name) 
+        }
 
         avVisibleSyncJob?.cancel()
         if (visibleVideos.isEmpty()) {

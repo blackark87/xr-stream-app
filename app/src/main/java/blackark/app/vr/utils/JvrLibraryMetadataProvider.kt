@@ -862,6 +862,14 @@ object JvrLibraryMetadataProvider {
         fileKey: String,
         imageUrl: String,
     ): String? {
+        if (imageUrl.startsWith("smb://", ignoreCase = true) ||
+            imageUrl.startsWith("content:", ignoreCase = true) ||
+            imageUrl.startsWith("file:", ignoreCase = true) ||
+            imageUrl.startsWith("/")
+        ) {
+            return imageUrl
+        }
+
         return try {
             val imageDir = File(context.filesDir, directoryName)
             if (!imageDir.exists()) {
@@ -1949,6 +1957,9 @@ object JvrLibraryMetadataProvider {
         return when {
             value.startsWith("https://", ignoreCase = true) -> value
             value.startsWith("http://", ignoreCase = true) -> value
+            value.startsWith("smb://", ignoreCase = true) -> value
+            value.startsWith("content:", ignoreCase = true) -> value
+            value.startsWith("file:", ignoreCase = true) -> value
             value.startsWith("//") -> "https:$value"
             value.startsWith("/") -> "$BASE_URL$value"
             else -> "$BASE_URL/$value"

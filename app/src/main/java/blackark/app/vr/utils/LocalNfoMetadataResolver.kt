@@ -42,10 +42,12 @@ internal fun buildPosterCandidateNames(videoName: String): List<String> {
     return buildList {
         for (extension in localNfoImageExtensions) {
             add("$stem.$extension")
+            add("$stem-poster.$extension")
         }
         if (!multipartBaseStem.isNullOrBlank() && !multipartBaseStem.equals(stem, ignoreCase = true)) {
             for (extension in localNfoImageExtensions) {
                 add("$multipartBaseStem.$extension")
+                add("$multipartBaseStem-poster.$extension")
             }
         }
         addAll(
@@ -59,6 +61,9 @@ internal fun buildPosterCandidateNames(videoName: String): List<String> {
                 "cover.jpg",
                 "cover.png",
                 "cover.webp",
+                "folder.jpg",
+                "folder.png",
+                "folder.webp",
             )
         )
     }.distinctBy { it.lowercase(Locale.US) }

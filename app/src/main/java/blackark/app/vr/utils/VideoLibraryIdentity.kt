@@ -87,3 +87,9 @@ fun buildSourceScope(identity: ParsedVideoIdentity): String {
 fun buildAssetKey(sourceScope: String, normalizedCode: String): String {
     return "${sourceScope.trim()}::${sanitizeNormalizedCode(normalizedCode)}"
 }
+
+fun isTrailerFile(fileName: String): Boolean {
+    val stem = fileName.substringBeforeLast('.', "").trim().lowercase()
+    return stem.endsWith("-trailer") || stem.endsWith("_trailer") || stem.endsWith(".trailer") || stem == "trailer" ||
+           stem.endsWith("-preview") || stem.endsWith("_preview") || stem.endsWith(".preview") || stem == "preview"
+}
