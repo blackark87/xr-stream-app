@@ -11,13 +11,16 @@ import android.util.Log
 import androidx.core.net.toUri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
+import androidx.media3.common.text.Cue
+import androidx.media3.common.text.CueGroup
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.exoplayer.source.ProgressiveMediaSource
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import blackark.app.vr.data.database.entity.RecentVideo
 import blackark.app.vr.data.repository.VideoDisplaySettingsRepository
 import blackark.app.vr.data.repository.VideoRepository
@@ -25,8 +28,10 @@ import blackark.app.vr.network.LocalFileClient
 import blackark.app.vr.network.SMBClient
 import blackark.app.vr.network.SMBConfig
 import blackark.app.vr.network.SMBFileItem
+import blackark.app.vr.player.ExternalSubtitle
 import blackark.app.vr.player.PlaybackSource
 import blackark.app.vr.player.SMBDataSource
+import blackark.app.vr.player.resolveKoreanExternalSubtitle
 import blackark.app.vr.utils.AppSettingsStore
 import blackark.app.vr.utils.InferredDisplayProfile
 import blackark.app.vr.utils.VideoFramePreviewExtractor
@@ -73,6 +78,8 @@ data class VideoPlayerState(
     val seekPreviewActive: Boolean = false,
     val seekPreviewTargetPositionMs: Long = 0,
     val seekPreviewThumbnailPath: String? = null,
+    val subtitleCues: List<Cue> = emptyList(),
+    val externalSubtitleFileName: String? = null,
 )
 
 enum class PlaybackMenu {
@@ -1102,6 +1109,8 @@ class VideoPlayerViewModel(
                     seekPreviewActive = false,
                     seekPreviewTargetPositionMs = 0L,
                     seekPreviewThumbnailPath = null,
+                    subtitleCues = emptyList(),
+                    externalSubtitleFileName = null,
                 )
                 viewModelScope.launch {
                     VideoFramePreviewExtractor.prepareVideo(
@@ -1112,6 +1121,18 @@ class VideoPlayerViewModel(
 
                 // Save to recent videos immediately to ensure we have an ID for updates.
                 saveToRecentVideos(videoFile, playbackSource, savedVideo)
+
+                val siblingFiles = loadSiblingFiles(videoFile, playbackSource)
+                val externalSubtitle = siblingFiles
+                    ?.let { files ->
+                        resolveKoreanExternalSubtitle(
+                            videoFileName = videoFile.name,
+                            siblingFiles = files,
+                        )
+                    }
+                _state.value = _state.value.copy(
+                    externalSubtitleFileName = externalSubtitle?.file?.name,
+                )
 
                 // Create ExoPlayer instance with larger buffer for SMB streaming
                 // Use 1MB allocation size to match SMB buffer
@@ -1169,6 +1190,12 @@ class VideoPlayerViewModel(
                                 } else {
                                     keepControlsVisibleWhileNotPlaying()
                                 }
+                            }
+
+                            override fun onCues(cueGroup: CueGroup) {
+                                _state.value = _state.value.copy(
+                                    subtitleCues = cueGroup.cues,
+                                )
                             }
 
                             override fun onTracksChanged(tracks: androidx.media3.common.Tracks) {
@@ -1275,10 +1302,12 @@ class VideoPlayerViewModel(
                 // videoFile.path is already a complete SMB URL from jcifs (e.g., smb://192.168.1.105:445/downloads/file.mp4)
                 val uri = videoFile.path.toUri()
 
-                val mediaItem = MediaItem.fromUri(uri)
+                val mediaItem = buildMediaItem(
+                    videoUri = uri,
+                    externalSubtitle = externalSubtitle,
+                )
 
-                // Create progressive media source
-                val mediaSource = ProgressiveMediaSource.Factory(dataSourceFactory)
+                val mediaSource = DefaultMediaSourceFactory(dataSourceFactory)
                     .createMediaSource(mediaItem)
 
                 // Set media source and prepare
@@ -1305,8 +1334,10 @@ class VideoPlayerViewModel(
                 // Start position tracking
                 startPositionTracking()
 
-                // Always refresh playlist for current file to keep index/order in sync with file screen.
-                refreshPlaylist(videoFile, playbackSource)
+                // Reuse the sibling listing used for subtitle discovery to avoid a second network query.
+                if (siblingFiles != null) {
+                    updatePlaylistFromSiblingFiles(videoFile, siblingFiles)
+                }
 
             } catch (e: Exception) {
                 _state.value = _state.value.copy(
@@ -1319,6 +1350,24 @@ class VideoPlayerViewModel(
                 }
             }
         }
+    }
+
+    private fun buildMediaItem(
+        videoUri: android.net.Uri,
+        externalSubtitle: ExternalSubtitle?,
+    ): MediaItem {
+        val builder = MediaItem.Builder().setUri(videoUri)
+        if (externalSubtitle != null) {
+            val subtitleConfiguration =
+                MediaItem.SubtitleConfiguration.Builder(externalSubtitle.file.path.toUri())
+                    .setMimeType(externalSubtitle.mimeType)
+                    .setLanguage("ko")
+                    .setLabel("한국어")
+                    .setSelectionFlags(C.SELECTION_FLAG_DEFAULT)
+                    .build()
+            builder.setSubtitleConfigurations(listOf(subtitleConfiguration))
+        }
+        return builder.build()
     }
 
     private fun applyAutoDetectedDisplaySettings(
@@ -1358,26 +1407,34 @@ class VideoPlayerViewModel(
         currentFile: SMBFileItem,
         playbackSource: PlaybackSource,
     ): Pair<List<SMBFileItem>, Int>? {
+        val siblingFiles = loadSiblingFiles(currentFile, playbackSource) ?: return null
+        return updatePlaylistFromSiblingFiles(currentFile, siblingFiles)
+    }
+
+    private suspend fun loadSiblingFiles(
+        currentFile: SMBFileItem,
+        playbackSource: PlaybackSource,
+    ): List<SMBFileItem>? {
         return when (playbackSource) {
-            is PlaybackSource.Smb -> refreshSmbPlaylist(currentFile, playbackSource.config)
-            is PlaybackSource.Local -> refreshLocalPlaylist(currentFile, playbackSource)
+            is PlaybackSource.Smb -> loadSmbSiblingFiles(currentFile, playbackSource.config)
+            is PlaybackSource.Local -> loadLocalSiblingFiles(currentFile, playbackSource)
         }
     }
 
-    private suspend fun refreshSmbPlaylist(
+    private suspend fun loadSmbSiblingFiles(
         currentFile: SMBFileItem,
         smbConfig: SMBConfig,
-    ): Pair<List<SMBFileItem>, Int>? {
+    ): List<SMBFileItem>? {
         return try {
             val relativeParentPath = resolveRelativeParentPath(currentFile.path, smbConfig)
-            Log.d("VideoPlayerViewModel", "Fetching playlist for path: $relativeParentPath")
+            Log.d("VideoPlayerViewModel", "Fetching sibling files for path: $relativeParentPath")
 
             val client = SMBClient(smbConfig)
             val connectResult = client.connect()
             if (connectResult.isFailure) {
                 Log.w(
                     "VideoPlayerViewModel",
-                    "Failed to connect while fetching playlist: ${connectResult.exceptionOrNull()?.message}"
+                    "Failed to connect while fetching sibling files: ${connectResult.exceptionOrNull()?.message}"
                 )
                 return null
             }
@@ -1388,44 +1445,22 @@ class VideoPlayerViewModel(
             if (listResult.isFailure) {
                 Log.w(
                     "VideoPlayerViewModel",
-                    "Failed to list files for playlist: ${listResult.exceptionOrNull()?.message}"
+                    "Failed to list sibling files: ${listResult.exceptionOrNull()?.message}"
                 )
                 return null
             }
 
-            val allFiles = listResult.getOrNull().orEmpty()
-            val sortedFiles = allFiles
-                .filter { it.isDirectory || SMBClient.isVideoFile(it.name) }
-                .sortedWith(
-                    compareByDescending<SMBFileItem> { it.isDirectory }
-                        .thenBy { it.name.lowercase() }
-                )
-            val videoFiles =
-                sortedFiles.filter { !it.isDirectory && SMBClient.isVideoFile(it.name) }
-
-            val currentIndex = resolveCurrentPlaylistIndex(videoFiles, currentFile)
-
-            _state.value = _state.value.copy(
-                playlist = videoFiles,
-                currentPlaylistIndex = currentIndex,
-            )
-
-            Log.d(
-                "VideoPlayerViewModel",
-                "Playlist fetched: ${videoFiles.size} videos, current index: $currentIndex"
-            )
-
-            videoFiles to currentIndex
+            listResult.getOrNull().orEmpty()
         } catch (e: Exception) {
-            Log.e("VideoPlayerViewModel", "Failed to fetch playlist: ${e.message}", e)
+            Log.e("VideoPlayerViewModel", "Failed to fetch SMB sibling files: ${e.message}", e)
             null
         }
     }
 
-    private suspend fun refreshLocalPlaylist(
+    private suspend fun loadLocalSiblingFiles(
         currentFile: SMBFileItem,
         playbackSource: PlaybackSource.Local,
-    ): Pair<List<SMBFileItem>, Int>? {
+    ): List<SMBFileItem>? {
         return try {
             val context = appContext ?: return null
             val rootTreeUri = playbackSource.rootTreeUri
@@ -1442,7 +1477,7 @@ class VideoPlayerViewModel(
             if (connectResult.isFailure) {
                 Log.w(
                     "VideoPlayerViewModel",
-                    "Failed to connect local storage while fetching playlist: ${connectResult.exceptionOrNull()?.message}"
+                    "Failed to connect local storage while fetching sibling files: ${connectResult.exceptionOrNull()?.message}"
                 )
                 return null
             }
@@ -1453,32 +1488,40 @@ class VideoPlayerViewModel(
             if (listResult.isFailure) {
                 Log.w(
                     "VideoPlayerViewModel",
-                    "Failed to list local files for playlist: ${listResult.exceptionOrNull()?.message}"
+                    "Failed to list local sibling files: ${listResult.exceptionOrNull()?.message}"
                 )
                 return null
             }
 
-            val allFiles = listResult.getOrNull().orEmpty()
-            val sortedFiles = allFiles
-                .filter { it.isDirectory || SMBClient.isVideoFile(it.name) }
-                .sortedWith(
-                    compareByDescending<SMBFileItem> { it.isDirectory }
-                        .thenBy { it.name.lowercase() }
-                )
-            val videoFiles =
-                sortedFiles.filter { !it.isDirectory && SMBClient.isVideoFile(it.name) }
-            val currentIndex = resolveCurrentPlaylistIndex(videoFiles, currentFile)
-
-            _state.value = _state.value.copy(
-                playlist = videoFiles,
-                currentPlaylistIndex = currentIndex,
-            )
-
-            videoFiles to currentIndex
+            listResult.getOrNull().orEmpty()
         } catch (e: Exception) {
-            Log.e("VideoPlayerViewModel", "Failed to fetch local playlist: ${e.message}", e)
+            Log.e("VideoPlayerViewModel", "Failed to fetch local sibling files: ${e.message}", e)
             null
         }
+    }
+
+    private fun updatePlaylistFromSiblingFiles(
+        currentFile: SMBFileItem,
+        siblingFiles: List<SMBFileItem>,
+    ): Pair<List<SMBFileItem>, Int> {
+        val videoFiles = siblingFiles
+            .asSequence()
+            .filter { !it.isDirectory && SMBClient.isVideoFile(it.name) }
+            .sortedBy { it.name.lowercase() }
+            .toList()
+        val currentIndex = resolveCurrentPlaylistIndex(videoFiles, currentFile)
+
+        _state.value = _state.value.copy(
+            playlist = videoFiles,
+            currentPlaylistIndex = currentIndex,
+        )
+
+        Log.d(
+            "VideoPlayerViewModel",
+            "Playlist fetched: ${videoFiles.size} videos, current index: $currentIndex"
+        )
+
+        return videoFiles to currentIndex
     }
 
     private fun resolveRelativeParentPath(currentPath: String, smbConfig: SMBConfig): String {
@@ -1800,6 +1843,10 @@ class VideoPlayerViewModel(
         player?.release()
         exoPlayer = null
         _playerFlow.value = null
+        _state.value = _state.value.copy(
+            subtitleCues = emptyList(),
+            externalSubtitleFileName = null,
+        )
         pendingSaveJob = null
         cancelSeekRepeat()
         cancelVolumeRepeat()

@@ -53,9 +53,11 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.SubtitleView
 import androidx.xr.arcore.ArDevice
 import androidx.xr.compose.platform.LocalSession
 import androidx.xr.compose.platform.LocalSpatialCapabilities
@@ -105,7 +107,17 @@ private val IMMERSIVE_CONTROLS_PANEL_HEIGHT = 360.dp
 private val IMMERSIVE_CONTROLS_PANEL_WIDTH_MONO = 1260.dp
 private val IMMERSIVE_CONTROLS_PANEL_WIDTH_STEREO = 1460.dp
 private const val IMMERSIVE_CONTROLS_FRONT_FACTOR = 0.84f
-private val IMMERSIVE_CONTROLS_DOWN_OFFSET = 280.dp
+private val IMMERSIVE_CONTROLS_DOWN_OFFSET = 400.dp
+private val IMMERSIVE_REVEAL_PANEL_WIDTH = 2400.dp
+private val IMMERSIVE_REVEAL_PANEL_HEIGHT = 1400.dp
+// Keep the hidden reveal target in front of subtitles, and controls in front of both.
+private const val IMMERSIVE_REVEAL_FRONT_FACTOR = 0.86f
+private val IMMERSIVE_SUBTITLE_PANEL_WIDTH = 1280.dp
+private val IMMERSIVE_SUBTITLE_PANEL_HEIGHT = 720.dp
+private const val IMMERSIVE_SUBTITLE_FRONT_FACTOR = 0.90f
+private val IMMERSIVE_SUBTITLE_CONTROLS_VISIBLE_UP_OFFSET = (-160).dp
+private const val SUBTITLE_DEFAULT_BOTTOM_PADDING_FRACTION = 0.08f
+private const val SUBTITLE_CONTROLS_VISIBLE_BOTTOM_PADDING_FRACTION = 0.36f
 
 private tailrec fun Context.findActivity(): Activity? =
     when (this) {
@@ -388,6 +400,12 @@ fun SpatialVideoPlayerContent(
     val supportsImmersiveDome = spatialCapabilities.isContent3dEnabled
     val shouldUseImmersiveDome = immersiveRequested && supportsImmersiveDome
     val isSurfaceReady = !playerState.isLoading && playerState.error == null
+    val playbackLayerPolicy = resolvePlaybackLayerPolicy(
+        isSurfaceReady = isSurfaceReady,
+        showControls = showControls,
+        controlsInputLocked = playerState.controlsInputLocked,
+        seekPreviewActive = playerState.seekPreviewActive,
+    )
 
     // Keep the Activity main panel alive while this screen is a pure Subspace composition.
     // The anchor stays off-screen so the dashboard panel does not cover video playback.
@@ -467,15 +485,10 @@ fun SpatialVideoPlayerContent(
         blackark.app.vr.ui.viewmodel.StereoMode.TopBottom -> StereoMode.TopBottom
     }
 
-    val toggleInteractionPolicy =
-        if (
-            isSurfaceReady &&
-            !showControls &&
-            !playerState.seekPreviewActive &&
-            !playerState.controlsInputLocked
-        ) {
+    val revealInteractionPolicy =
+        if (playbackLayerPolicy.enableSurfaceRevealInput) {
             clickInteractionPolicy(isHandTrackingEnabled = isHandTrackingEnabled) {
-                videoPlayerViewModel.toggleControls()
+                videoPlayerViewModel.setControlsVisibility(true)
             }
         } else {
             null
@@ -501,7 +514,7 @@ fun SpatialVideoPlayerContent(
             exoPlayer = exoPlayer,
             videoFormat = playerState.videoFormat,
             stereoMode = xrStereoMode,
-            interactionPolicy = toggleInteractionPolicy,
+            interactionPolicy = revealInteractionPolicy,
             headLockedRotation180 =
                 when {
                     enableHeadFollowIn180Stereo -> headFollowPose?.rotation
@@ -510,12 +523,33 @@ fun SpatialVideoPlayerContent(
         )
 
         if (isSurfaceReady) {
-            if (!showControls) {
+            if (playerState.subtitleCues.isNotEmpty()) {
                 SpatialPanel(
-                    modifier = SubspaceModifier.fillMaxSize(),
+                    modifier = buildImmersiveSubtitleModifier(
+                        dashboardPanelPose = dashboardPanelPose,
+                        density = density,
+                        controlsVisible = showControls,
+                    ),
+                    interactionPolicy = clickInteractionPolicy(isEnabled = false),
+                ) {
+                    SubtitleCueOverlay(
+                        cues = playerState.subtitleCues,
+                        bottomPaddingFraction = SUBTITLE_DEFAULT_BOTTOM_PADDING_FRACTION,
+                    )
+                }
+            }
+
+            if (playbackLayerPolicy.showRevealInputLayer) {
+                SpatialPanel(
+                    modifier = buildImmersiveRevealInputModifier(
+                        dashboardPanelPose = dashboardPanelPose,
+                        density = density,
+                    ),
                     interactionPolicy = clickInteractionPolicy(
                         isHandTrackingEnabled = isHandTrackingEnabled,
-                    ),
+                    ) {
+                        videoPlayerViewModel.setControlsVisibility(true)
+                    },
                 ) {
                     PlaybackScrollInputOverlay(
                         showControls = false,
@@ -534,7 +568,7 @@ fun SpatialVideoPlayerContent(
                 }
             }
 
-            if (showControls) {
+            if (playbackLayerPolicy.showControlsLayer) {
                 SpatialPanel(
                     modifier = buildImmersiveControlsModifier(
                         dashboardPanelPose = dashboardPanelPose,
@@ -567,7 +601,7 @@ fun SpatialVideoPlayerContent(
         Standard2DPlayer(
             exoPlayer = exoPlayer,
             stereoMode = xrStereoMode,
-            interactionPolicy = toggleInteractionPolicy,
+            interactionPolicy = revealInteractionPolicy,
             showControls = showControls,
             isSurfaceReady = isSurfaceReady,
             videoPlayerViewModel = videoPlayerViewModel,
@@ -687,40 +721,80 @@ private fun Standard2DPlayer(
                     SpatialPanel(
                         modifier = SubspaceModifier.fillMaxSize(),
                     ) {
-                        PlaybackScrollInputOverlay(
-                            showControls = showControls,
-                            controlsInputLocked = playerState.controlsInputLocked,
-                            seekPreviewActive = playerState.seekPreviewActive,
-                            onKeyUp = { event ->
-                                videoPlayerViewModel.dispatchPlaybackKeyEvent(event)
-                            },
-                            controlsAlignment = Alignment.BottomCenter,
-                            controlsPadding = PaddingValues(
-                                start = 20.dp,
-                                end = 20.dp,
-                                bottom = 28.dp
-                            ),
-                            controlsModifier = Modifier
-                                .fillMaxWidth(0.92f)
-                                .widthIn(max = 1080.dp),
-                            onHorizontalScrollDelta = { delta ->
-                                videoPlayerViewModel.handlePlaybackHorizontalScroll(delta)
-                            },
-                            onVerticalScrollDelta = { delta ->
-                                videoPlayerViewModel.handlePlaybackVerticalScroll(delta)
-                            },
-                        ) {
-                            XRPlaybackControls(
-                                videoPlayerViewModel = videoPlayerViewModel,
-                                playerState = playerState,
-                                onNavigateBack = { videoPlayerViewModel.requestNavigateBack() },
-                            )
+                        Box(modifier = Modifier.fillMaxSize()) {
+                            if (playerState.subtitleCues.isNotEmpty()) {
+                                SubtitleCueOverlay(
+                                    cues = playerState.subtitleCues,
+                                    bottomPaddingFraction =
+                                        if (showControls) {
+                                            SUBTITLE_CONTROLS_VISIBLE_BOTTOM_PADDING_FRACTION
+                                        } else {
+                                            SUBTITLE_DEFAULT_BOTTOM_PADDING_FRACTION
+                                        },
+                                )
+                            }
+
+                            PlaybackScrollInputOverlay(
+                                showControls = showControls,
+                                controlsInputLocked = playerState.controlsInputLocked,
+                                seekPreviewActive = playerState.seekPreviewActive,
+                                onKeyUp = { event ->
+                                    videoPlayerViewModel.dispatchPlaybackKeyEvent(event)
+                                },
+                                controlsAlignment = Alignment.BottomCenter,
+                                controlsPadding = PaddingValues(
+                                    start = 20.dp,
+                                    end = 20.dp,
+                                    bottom = 28.dp
+                                ),
+                                controlsModifier = Modifier
+                                    .fillMaxWidth(0.92f)
+                                    .widthIn(max = 1080.dp),
+                                onHorizontalScrollDelta = { delta ->
+                                    videoPlayerViewModel.handlePlaybackHorizontalScroll(delta)
+                                },
+                                onVerticalScrollDelta = { delta ->
+                                    videoPlayerViewModel.handlePlaybackVerticalScroll(delta)
+                                },
+                            ) {
+                                XRPlaybackControls(
+                                    videoPlayerViewModel = videoPlayerViewModel,
+                                    playerState = playerState,
+                                    onNavigateBack = { videoPlayerViewModel.requestNavigateBack() },
+                                )
+                            }
                         }
                     }
                 }
             }
         }
     }
+}
+
+@Composable
+private fun SubtitleCueOverlay(
+    cues: List<androidx.media3.common.text.Cue>,
+    bottomPaddingFraction: Float,
+) {
+    AndroidView(
+        factory = { context ->
+            SubtitleView(context).apply {
+                setBackgroundColor(android.graphics.Color.TRANSPARENT)
+                setApplyEmbeddedStyles(true)
+                setApplyEmbeddedFontSizes(true)
+                setUserDefaultStyle()
+                setUserDefaultTextSize()
+                setBottomPaddingFraction(bottomPaddingFraction)
+                isClickable = false
+                isFocusable = false
+            }
+        },
+        update = { subtitleView ->
+            subtitleView.setBottomPaddingFraction(bottomPaddingFraction)
+            subtitleView.setCues(cues)
+        },
+        modifier = Modifier.fillMaxSize(),
+    )
 }
 
 
@@ -766,6 +840,61 @@ private fun buildHiddenMainPanelAnchorModifier(
             x = HIDDEN_MAIN_PANEL_OFFSET,
             y = HIDDEN_MAIN_PANEL_OFFSET,
         )
+
+private fun buildImmersiveRevealInputModifier(
+    dashboardPanelPose: Pose?,
+    density: Density,
+): SubspaceModifier {
+    val baseModifier =
+        SubspaceModifier
+            .width(IMMERSIVE_REVEAL_PANEL_WIDTH)
+            .height(IMMERSIVE_REVEAL_PANEL_HEIGHT)
+
+    if (dashboardPanelPose == null) {
+        return baseModifier
+    }
+
+    return baseModifier
+        .offset(
+            x = with(density) {
+                dashboardPanelPose.translation.x.toDp()
+            } * IMMERSIVE_REVEAL_FRONT_FACTOR,
+            y = with(density) { dashboardPanelPose.translation.y.toDp() },
+            z = with(density) {
+                dashboardPanelPose.translation.z.toDp()
+            } * IMMERSIVE_REVEAL_FRONT_FACTOR,
+        )
+        .rotate(dashboardPanelPose.rotation)
+}
+
+private fun buildImmersiveSubtitleModifier(
+    dashboardPanelPose: Pose?,
+    density: Density,
+    controlsVisible: Boolean,
+): SubspaceModifier {
+    val verticalOffset =
+        if (controlsVisible) IMMERSIVE_SUBTITLE_CONTROLS_VISIBLE_UP_OFFSET else 0.dp
+    val baseModifier =
+        SubspaceModifier
+            .width(IMMERSIVE_SUBTITLE_PANEL_WIDTH)
+            .height(IMMERSIVE_SUBTITLE_PANEL_HEIGHT)
+
+    if (dashboardPanelPose == null) {
+        return baseModifier.offset(y = verticalOffset)
+    }
+
+    return baseModifier
+        .offset(
+            x = with(density) {
+                dashboardPanelPose.translation.x.toDp()
+            } * IMMERSIVE_SUBTITLE_FRONT_FACTOR,
+            y = with(density) { dashboardPanelPose.translation.y.toDp() } + verticalOffset,
+            z = with(density) {
+                dashboardPanelPose.translation.z.toDp()
+            } * IMMERSIVE_SUBTITLE_FRONT_FACTOR,
+        )
+        .rotate(dashboardPanelPose.rotation)
+}
 
 private fun buildImmersiveControlsModifier(
     dashboardPanelPose: Pose?,
