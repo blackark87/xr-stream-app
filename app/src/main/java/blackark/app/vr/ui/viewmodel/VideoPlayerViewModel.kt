@@ -3,6 +3,8 @@ package blackark.app.vr.ui.viewmodel
 import android.content.Context
 import android.database.ContentObserver
 import android.media.AudioManager
+import android.text.Spanned
+import android.text.style.ForegroundColorSpan
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
@@ -29,14 +31,18 @@ import blackark.app.vr.network.LocalFileClient
 import blackark.app.vr.network.SMBClient
 import blackark.app.vr.network.SMBConfig
 import blackark.app.vr.network.SMBFileItem
+import blackark.app.vr.player.AssColorSubtitleParserFactory
 import blackark.app.vr.player.ExternalSubtitle
 import blackark.app.vr.player.PlaybackSource
 import blackark.app.vr.player.SMBDataSource
 import blackark.app.vr.player.buildKoreanExternalSubtitleCandidates
 import blackark.app.vr.player.configureKoreanExternalSubtitle
+import blackark.app.vr.player.resolveCurrentPlaylistIndex
 import blackark.app.vr.player.resolveKoreanExternalSubtitle
+import blackark.app.vr.player.resolvePlaybackPlaylist
 import blackark.app.vr.utils.AppSettingsStore
 import blackark.app.vr.utils.InferredDisplayProfile
+import blackark.app.vr.utils.SubtitleFontCatalog
 import blackark.app.vr.utils.VideoFramePreviewExtractor
 import blackark.app.vr.utils.inferDisplayProfileFromFrame
 import kotlinx.coroutines.CoroutineScope
@@ -58,6 +64,24 @@ import kotlin.math.roundToInt
 
 private const val PLAYER_LOG_TAG = "VideoPlayerViewModel"
 private const val SUBTITLE_LOG_PREFIX = "[SubtitleDebug]"
+private const val PLAYBACK_CONTROL_LOG_PREFIX = "[PlaybackControlDebug]"
+
+private fun describeCueColors(cues: List<Cue>): String {
+    val colors = cues
+        .asSequence()
+        .mapNotNull { it.text as? Spanned }
+        .flatMap { text ->
+            text.getSpans(0, text.length, ForegroundColorSpan::class.java)
+                .asSequence()
+        }
+        .map { span -> span.foregroundColor }
+        .distinct()
+        .take(6)
+        .map { color -> "#%08X".format(color) }
+        .toList()
+
+    return colors.ifEmpty { listOf("none") }.joinToString(",")
+}
 
 sealed class PlayerEvent {
     object NavigateBack : PlayerEvent()
@@ -79,13 +103,15 @@ data class VideoPlayerState(
     val zoomLevel: Float = 1.0f,
     val playlist: List<SMBFileItem> = emptyList(),
     val currentPlaylistIndex: Int = -1,
+    val canPlayPrevious: Boolean = false,
+    val canPlayNext: Boolean = false,
     val showControls: Boolean = false,
     val controlsInputLocked: Boolean = false,
     val seekPreviewActive: Boolean = false,
     val seekPreviewTargetPositionMs: Long = 0,
     val seekPreviewThumbnailPath: String? = null,
     val subtitlesEnabled: Boolean = true,
-    val subtitleFontFamily: SubtitleFontFamily = SubtitleFontFamily.SansSerif,
+    val subtitleFontId: String = SubtitleFontCatalog.DEFAULT_FONT_ID,
     val subtitleTextSize: SubtitleTextSize = SubtitleTextSize.Medium,
     val subtitleCues: List<Cue> = emptyList(),
     val externalSubtitleFileName: String? = null,
@@ -108,12 +134,6 @@ enum class StereoMode {
     Mono,
     SideBySide,
     TopBottom
-}
-
-enum class SubtitleFontFamily {
-    SansSerif,
-    Serif,
-    Monospace,
 }
 
 enum class SubtitleTextSize(val scale: Float) {
@@ -272,19 +292,6 @@ class VideoPlayerViewModel(
         )
         player?.currentTracks?.let(::logSubtitleTrackState)
         scheduleControlsAutoHideIfNeeded()
-    }
-
-    fun setSubtitleFontFamily(fontFamily: SubtitleFontFamily) {
-        if (_state.value.subtitleFontFamily == fontFamily) return
-
-        _state.value = _state.value.copy(subtitleFontFamily = fontFamily)
-        appContext?.let { context ->
-            AppSettingsStore.setSubtitleFontFamily(context, fontFamily.name)
-        }
-        Log.i(
-            PLAYER_LOG_TAG,
-            "$SUBTITLE_LOG_PREFIX font family=${fontFamily.name}",
-        )
     }
 
     fun setSubtitleTextSize(textSize: SubtitleTextSize) {
@@ -1163,11 +1170,9 @@ class VideoPlayerViewModel(
                     VideoFormat.Format2D
                 }
 
-                val initialSubtitleFontFamily = AppSettingsStore.getSubtitleFontFamily(context)
-                    ?.let { savedName ->
-                        SubtitleFontFamily.entries.firstOrNull { it.name == savedName }
-                    }
-                    ?: SubtitleFontFamily.SansSerif
+                val initialSubtitleFontId = SubtitleFontCatalog.normalizePersistedId(
+                    AppSettingsStore.getSubtitleFontId(context)
+                )
                 val initialSubtitleTextSize = AppSettingsStore.getSubtitleTextSize(context)
                     ?.let { savedName ->
                         SubtitleTextSize.entries.firstOrNull { it.name == savedName }
@@ -1188,13 +1193,17 @@ class VideoPlayerViewModel(
                     stereoMode = initialStereoMode,
                     videoFormat = initialVideoFormat,
                     activePlaybackMenu = PlaybackMenu.None,
+                    playlist = emptyList(),
+                    currentPlaylistIndex = -1,
+                    canPlayPrevious = false,
+                    canPlayNext = false,
                     showControls = false,
                     controlsInputLocked = false,
                     seekPreviewActive = false,
                     seekPreviewTargetPositionMs = 0L,
                     seekPreviewThumbnailPath = null,
                     subtitlesEnabled = true,
-                    subtitleFontFamily = initialSubtitleFontFamily,
+                    subtitleFontId = initialSubtitleFontId,
                     subtitleTextSize = initialSubtitleTextSize,
                     subtitleCues = emptyList(),
                     externalSubtitleFileName = null,
@@ -1335,7 +1344,8 @@ class VideoPlayerViewModel(
                                     PLAYER_LOG_TAG,
                                     "$SUBTITLE_LOG_PREFIX cues count=${cueGroup.cues.size} " +
                                             "timeUs=${cueGroup.presentationTimeUs} " +
-                                            "enabled=$subtitlesEnabled",
+                                            "enabled=$subtitlesEnabled " +
+                                            "colors=${describeCueColors(cueGroup.cues)}",
                                 )
                                 _state.value = _state.value.copy(
                                     subtitleCues =
@@ -1459,6 +1469,7 @@ class VideoPlayerViewModel(
                 )
 
                 val mediaSource = DefaultMediaSourceFactory(dataSourceFactory)
+                    .setSubtitleParserFactory(AssColorSubtitleParserFactory())
                     .createMediaSource(mediaItem)
 
                 // Set media source and prepare
@@ -1618,7 +1629,7 @@ class VideoPlayerViewModel(
             Log.d(PLAYER_LOG_TAG, "Fetching sibling files for path: $relativeParentPath")
 
             val client = SMBClient(smbConfig)
-            val connectResult = client.connect()
+            val connectResult = client.connect(verifyRootAccess = false)
             if (connectResult.isFailure) {
                 Log.w(
                     PLAYER_LOG_TAG,
@@ -1628,19 +1639,22 @@ class VideoPlayerViewModel(
                 return null
             }
 
-            val listResult = client.listFiles(relativeParentPath)
-            client.disconnect()
+            try {
+                val listResult = client.listFiles(relativeParentPath)
+                if (listResult.isFailure) {
+                    Log.w(
+                        PLAYER_LOG_TAG,
+                        "$PLAYBACK_CONTROL_LOG_PREFIX sibling listing failed " +
+                                "path=$relativeParentPath: " +
+                                listResult.exceptionOrNull()?.message,
+                    )
+                    return null
+                }
 
-            if (listResult.isFailure) {
-                Log.w(
-                    PLAYER_LOG_TAG,
-                    "$SUBTITLE_LOG_PREFIX sibling listing failed path=$relativeParentPath: " +
-                            listResult.exceptionOrNull()?.message,
-                )
-                return null
+                listResult.getOrNull().orEmpty()
+            } finally {
+                client.disconnect()
             }
-
-            listResult.getOrNull().orEmpty()
         } catch (e: Exception) {
             Log.e(
                 PLAYER_LOG_TAG,
@@ -1804,24 +1818,23 @@ class VideoPlayerViewModel(
         currentFile: SMBFileItem,
         siblingFiles: List<SMBFileItem>,
     ): Pair<List<SMBFileItem>, Int> {
-        val videoFiles = siblingFiles
-            .asSequence()
-            .filter { !it.isDirectory && SMBClient.isVideoFile(it.name) }
-            .sortedBy { it.name.lowercase() }
-            .toList()
-        val currentIndex = resolveCurrentPlaylistIndex(videoFiles, currentFile)
+        val snapshot = resolvePlaybackPlaylist(currentFile, siblingFiles)
 
         _state.value = _state.value.copy(
-            playlist = videoFiles,
-            currentPlaylistIndex = currentIndex,
+            playlist = snapshot.files,
+            currentPlaylistIndex = snapshot.currentIndex,
+            canPlayPrevious = snapshot.canPlayPrevious,
+            canPlayNext = snapshot.canPlayNext,
         )
 
-        Log.d(
-            "VideoPlayerViewModel",
-            "Playlist fetched: ${videoFiles.size} videos, current index: $currentIndex"
+        Log.i(
+            PLAYER_LOG_TAG,
+            "$PLAYBACK_CONTROL_LOG_PREFIX playlist size=${snapshot.files.size} " +
+                    "currentIndex=${snapshot.currentIndex} " +
+                    "previous=${snapshot.canPlayPrevious} next=${snapshot.canPlayNext}",
         )
 
-        return videoFiles to currentIndex
+        return snapshot.files to snapshot.currentIndex
     }
 
     private fun resolveRelativeParentPath(currentPath: String, smbConfig: SMBConfig): String {
@@ -1853,27 +1866,6 @@ class VideoPlayerViewModel(
         }
     }
 
-    private fun normalizeSmbPath(path: String): String {
-        return path
-            .trim()
-            .replace('\\', '/')
-            .removeSuffix("/")
-            .lowercase()
-    }
-
-    private fun resolveCurrentPlaylistIndex(
-        playlist: List<SMBFileItem>,
-        currentFile: SMBFileItem,
-    ): Int {
-        if (playlist.isEmpty()) return -1
-
-        val normalizedCurrent = normalizeSmbPath(currentFile.path)
-        val byPath = playlist.indexOfFirst { normalizeSmbPath(it.path) == normalizedCurrent }
-        if (byPath >= 0) return byPath
-
-        return playlist.indexOfFirst { it.name.equals(currentFile.name, ignoreCase = true) }
-    }
-
     private suspend fun ensurePlaylistReady(): Pair<List<SMBFileItem>, Int>? {
         val currentFile = _state.value.videoFile ?: return null
         val playbackSource = currentPlaybackSource ?: return null
@@ -1883,7 +1875,11 @@ class VideoPlayerViewModel(
 
         if (currentPlaylist.isNotEmpty() && currentIndex >= 0) {
             if (currentIndex != _state.value.currentPlaylistIndex) {
-                _state.value = _state.value.copy(currentPlaylistIndex = currentIndex)
+                _state.value = _state.value.copy(
+                    currentPlaylistIndex = currentIndex,
+                    canPlayPrevious = currentIndex > 0,
+                    canPlayNext = currentIndex < currentPlaylist.lastIndex,
+                )
             }
             return currentPlaylist to currentIndex
         }
@@ -1893,15 +1889,30 @@ class VideoPlayerViewModel(
 
     fun playNextVideo() {
         viewModelScope.launch {
-            val playlistResult = ensurePlaylistReady() ?: return@launch
+            val playlistResult = ensurePlaylistReady()
+            if (playlistResult == null) {
+                Log.w(PLAYER_LOG_TAG, "$PLAYBACK_CONTROL_LOG_PREFIX next unavailable playlist")
+                return@launch
+            }
             val (playlist, currentIndex) = playlistResult
-            if (currentIndex < 0 || currentIndex >= playlist.lastIndex) return@launch
+            if (currentIndex < 0 || currentIndex >= playlist.lastIndex) {
+                Log.i(
+                    PLAYER_LOG_TAG,
+                    "$PLAYBACK_CONTROL_LOG_PREFIX next boundary index=$currentIndex size=${playlist.size}",
+                )
+                return@launch
+            }
 
             val ctx = appContext ?: return@launch
             val playbackSource = currentPlaybackSource ?: return@launch
 
             val nextIndex = currentIndex + 1
             val nextFile = playlist[nextIndex]
+            Log.i(
+                PLAYER_LOG_TAG,
+                "$PLAYBACK_CONTROL_LOG_PREFIX next from=$currentIndex to=$nextIndex " +
+                        "file=${nextFile.name}",
+            )
 
             _state.value = _state.value.copy(currentPlaylistIndex = nextIndex)
             initializePlayer(ctx, playbackSource, nextFile)
@@ -1911,15 +1922,31 @@ class VideoPlayerViewModel(
 
     fun playPreviousVideo() {
         viewModelScope.launch {
-            val playlistResult = ensurePlaylistReady() ?: return@launch
+            val playlistResult = ensurePlaylistReady()
+            if (playlistResult == null) {
+                Log.w(PLAYER_LOG_TAG, "$PLAYBACK_CONTROL_LOG_PREFIX previous unavailable playlist")
+                return@launch
+            }
             val (playlist, currentIndex) = playlistResult
-            if (currentIndex <= 0 || currentIndex >= playlist.size) return@launch
+            if (currentIndex <= 0 || currentIndex >= playlist.size) {
+                Log.i(
+                    PLAYER_LOG_TAG,
+                    "$PLAYBACK_CONTROL_LOG_PREFIX previous boundary " +
+                            "index=$currentIndex size=${playlist.size}",
+                )
+                return@launch
+            }
 
             val ctx = appContext ?: return@launch
             val playbackSource = currentPlaybackSource ?: return@launch
 
             val prevIndex = currentIndex - 1
             val prevFile = playlist[prevIndex]
+            Log.i(
+                PLAYER_LOG_TAG,
+                "$PLAYBACK_CONTROL_LOG_PREFIX previous from=$currentIndex to=$prevIndex " +
+                        "file=${prevFile.name}",
+            )
 
             _state.value = _state.value.copy(currentPlaylistIndex = prevIndex)
             initializePlayer(ctx, playbackSource, prevFile)

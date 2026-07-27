@@ -6,10 +6,12 @@ import android.content.Intent
 import android.net.Uri
 import android.provider.DocumentsContract
 import android.util.Log
+import android.util.TypedValue
 import android.view.KeyEvent
 import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.widget.TextView
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -115,6 +117,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.boundsInWindow
@@ -182,12 +185,15 @@ import blackark.app.vr.ui.viewmodel.AvVrFilterOption
 import blackark.app.vr.ui.viewmodel.FileBrowserSortMode
 import blackark.app.vr.ui.viewmodel.FileBrowserViewMode
 import blackark.app.vr.ui.viewmodel.MainDashboardViewModel
+import blackark.app.vr.ui.viewmodel.SubtitleTextSize
 import blackark.app.vr.utils.AppSettingsStore
 import blackark.app.vr.utils.ImageCacheVersionStore
 import blackark.app.vr.utils.JvrCastMetadata
 import blackark.app.vr.utils.JvrLibraryMetadataProvider
 import blackark.app.vr.utils.JvrMovieMetadata
 import blackark.app.vr.utils.ServerCredentialAutofillStore
+import blackark.app.vr.utils.SubtitleFontCatalog
+import blackark.app.vr.utils.SubtitleFontOption
 import blackark.app.vr.utils.ThumbnailImageLoaderProvider
 import blackark.app.vr.utils.VideoThumbnailFetcher
 import blackark.app.vr.utils.extractVirtualGroupKey
@@ -1809,6 +1815,24 @@ private fun SettingsPanel(
     onClearFavorites: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val context = LocalContext.current.applicationContext
+    val subtitleFonts = remember { SubtitleFontCatalog.availableFonts() }
+    var selectedSubtitleFontId by remember {
+        mutableStateOf(
+            SubtitleFontCatalog.resolveOption(
+                fontId = AppSettingsStore.getSubtitleFontId(context),
+                availableFonts = subtitleFonts,
+            ).id
+        )
+    }
+    var selectedSubtitleTextSize by remember {
+        mutableStateOf(
+            AppSettingsStore.getSubtitleTextSize(context)
+                ?.let { stored -> SubtitleTextSize.entries.firstOrNull { it.name == stored } }
+                ?: SubtitleTextSize.Medium
+        )
+    }
+
     Card(
         modifier = modifier,
         colors = CardDefaults.cardColors(
@@ -1819,7 +1843,8 @@ private fun SettingsPanel(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(16.dp),
+                .padding(16.dp)
+                .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             Text(
@@ -1842,6 +1867,32 @@ private fun SettingsPanel(
                 checked = isAvBackgroundIndexingEnabled,
                 onCheckedChange = onAvBackgroundIndexingChange,
             )
+
+            HorizontalDivider(color = DividerGray)
+
+            Text(
+                text = stringResource(R.string.subtitle_settings),
+                style = MaterialTheme.typography.titleLarge,
+                color = TextPrimary,
+            )
+            SettingsSubtitleFontPicker(
+                fonts = subtitleFonts,
+                selectedFontId = selectedSubtitleFontId,
+                onFontSelected = { option ->
+                    selectedSubtitleFontId = option.id
+                    AppSettingsStore.setSubtitleFontId(context, option.id)
+                },
+            )
+            SettingsSubtitleSizePicker(
+                selectedSize = selectedSubtitleTextSize,
+                onSizeSelected = { size ->
+                    selectedSubtitleTextSize = size
+                    AppSettingsStore.setSubtitleTextSize(context, size.name)
+                },
+            )
+
+            HorizontalDivider(color = DividerGray)
+
             SettingsActionRow(
                 title = stringResource(R.string.clear_artwork),
                 description = stringResource(R.string.clear_artwork_description),
@@ -1916,6 +1967,188 @@ private fun SettingsPanel(
             )
         }
     }
+}
+
+@Composable
+private fun SettingsSubtitleFontPicker(
+    fonts: List<SubtitleFontOption>,
+    selectedFontId: String,
+    onFontSelected: (SubtitleFontOption) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val selectedFont = remember(fonts, selectedFontId) {
+        SubtitleFontCatalog.resolveOption(selectedFontId, fonts)
+    }
+
+    Column(
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            text = stringResource(R.string.subtitle_font),
+            style = MaterialTheme.typography.titleMedium,
+            color = TextPrimary,
+        )
+        Text(
+            text = stringResource(R.string.subtitle_font_description),
+            style = MaterialTheme.typography.bodySmall,
+            color = TextTertiary,
+        )
+
+        Box(modifier = Modifier.fillMaxWidth()) {
+            Button(
+                onClick = { expanded = true },
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = CardBackgroundHover,
+                    contentColor = TextPrimary,
+                ),
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+            ) {
+                SubtitleFontPreviewText(
+                    option = selectedFont,
+                    text = selectedFont.displayName,
+                    textColor = TextPrimary,
+                    textSizeSp = 16f,
+                    singleLine = true,
+                    modifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = 32.dp),
+                )
+                Icon(
+                    imageVector = Icons.Filled.KeyboardArrowDown,
+                    contentDescription = null,
+                    tint = TextSecondary,
+                )
+            }
+
+            DropdownMenu(
+                expanded = expanded,
+                onDismissRequest = { expanded = false },
+                modifier = Modifier
+                    .widthIn(min = 360.dp, max = 520.dp)
+                    .heightIn(max = 420.dp),
+            ) {
+                fonts.forEach { option ->
+                    DropdownMenuItem(
+                        text = {
+                            SubtitleFontPreviewText(
+                                option = option,
+                                text = option.displayName,
+                                textColor = TextPrimary,
+                                textSizeSp = 16f,
+                                singleLine = true,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(min = 36.dp),
+                            )
+                        },
+                        trailingIcon = {
+                            if (option.id == selectedFont.id) {
+                                Text(
+                                    text = "✓",
+                                    color = SuccessGreen,
+                                    style = MaterialTheme.typography.titleMedium,
+                                )
+                            }
+                        },
+                        onClick = {
+                            onFontSelected(option)
+                            expanded = false
+                        },
+                    )
+                }
+            }
+        }
+
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = CardBackgroundHover),
+            shape = RoundedCornerShape(12.dp),
+        ) {
+            SubtitleFontPreviewText(
+                option = selectedFont,
+                text = stringResource(R.string.subtitle_font_preview),
+                textColor = TextPrimary,
+                textSizeSp = 22f,
+                singleLine = false,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 12.dp)
+                    .heightIn(min = 44.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun SettingsSubtitleSizePicker(
+    selectedSize: SubtitleTextSize,
+    onSizeSelected: (SubtitleTextSize) -> Unit,
+) {
+    Column(
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            text = stringResource(R.string.subtitle_size),
+            style = MaterialTheme.typography.titleMedium,
+            color = TextPrimary,
+        )
+        Text(
+            text = stringResource(R.string.subtitle_size_description),
+            style = MaterialTheme.typography.bodySmall,
+            color = TextTertiary,
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            SubtitleTextSize.entries.forEach { size ->
+                val selected = size == selectedSize
+                Button(
+                    onClick = { onSizeSelected(size) },
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (selected) NetflixRed else CardBackgroundHover,
+                        contentColor = TextPrimary,
+                    ),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
+                ) {
+                    Text(text = "${(size.scale * 100).roundToInt()}%")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SubtitleFontPreviewText(
+    option: SubtitleFontOption,
+    text: String,
+    textColor: Color,
+    textSizeSp: Float,
+    singleLine: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val typeface = remember(option.id) { SubtitleFontCatalog.resolveTypeface(option) }
+    val colorArgb = textColor.toArgb()
+    AndroidView(
+        factory = { context ->
+            TextView(context).apply {
+                setBackgroundColor(android.graphics.Color.TRANSPARENT)
+                includeFontPadding = false
+                setPadding(0, 0, 0, 0)
+            }
+        },
+        update = { view ->
+            view.text = text
+            view.typeface = typeface
+            view.setTextColor(colorArgb)
+            view.setTextSize(TypedValue.COMPLEX_UNIT_SP, textSizeSp)
+            view.setSingleLine(singleLine)
+            view.maxLines = if (singleLine) 1 else 2
+        },
+        modifier = modifier,
+    )
 }
 
 @Composable

@@ -3,7 +3,6 @@ package blackark.app.vr.ui.screens
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
-import android.graphics.Typeface
 import android.os.Build
 import android.text.SpannableString
 import android.text.Spanned
@@ -99,13 +98,13 @@ import blackark.app.vr.ui.ApplyHandTrackingPreference
 import blackark.app.vr.ui.components.XRPlaybackControls
 import blackark.app.vr.ui.isSpatialInputSourceAllowed
 import blackark.app.vr.ui.viewmodel.PlayerEvent
-import blackark.app.vr.ui.viewmodel.SubtitleFontFamily
 import blackark.app.vr.ui.viewmodel.SubtitleTextSize
 import blackark.app.vr.ui.viewmodel.VideoFormat
 import blackark.app.vr.ui.viewmodel.VideoPlayerState
 import blackark.app.vr.ui.viewmodel.VideoPlayerViewModel
 import blackark.app.vr.ui.viewmodel.VideoPlayerViewModelFactory
 import blackark.app.vr.utils.AppSettingsStore
+import blackark.app.vr.utils.SubtitleFontCatalog
 import kotlinx.coroutines.delay
 
 private const val TAG = "VideoPlayerScreen"
@@ -116,7 +115,7 @@ private val IMMERSIVE_CONTROLS_PANEL_WIDTH_MONO = 1260.dp
 private val IMMERSIVE_CONTROLS_PANEL_WIDTH_STEREO = 1460.dp
 private const val IMMERSIVE_CONTROLS_FRONT_FACTOR = 0.84f
 // Subspace uses positive Y upward, so a negative offset places controls lower.
-private val IMMERSIVE_CONTROLS_DOWN_OFFSET = (-220).dp
+private val IMMERSIVE_CONTROLS_DOWN_OFFSET = (-320).dp
 private val IMMERSIVE_REVEAL_PANEL_WIDTH = 2400.dp
 private val IMMERSIVE_REVEAL_PANEL_HEIGHT = 1400.dp
 // Keep the hidden reveal target in front of subtitles, and controls in front of both.
@@ -124,9 +123,9 @@ private const val IMMERSIVE_REVEAL_FRONT_FACTOR = 0.86f
 private val IMMERSIVE_SUBTITLE_PANEL_WIDTH = 1280.dp
 private val IMMERSIVE_SUBTITLE_PANEL_HEIGHT = 720.dp
 private const val IMMERSIVE_SUBTITLE_FRONT_FACTOR = 0.90f
-private val IMMERSIVE_SUBTITLE_CONTROLS_VISIBLE_UP_OFFSET = 180.dp
+private val IMMERSIVE_SUBTITLE_CONTROLS_VISIBLE_UP_OFFSET = 260.dp
 private const val SUBTITLE_DEFAULT_BOTTOM_PADDING_FRACTION = 0.08f
-private const val SUBTITLE_CONTROLS_VISIBLE_BOTTOM_PADDING_FRACTION = 0.36f
+private const val SUBTITLE_CONTROLS_VISIBLE_BOTTOM_PADDING_FRACTION = 0.44f
 
 private tailrec fun Context.findActivity(): Activity? =
     when (this) {
@@ -544,7 +543,7 @@ fun SpatialVideoPlayerContent(
                     SubtitleCueOverlay(
                         cues = playerState.subtitleCues,
                         bottomPaddingFraction = SUBTITLE_DEFAULT_BOTTOM_PADDING_FRACTION,
-                        fontFamily = playerState.subtitleFontFamily,
+                        fontId = playerState.subtitleFontId,
                         textSize = playerState.subtitleTextSize,
                     )
                 }
@@ -742,7 +741,7 @@ private fun Standard2DPlayer(
                                         } else {
                                             SUBTITLE_DEFAULT_BOTTOM_PADDING_FRACTION
                                         },
-                                    fontFamily = playerState.subtitleFontFamily,
+                                    fontId = playerState.subtitleFontId,
                                     textSize = playerState.subtitleTextSize,
                                 )
                             }
@@ -788,16 +787,11 @@ private fun Standard2DPlayer(
 private fun SubtitleCueOverlay(
     cues: List<Cue>,
     bottomPaddingFraction: Float,
-    fontFamily: SubtitleFontFamily,
+    fontId: String,
     textSize: SubtitleTextSize,
 ) {
-    val typeface = remember(fontFamily) {
-        when (fontFamily) {
-            SubtitleFontFamily.SansSerif -> Typeface.SANS_SERIF
-            SubtitleFontFamily.Serif -> Typeface.SERIF
-            SubtitleFontFamily.Monospace -> Typeface.MONOSPACE
-        }
-    }
+    val fontOption = remember(fontId) { SubtitleFontCatalog.resolveOption(fontId) }
+    val typeface = remember(fontOption.id) { SubtitleFontCatalog.resolveTypeface(fontOption) }
     val fallbackStyle = remember(typeface) {
         CaptionStyleCompat(
             android.graphics.Color.WHITE,
@@ -808,7 +802,7 @@ private fun SubtitleCueOverlay(
             typeface,
         )
     }
-    val renderedCues = remember(cues, fontFamily) {
+    val renderedCues = remember(cues, fontId) {
         cues.map(::removeEmbeddedTypeface)
     }
     val textSizeFraction = SubtitleView.DEFAULT_TEXT_SIZE_FRACTION * textSize.scale

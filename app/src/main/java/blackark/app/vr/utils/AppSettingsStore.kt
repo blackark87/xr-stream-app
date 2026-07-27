@@ -68,14 +68,14 @@ object AppSettingsStore {
             .apply()
     }
 
-    fun getSubtitleFontFamily(context: Context): String? {
+    fun getSubtitleFontId(context: Context): String? {
         return prefs(context).getString(KEY_SUBTITLE_FONT_FAMILY, null)
     }
 
-    fun setSubtitleFontFamily(context: Context, fontFamily: String) {
+    fun setSubtitleFontId(context: Context, fontId: String) {
         prefs(context)
             .edit()
-            .putString(KEY_SUBTITLE_FONT_FAMILY, fontFamily)
+            .putString(KEY_SUBTITLE_FONT_FAMILY, fontId)
             .apply()
     }
 
