@@ -1,6 +1,8 @@
 package blackark.app.vr.player
 
+import androidx.media3.common.C
 import androidx.media3.common.MimeTypes
+import androidx.media3.common.TrackSelectionParameters
 import blackark.app.vr.network.SMBFileItem
 
 internal data class ExternalSubtitle(
@@ -28,3 +30,13 @@ internal fun resolveKoreanExternalSubtitle(
             ?.let { file -> ExternalSubtitle(file = file, mimeType = mimeType) }
     }
 }
+
+internal fun enableKoreanExternalSubtitle(
+    parameters: TrackSelectionParameters,
+): TrackSelectionParameters =
+    parameters.buildUpon()
+        .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+        .setSelectTextByDefault(true)
+        .setPreferredTextLanguage("ko")
+        .setSelectUndeterminedTextLanguage(true)
+        .build()

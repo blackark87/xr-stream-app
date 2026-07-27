@@ -1,9 +1,13 @@
 package blackark.app.vr.player
 
+import androidx.media3.common.C
 import androidx.media3.common.MimeTypes
+import androidx.media3.common.TrackSelectionParameters
 import blackark.app.vr.network.SMBFileItem
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ExternalSubtitleResolverTest {
@@ -58,6 +62,16 @@ class ExternalSubtitleResolverTest {
         )
 
         assertNull(subtitle)
+    }
+
+    @Test
+    fun `Korean external subtitles are explicitly selected`() {
+        val parameters = enableKoreanExternalSubtitle(TrackSelectionParameters.DEFAULT)
+
+        assertTrue(parameters.selectTextByDefault)
+        assertEquals(listOf("ko"), parameters.preferredTextLanguages)
+        assertTrue(parameters.selectUndeterminedTextLanguage)
+        assertFalse(parameters.disabledTrackTypes.contains(C.TRACK_TYPE_TEXT))
     }
 
     private fun file(

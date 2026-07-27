@@ -31,6 +31,7 @@ import blackark.app.vr.network.SMBFileItem
 import blackark.app.vr.player.ExternalSubtitle
 import blackark.app.vr.player.PlaybackSource
 import blackark.app.vr.player.SMBDataSource
+import blackark.app.vr.player.enableKoreanExternalSubtitle
 import blackark.app.vr.player.resolveKoreanExternalSubtitle
 import blackark.app.vr.utils.AppSettingsStore
 import blackark.app.vr.utils.InferredDisplayProfile
@@ -1133,6 +1134,12 @@ class VideoPlayerViewModel(
                 _state.value = _state.value.copy(
                     externalSubtitleFileName = externalSubtitle?.file?.name,
                 )
+                if (externalSubtitle != null) {
+                    Log.i(
+                        "VideoPlayerViewModel",
+                        "Using external Korean subtitle: ${externalSubtitle.file.name}",
+                    )
+                }
 
                 // Create ExoPlayer instance with larger buffer for SMB streaming
                 // Use 1MB allocation size to match SMB buffer
@@ -1158,6 +1165,10 @@ class VideoPlayerViewModel(
                     .setLoadControl(loadControl)
                     .build().apply {
                         volume = 1.0f
+                        if (externalSubtitle != null) {
+                            trackSelectionParameters =
+                                enableKoreanExternalSubtitle(trackSelectionParameters)
+                        }
                         // Set up player listener
                         addListener(object : Player.Listener {
                             override fun onPlaybackStateChanged(playbackState: Int) {
@@ -1363,6 +1374,7 @@ class VideoPlayerViewModel(
                     .setMimeType(externalSubtitle.mimeType)
                     .setLanguage("ko")
                     .setLabel("한국어")
+                    .setRoleFlags(C.ROLE_FLAG_SUBTITLE)
                     .setSelectionFlags(C.SELECTION_FLAG_DEFAULT)
                     .build()
             builder.setSubtitleConfigurations(listOf(subtitleConfiguration))

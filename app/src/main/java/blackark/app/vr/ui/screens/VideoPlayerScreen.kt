@@ -103,11 +103,11 @@ import kotlinx.coroutines.delay
 private const val TAG = "VideoPlayerScreen"
 private val HIDDEN_MAIN_PANEL_OFFSET = 4000.dp
 private val HIDDEN_MAIN_PANEL_ANCHOR_SIZE = 2.dp
-private val IMMERSIVE_CONTROLS_PANEL_HEIGHT = 360.dp
+private val IMMERSIVE_CONTROLS_PANEL_HEIGHT = 800.dp
 private val IMMERSIVE_CONTROLS_PANEL_WIDTH_MONO = 1260.dp
 private val IMMERSIVE_CONTROLS_PANEL_WIDTH_STEREO = 1460.dp
 private const val IMMERSIVE_CONTROLS_FRONT_FACTOR = 0.84f
-private val IMMERSIVE_CONTROLS_DOWN_OFFSET = 400.dp
+private val IMMERSIVE_CONTROLS_DOWN_OFFSET = (-120).dp
 private val IMMERSIVE_REVEAL_PANEL_WIDTH = 2400.dp
 private val IMMERSIVE_REVEAL_PANEL_HEIGHT = 1400.dp
 // Keep the hidden reveal target in front of subtitles, and controls in front of both.
@@ -115,7 +115,7 @@ private const val IMMERSIVE_REVEAL_FRONT_FACTOR = 0.86f
 private val IMMERSIVE_SUBTITLE_PANEL_WIDTH = 1280.dp
 private val IMMERSIVE_SUBTITLE_PANEL_HEIGHT = 720.dp
 private const val IMMERSIVE_SUBTITLE_FRONT_FACTOR = 0.90f
-private val IMMERSIVE_SUBTITLE_CONTROLS_VISIBLE_UP_OFFSET = (-160).dp
+private val IMMERSIVE_SUBTITLE_CONTROLS_VISIBLE_UP_OFFSET = 180.dp
 private const val SUBTITLE_DEFAULT_BOTTOM_PADDING_FRACTION = 0.08f
 private const val SUBTITLE_CONTROLS_VISIBLE_BOTTOM_PADDING_FRACTION = 0.36f
 
