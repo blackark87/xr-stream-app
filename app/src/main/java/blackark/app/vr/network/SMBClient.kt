@@ -31,7 +31,9 @@ class SMBClient(private val config: SMBConfig) {
 
     private var cifsContext: CIFSContext? = null
 
-    suspend fun connect(): Result<Unit> = withContext(Dispatchers.IO) {
+    suspend fun connect(
+        verifyRootAccess: Boolean = true,
+    ): Result<Unit> = withContext(Dispatchers.IO) {
         try {
             val props = Properties().apply {
                 setProperty("jcifs.smb.client.minVersion", "SMB202")
@@ -50,10 +52,12 @@ class SMBClient(private val config: SMBConfig) {
 
             cifsContext = baseContext.withCredentials(auth)
 
-            // Test connection
-            val testUrl = buildSmbUrl("")
-            val testFile = SmbFile(testUrl, cifsContext)
-            testFile.exists() // This will throw if connection fails
+            if (verifyRootAccess) {
+                // Test connection for normal browser/listing operations.
+                val testUrl = buildSmbUrl("")
+                val testFile = SmbFile(testUrl, cifsContext)
+                testFile.exists() // This will throw if connection fails
+            }
 
             Result.success(Unit)
         } catch (e: Exception) {
@@ -141,7 +145,12 @@ class SMBClient(private val config: SMBConfig) {
                 IllegalStateException("Not connected. Call connect() first.")
             )
 
-            val url = buildSmbUrl(path)
+            val url =
+                if (path.startsWith("smb://", ignoreCase = true)) {
+                    path
+                } else {
+                    buildSmbUrl(path)
+                }
             val smbFile = SmbFile(url, context)
 
             if (!smbFile.exists()) {

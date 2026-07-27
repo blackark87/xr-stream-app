@@ -31,6 +31,34 @@ internal fun resolveKoreanExternalSubtitle(
     }
 }
 
+internal fun buildKoreanExternalSubtitleCandidates(
+    videoFile: SMBFileItem,
+): List<ExternalSubtitle> {
+    val baseName = videoFile.name.substringBeforeLast('.', missingDelimiterValue = videoFile.name)
+    if (baseName.isBlank()) return emptyList()
+
+    val basePath = videoFile.path.substringBeforeLast(
+        delimiter = '.',
+        missingDelimiterValue = videoFile.path,
+    )
+    return listOf(
+        ExternalSubtitle(
+            file = videoFile.copy(
+                name = "$baseName.ko.ass",
+                path = "$basePath.ko.ass",
+            ),
+            mimeType = MimeTypes.TEXT_SSA,
+        ),
+        ExternalSubtitle(
+            file = videoFile.copy(
+                name = "$baseName.ko.srt",
+                path = "$basePath.ko.srt",
+            ),
+            mimeType = MimeTypes.APPLICATION_SUBRIP,
+        ),
+    )
+}
+
 internal fun configureKoreanExternalSubtitle(
     parameters: TrackSelectionParameters,
     enabled: Boolean,

@@ -65,6 +65,27 @@ class ExternalSubtitleResolverTest {
     }
 
     @Test
+    fun `direct candidates preserve the video URL and prefer ass`() {
+        val candidates = buildKoreanExternalSubtitleCandidates(
+            SMBFileItem(
+                name = "SAVR-420-pt1.mp4",
+                path = "smb://server/share/folder.with.dot/SAVR-420-pt1.mp4",
+                isDirectory = false,
+                size = 100L,
+                lastModified = 200L,
+            ),
+        )
+
+        assertEquals("SAVR-420-pt1.ko.ass", candidates[0].file.name)
+        assertEquals(
+            "smb://server/share/folder.with.dot/SAVR-420-pt1.ko.ass",
+            candidates[0].file.path,
+        )
+        assertEquals(MimeTypes.TEXT_SSA, candidates[0].mimeType)
+        assertEquals("SAVR-420-pt1.ko.srt", candidates[1].file.name)
+    }
+
+    @Test
     fun `Korean external subtitles are explicitly selected`() {
         val parameters = configureKoreanExternalSubtitle(
             parameters = TrackSelectionParameters.DEFAULT,

@@ -32,6 +32,7 @@ import blackark.app.vr.network.SMBFileItem
 import blackark.app.vr.player.ExternalSubtitle
 import blackark.app.vr.player.PlaybackSource
 import blackark.app.vr.player.SMBDataSource
+import blackark.app.vr.player.buildKoreanExternalSubtitleCandidates
 import blackark.app.vr.player.configureKoreanExternalSubtitle
 import blackark.app.vr.player.resolveKoreanExternalSubtitle
 import blackark.app.vr.utils.AppSettingsStore
@@ -1155,11 +1156,23 @@ class VideoPlayerViewModel(
                 saveToRecentVideos(videoFile, playbackSource, savedVideo)
 
                 val siblingFiles = loadSiblingFiles(videoFile, playbackSource)
-                val externalSubtitle = siblingFiles
+                val listedExternalSubtitle = siblingFiles
                     ?.let { files ->
                         resolveKoreanExternalSubtitle(
                             videoFileName = videoFile.name,
                             siblingFiles = files,
+                        )
+                    }
+                val externalSubtitle = listedExternalSubtitle
+                    ?: when (playbackSource) {
+                        is PlaybackSource.Smb -> loadSmbExternalSubtitleFallback(
+                            videoFile = videoFile,
+                            smbConfig = playbackSource.config,
+                        )
+
+                        is PlaybackSource.Local -> loadLocalExternalSubtitleFallback(
+                            videoFile = videoFile,
+                            playbackSource = playbackSource,
                         )
                     }
                 _state.value = _state.value.copy(
@@ -1183,7 +1196,9 @@ class VideoPlayerViewModel(
                 if (externalSubtitle != null) {
                     Log.i(
                         PLAYER_LOG_TAG,
-                        "$SUBTITLE_LOG_PREFIX selected file=${externalSubtitle.file.name} " +
+                        "$SUBTITLE_LOG_PREFIX selected " +
+                                "source=${if (listedExternalSubtitle != null) "listing" else "direct-probe"} " +
+                                "file=${externalSubtitle.file.name} " +
                                 "mime=${externalSubtitle.mimeType} " +
                                 "scheme=${externalSubtitle.file.path.toUri().scheme}",
                     )
@@ -1546,14 +1561,15 @@ class VideoPlayerViewModel(
     ): List<SMBFileItem>? {
         return try {
             val relativeParentPath = resolveRelativeParentPath(currentFile.path, smbConfig)
-            Log.d("VideoPlayerViewModel", "Fetching sibling files for path: $relativeParentPath")
+            Log.d(PLAYER_LOG_TAG, "Fetching sibling files for path: $relativeParentPath")
 
             val client = SMBClient(smbConfig)
             val connectResult = client.connect()
             if (connectResult.isFailure) {
                 Log.w(
-                    "VideoPlayerViewModel",
-                    "Failed to connect while fetching sibling files: ${connectResult.exceptionOrNull()?.message}"
+                    PLAYER_LOG_TAG,
+                    "$SUBTITLE_LOG_PREFIX sibling connect failed: " +
+                            connectResult.exceptionOrNull()?.message,
                 )
                 return null
             }
@@ -1563,17 +1579,128 @@ class VideoPlayerViewModel(
 
             if (listResult.isFailure) {
                 Log.w(
-                    "VideoPlayerViewModel",
-                    "Failed to list sibling files: ${listResult.exceptionOrNull()?.message}"
+                    PLAYER_LOG_TAG,
+                    "$SUBTITLE_LOG_PREFIX sibling listing failed path=$relativeParentPath: " +
+                            listResult.exceptionOrNull()?.message,
                 )
                 return null
             }
 
             listResult.getOrNull().orEmpty()
         } catch (e: Exception) {
-            Log.e("VideoPlayerViewModel", "Failed to fetch SMB sibling files: ${e.message}", e)
+            Log.e(
+                PLAYER_LOG_TAG,
+                "$SUBTITLE_LOG_PREFIX sibling listing threw an exception",
+                e,
+            )
             null
         }
+    }
+
+    private suspend fun loadSmbExternalSubtitleFallback(
+        videoFile: SMBFileItem,
+        smbConfig: SMBConfig,
+    ): ExternalSubtitle? {
+        val candidates = buildKoreanExternalSubtitleCandidates(videoFile)
+        if (candidates.isEmpty()) return null
+
+        Log.i(
+            PLAYER_LOG_TAG,
+            "$SUBTITLE_LOG_PREFIX direct probe candidates=${candidates.map { it.file.name }}",
+        )
+        val client = SMBClient(smbConfig)
+        val connectResult = client.connect(verifyRootAccess = false)
+        if (connectResult.isFailure) {
+            Log.w(
+                PLAYER_LOG_TAG,
+                "$SUBTITLE_LOG_PREFIX direct probe connect failed: " +
+                        connectResult.exceptionOrNull()?.message,
+            )
+            return null
+        }
+
+        try {
+            for (candidate in candidates) {
+                val fileResult = client.getFileInfo(candidate.file.path)
+                val resolvedFile = fileResult.getOrNull()
+                if (resolvedFile != null && !resolvedFile.isDirectory) {
+                    Log.i(
+                        PLAYER_LOG_TAG,
+                        "$SUBTITLE_LOG_PREFIX direct probe found file=${resolvedFile.name}",
+                    )
+                    return candidate.copy(file = resolvedFile)
+                }
+
+                Log.d(
+                    PLAYER_LOG_TAG,
+                    "$SUBTITLE_LOG_PREFIX direct probe unavailable file=${candidate.file.name} " +
+                            "reason=${fileResult.exceptionOrNull()?.message ?: "not a file"}",
+                )
+            }
+        } finally {
+            client.disconnect()
+        }
+
+        Log.w(
+            PLAYER_LOG_TAG,
+            "$SUBTITLE_LOG_PREFIX direct probe found no matching file",
+        )
+        return null
+    }
+
+    private suspend fun loadLocalExternalSubtitleFallback(
+        videoFile: SMBFileItem,
+        playbackSource: PlaybackSource.Local,
+    ): ExternalSubtitle? {
+        val context = appContext ?: return null
+        val rootTreeUri = playbackSource.rootTreeUri
+            ?: AppSettingsStore.getLocalStorageTreeUri(context)
+            ?: return null
+        val candidates = buildKoreanExternalSubtitleCandidates(videoFile)
+        if (candidates.isEmpty()) return null
+
+        Log.i(
+            PLAYER_LOG_TAG,
+            "$SUBTITLE_LOG_PREFIX local direct probe " +
+                    "candidates=${candidates.map { it.file.name }}",
+        )
+        val client = LocalFileClient(context, rootTreeUri)
+        val connectResult = client.connect()
+        if (connectResult.isFailure) {
+            Log.w(
+                PLAYER_LOG_TAG,
+                "$SUBTITLE_LOG_PREFIX local direct probe connect failed: " +
+                        connectResult.exceptionOrNull()?.message,
+            )
+            return null
+        }
+
+        for (candidate in candidates) {
+            val fileResult = client.getFileInfo(candidate.file.path)
+            val resolvedFile = fileResult.getOrNull()
+            if (resolvedFile != null && !resolvedFile.isDirectory) {
+                Log.i(
+                    PLAYER_LOG_TAG,
+                    "$SUBTITLE_LOG_PREFIX local direct probe found file=${resolvedFile.name}",
+                )
+                client.disconnect()
+                return candidate.copy(file = resolvedFile)
+            }
+
+            Log.d(
+                PLAYER_LOG_TAG,
+                "$SUBTITLE_LOG_PREFIX local direct probe unavailable " +
+                        "file=${candidate.file.name} " +
+                        "reason=${fileResult.exceptionOrNull()?.message ?: "not a file"}",
+            )
+        }
+
+        client.disconnect()
+        Log.w(
+            PLAYER_LOG_TAG,
+            "$SUBTITLE_LOG_PREFIX local direct probe found no matching file",
+        )
+        return null
     }
 
     private suspend fun loadLocalSiblingFiles(
