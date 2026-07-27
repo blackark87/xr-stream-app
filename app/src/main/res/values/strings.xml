@@ -105,7 +105,7 @@
     <string name="settings">Settings</string>
     <string name="subtitle_settings">Subtitles</string>
     <string name="subtitle_font">Subtitle font</string>
-    <string name="subtitle_font_description">Choose from fonts available on this device.</string>
+    <string name="subtitle_font_description">Choose from fonts on this device that support Korean text.</string>
     <string name="subtitle_font_preview">가나다라마바사 ABC abc 123</string>
     <string name="subtitle_size">Subtitle size</string>
     <string name="subtitle_size_description">Sets a consistent text size while preserving subtitle colors and emphasis.</string>

@@ -148,9 +148,8 @@ internal data class AssColorDocument(
 }
 
 internal object AssColorMetadataParser {
-    private val overrideBlockPattern = Regex("""\{([^}]*)}""")
     private val colorDirectivePattern =
-        Regex("""\\(1c|c|1a|alpha|r)([^\\}]*)""", RegexOption.IGNORE_CASE)
+        Regex("""\\(1c|c|1a|alpha|r)([^\\]*)""", RegexOption.IGNORE_CASE)
 
     fun parse(
         data: ByteArray,
@@ -293,9 +292,9 @@ internal object AssColorMetadataParser {
             }
         }
 
-        overrideBlockPattern.findAll(dialogue.rawText).forEach { block ->
-            appendVisibleSegment(dialogue.rawText.substring(cursor, block.range.first))
-            colorDirectivePattern.findAll(block.groupValues[1]).forEach { directive ->
+        findOverrideBlocks(dialogue.rawText).forEach { block ->
+            appendVisibleSegment(dialogue.rawText.substring(cursor, block.start))
+            colorDirectivePattern.findAll(block.contents).forEach { directive ->
                 val name = directive.groupValues[1].lowercase()
                 val argument = directive.groupValues[2].trim()
                 when (name) {
@@ -331,11 +330,33 @@ internal object AssColorMetadataParser {
                     }
                 }
             }
-            cursor = block.range.last + 1
+            cursor = block.endExclusive
         }
         appendVisibleSegment(dialogue.rawText.substring(cursor))
 
         return (visibleText.toString() to colorRuns) to directiveCount
+    }
+
+    /**
+     * Avoids Android ICU regex differences for literal closing braces in ASS override blocks.
+     */
+    private fun findOverrideBlocks(value: String): List<AssOverrideBlock> {
+        val blocks = mutableListOf<AssOverrideBlock>()
+        var searchFrom = 0
+        while (searchFrom < value.length) {
+            val start = value.indexOf('{', startIndex = searchFrom)
+            if (start < 0) break
+            val end = value.indexOf('}', startIndex = start + 1)
+            if (end < 0) break
+
+            blocks += AssOverrideBlock(
+                start = start,
+                endExclusive = end + 1,
+                contents = value.substring(start + 1, end),
+            )
+            searchFrom = end + 1
+        }
+        return blocks
     }
 
     private fun parseFormat(payload: String): List<String> =
@@ -478,5 +499,11 @@ internal object AssColorMetadataParser {
         val endTimeUs: Long,
         val styleName: String,
         val rawText: String,
+    )
+
+    private data class AssOverrideBlock(
+        val start: Int,
+        val endExclusive: Int,
+        val contents: String,
     )
 }

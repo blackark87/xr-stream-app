@@ -100,6 +100,22 @@ class AssColorMetadataParserTest {
         assertTrue(document.dialogues.single().colorRuns.isEmpty())
     }
 
+    @Test
+    fun `unclosed override block remains visible instead of crashing the parser`() {
+        val document = AssColorMetadataParser.parse(
+            ass(
+                dialogue =
+                    "Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,," +
+                            "표시 {\\1c&H0000FF& 그대로",
+            )
+        )
+
+        assertEquals(
+            "표시 {\\1c&H0000FF& 그대로",
+            document.dialogues.single().text,
+        )
+    }
+
     private fun ass(
         styles: List<String> = emptyList(),
         dialogue: String,

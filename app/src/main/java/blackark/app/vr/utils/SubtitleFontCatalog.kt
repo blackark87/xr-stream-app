@@ -38,6 +38,10 @@ object SubtitleFontCatalog {
         val systemOptions = runCatching { SystemFonts.getAvailableFonts() }.getOrDefault(emptySet())
             .mapNotNull { font ->
                 val file = font.file ?: return@mapNotNull null
+                val locales = font.localeList
+                if (!supportsKoreanLanguageCodes(List(locales.size()) { locales[it].language })) {
+                    return@mapNotNull null
+                }
                 val style = font.style
                 val italic = style.slant == FontStyle.FONT_SLANT_ITALIC
                 SubtitleFontOption(
@@ -64,6 +68,10 @@ object SubtitleFontCatalog {
 
         return familyOptions + systemOptions
     }
+
+    internal fun supportsKoreanLanguageCodes(
+        languageCodes: Iterable<String>,
+    ): Boolean = languageCodes.any { it.equals("ko", ignoreCase = true) }
 
     fun normalizePersistedId(value: String?): String = when (value) {
         null,

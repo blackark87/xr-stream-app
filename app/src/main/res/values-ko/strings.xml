@@ -96,7 +96,7 @@
     <string name="settings">설정</string>
     <string name="subtitle_settings">자막</string>
     <string name="subtitle_font">자막 글꼴</string>
-    <string name="subtitle_font_description">이 기기에서 사용할 수 있는 시스템 글꼴을 선택합니다.</string>
+    <string name="subtitle_font_description">이 기기에 설치된 글꼴 중 한글을 지원하는 글꼴을 선택합니다.</string>
     <string name="subtitle_font_preview">가나다라마바사 ABC abc 123</string>
     <string name="subtitle_size">자막 크기</string>
     <string name="subtitle_size_description">자막의 색상과 강조는 유지하면서 글자 크기를 일정하게 적용합니다.</string>

@@ -1,6 +1,8 @@
 package blackark.app.vr.utils
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SubtitleFontCatalogTest {
@@ -40,5 +42,19 @@ class SubtitleFontCatalogTest {
         )
 
         assertEquals(SubtitleFontCatalog.DEFAULT_FONT_ID, resolved.id)
+    }
+
+    @Test
+    fun `only Korean language metadata is accepted for system fonts`() {
+        assertTrue(
+            SubtitleFontCatalog.supportsKoreanLanguageCodes(
+                listOf("en", "ko", "ja"),
+            ),
+        )
+        assertFalse(
+            SubtitleFontCatalog.supportsKoreanLanguageCodes(
+                listOf("en", "ja", "zh"),
+            ),
+        )
     }
 }
