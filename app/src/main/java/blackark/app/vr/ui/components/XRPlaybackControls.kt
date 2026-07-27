@@ -71,6 +71,8 @@ import androidx.compose.ui.zIndex
 import androidx.media3.common.util.UnstableApi
 import blackark.app.vr.ui.viewmodel.PlaybackMenu
 import blackark.app.vr.ui.viewmodel.StereoMode
+import blackark.app.vr.ui.viewmodel.SubtitleFontFamily
+import blackark.app.vr.ui.viewmodel.SubtitleTextSize
 import blackark.app.vr.ui.viewmodel.VideoFormat
 import blackark.app.vr.ui.viewmodel.VideoPlayerState
 import blackark.app.vr.ui.viewmodel.VideoPlayerViewModel
@@ -255,7 +257,7 @@ fun XRPlaybackControls(
                     PlaybackMenu.Display -> {
                         PlaybackFloatingMenuCard(
                             title = "Display",
-                            subtitle = "Projection and stereo layout",
+                            subtitle = "Projection, stereo, and subtitles",
                             width = menuWidth,
                             containerColor = menuSurface,
                             borderColor = sectionBorder,
@@ -313,6 +315,60 @@ fun XRPlaybackControls(
                                             modifier = Modifier.weight(1f),
                                         )
                                     }
+                                }
+                            }
+
+                            Text(
+                                text = "Subtitle Font",
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.SemiBold,
+                                color = textMuted,
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                SubtitleFontFamily.entries.forEach { fontFamily ->
+                                    PlaybackOptionButton(
+                                        text = subtitleFontFamilyLabel(fontFamily),
+                                        selected = playerState.subtitleFontFamily == fontFamily,
+                                        onClick = {
+                                            videoPlayerViewModel.setSubtitleFontFamily(fontFamily)
+                                        },
+                                        selectedContainerColor = accentStrong,
+                                        selectedContentColor = onAccent,
+                                        idleContainerColor = chipIdle,
+                                        idleContentColor = textStrong,
+                                        borderColor = sectionBorder,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                }
+                            }
+
+                            Text(
+                                text = "Subtitle Size",
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.SemiBold,
+                                color = textMuted,
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                SubtitleTextSize.entries.forEach { textSize ->
+                                    PlaybackOptionButton(
+                                        text = subtitleTextSizeLabel(textSize),
+                                        selected = playerState.subtitleTextSize == textSize,
+                                        onClick = {
+                                            videoPlayerViewModel.setSubtitleTextSize(textSize)
+                                        },
+                                        selectedContainerColor = accentStrong,
+                                        selectedContentColor = onAccent,
+                                        idleContainerColor = chipIdle,
+                                        idleContentColor = textStrong,
+                                        borderColor = sectionBorder,
+                                        modifier = Modifier.weight(1f),
+                                    )
                                 }
                             }
                         }
@@ -900,16 +956,29 @@ private fun playbackSpeedRows(): List<List<Float>> =
 
 private fun PlaybackMenu.menuWidth(videoFormat: VideoFormat): Dp = when (this) {
     PlaybackMenu.Speed -> 276.dp
-    PlaybackMenu.Display -> if (videoFormat == VideoFormat.Format2D) 320.dp else 352.dp
+    PlaybackMenu.Display -> if (videoFormat == VideoFormat.Format2D) 420.dp else 440.dp
     PlaybackMenu.Volume -> 264.dp
     PlaybackMenu.None -> 0.dp
 }
 
 private fun PlaybackMenu.menuEstimatedHeight(videoFormat: VideoFormat): Dp = when (this) {
     PlaybackMenu.Speed -> 170.dp
-    PlaybackMenu.Display -> if (videoFormat == VideoFormat.Format2D) 172.dp else 238.dp
+    PlaybackMenu.Display -> if (videoFormat == VideoFormat.Format2D) 340.dp else 420.dp
     PlaybackMenu.Volume -> 156.dp
     PlaybackMenu.None -> 0.dp
+}
+
+private fun subtitleFontFamilyLabel(fontFamily: SubtitleFontFamily): String = when (fontFamily) {
+    SubtitleFontFamily.SansSerif -> "Sans"
+    SubtitleFontFamily.Serif -> "Serif"
+    SubtitleFontFamily.Monospace -> "Mono"
+}
+
+private fun subtitleTextSizeLabel(textSize: SubtitleTextSize): String = when (textSize) {
+    SubtitleTextSize.Small -> "80%"
+    SubtitleTextSize.Medium -> "100%"
+    SubtitleTextSize.Large -> "125%"
+    SubtitleTextSize.ExtraLarge -> "150%"
 }
 
 private fun buildPlaybackSummary(playerState: VideoPlayerState): String {

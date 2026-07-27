@@ -3,7 +3,11 @@ package blackark.app.vr.ui.screens
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
+import android.graphics.Typeface
 import android.os.Build
+import android.text.SpannableString
+import android.text.Spanned
+import android.text.style.TypefaceSpan
 import android.util.Log
 import android.window.OnBackInvokedCallback
 import android.window.OnBackInvokedDispatcher
@@ -55,8 +59,10 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.media3.common.text.Cue
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.CaptionStyleCompat
 import androidx.media3.ui.SubtitleView
 import androidx.xr.arcore.ArDevice
 import androidx.xr.compose.platform.LocalSession
@@ -93,6 +99,8 @@ import blackark.app.vr.ui.ApplyHandTrackingPreference
 import blackark.app.vr.ui.components.XRPlaybackControls
 import blackark.app.vr.ui.isSpatialInputSourceAllowed
 import blackark.app.vr.ui.viewmodel.PlayerEvent
+import blackark.app.vr.ui.viewmodel.SubtitleFontFamily
+import blackark.app.vr.ui.viewmodel.SubtitleTextSize
 import blackark.app.vr.ui.viewmodel.VideoFormat
 import blackark.app.vr.ui.viewmodel.VideoPlayerState
 import blackark.app.vr.ui.viewmodel.VideoPlayerViewModel
@@ -103,7 +111,7 @@ import kotlinx.coroutines.delay
 private const val TAG = "VideoPlayerScreen"
 private val HIDDEN_MAIN_PANEL_OFFSET = 4000.dp
 private val HIDDEN_MAIN_PANEL_ANCHOR_SIZE = 2.dp
-private val IMMERSIVE_CONTROLS_PANEL_HEIGHT = 800.dp
+private val IMMERSIVE_CONTROLS_PANEL_HEIGHT = 1200.dp
 private val IMMERSIVE_CONTROLS_PANEL_WIDTH_MONO = 1260.dp
 private val IMMERSIVE_CONTROLS_PANEL_WIDTH_STEREO = 1460.dp
 private const val IMMERSIVE_CONTROLS_FRONT_FACTOR = 0.84f
@@ -536,6 +544,8 @@ fun SpatialVideoPlayerContent(
                     SubtitleCueOverlay(
                         cues = playerState.subtitleCues,
                         bottomPaddingFraction = SUBTITLE_DEFAULT_BOTTOM_PADDING_FRACTION,
+                        fontFamily = playerState.subtitleFontFamily,
+                        textSize = playerState.subtitleTextSize,
                     )
                 }
             }
@@ -732,6 +742,8 @@ private fun Standard2DPlayer(
                                         } else {
                                             SUBTITLE_DEFAULT_BOTTOM_PADDING_FRACTION
                                         },
+                                    fontFamily = playerState.subtitleFontFamily,
+                                    textSize = playerState.subtitleTextSize,
                                 )
                             }
 
@@ -774,30 +786,73 @@ private fun Standard2DPlayer(
 
 @Composable
 private fun SubtitleCueOverlay(
-    cues: List<androidx.media3.common.text.Cue>,
+    cues: List<Cue>,
     bottomPaddingFraction: Float,
+    fontFamily: SubtitleFontFamily,
+    textSize: SubtitleTextSize,
 ) {
+    val typeface = remember(fontFamily) {
+        when (fontFamily) {
+            SubtitleFontFamily.SansSerif -> Typeface.SANS_SERIF
+            SubtitleFontFamily.Serif -> Typeface.SERIF
+            SubtitleFontFamily.Monospace -> Typeface.MONOSPACE
+        }
+    }
+    val fallbackStyle = remember(typeface) {
+        CaptionStyleCompat(
+            android.graphics.Color.WHITE,
+            android.graphics.Color.TRANSPARENT,
+            android.graphics.Color.TRANSPARENT,
+            CaptionStyleCompat.EDGE_TYPE_OUTLINE,
+            android.graphics.Color.BLACK,
+            typeface,
+        )
+    }
+    val renderedCues = remember(cues, fontFamily) {
+        cues.map(::removeEmbeddedTypeface)
+    }
+    val textSizeFraction = SubtitleView.DEFAULT_TEXT_SIZE_FRACTION * textSize.scale
+
     AndroidView(
         factory = { context ->
             SubtitleView(context).apply {
                 setBackgroundColor(android.graphics.Color.TRANSPARENT)
                 setApplyEmbeddedStyles(true)
-                setApplyEmbeddedFontSizes(true)
-                setUserDefaultStyle()
-                setUserDefaultTextSize()
+                setApplyEmbeddedFontSizes(false)
+                setStyle(fallbackStyle)
+                setFractionalTextSize(textSizeFraction)
                 setBottomPaddingFraction(bottomPaddingFraction)
                 isClickable = false
                 isFocusable = false
             }
         },
         update = { subtitleView ->
+            subtitleView.setStyle(fallbackStyle)
+            subtitleView.setFractionalTextSize(textSizeFraction)
             subtitleView.setBottomPaddingFraction(bottomPaddingFraction)
-            subtitleView.setCues(cues)
+            subtitleView.setCues(renderedCues)
         },
         modifier = Modifier.fillMaxSize(),
     )
 }
 
+private fun removeEmbeddedTypeface(cue: Cue): Cue {
+    val text = cue.text ?: return cue
+    if (text !is Spanned) return cue
+
+    val styledText = SpannableString(text)
+    val typefaceSpans = styledText.getSpans(
+        0,
+        styledText.length,
+        TypefaceSpan::class.java,
+    )
+    if (typefaceSpans.isEmpty()) return cue
+
+    typefaceSpans.forEach(styledText::removeSpan)
+    return cue.buildUpon()
+        .setText(styledText)
+        .build()
+}
 
 private fun buildFlatSurfaceModifier(
     dashboardPanelPose: Pose?,

@@ -85,6 +85,8 @@ data class VideoPlayerState(
     val seekPreviewTargetPositionMs: Long = 0,
     val seekPreviewThumbnailPath: String? = null,
     val subtitlesEnabled: Boolean = true,
+    val subtitleFontFamily: SubtitleFontFamily = SubtitleFontFamily.SansSerif,
+    val subtitleTextSize: SubtitleTextSize = SubtitleTextSize.Medium,
     val subtitleCues: List<Cue> = emptyList(),
     val externalSubtitleFileName: String? = null,
 )
@@ -106,6 +108,19 @@ enum class StereoMode {
     Mono,
     SideBySide,
     TopBottom
+}
+
+enum class SubtitleFontFamily {
+    SansSerif,
+    Serif,
+    Monospace,
+}
+
+enum class SubtitleTextSize(val scale: Float) {
+    Small(0.8f),
+    Medium(1.0f),
+    Large(1.25f),
+    ExtraLarge(1.5f),
 }
 
 @UnstableApi
@@ -257,6 +272,32 @@ class VideoPlayerViewModel(
         )
         player?.currentTracks?.let(::logSubtitleTrackState)
         scheduleControlsAutoHideIfNeeded()
+    }
+
+    fun setSubtitleFontFamily(fontFamily: SubtitleFontFamily) {
+        if (_state.value.subtitleFontFamily == fontFamily) return
+
+        _state.value = _state.value.copy(subtitleFontFamily = fontFamily)
+        appContext?.let { context ->
+            AppSettingsStore.setSubtitleFontFamily(context, fontFamily.name)
+        }
+        Log.i(
+            PLAYER_LOG_TAG,
+            "$SUBTITLE_LOG_PREFIX font family=${fontFamily.name}",
+        )
+    }
+
+    fun setSubtitleTextSize(textSize: SubtitleTextSize) {
+        if (_state.value.subtitleTextSize == textSize) return
+
+        _state.value = _state.value.copy(subtitleTextSize = textSize)
+        appContext?.let { context ->
+            AppSettingsStore.setSubtitleTextSize(context, textSize.name)
+        }
+        Log.i(
+            PLAYER_LOG_TAG,
+            "$SUBTITLE_LOG_PREFIX text size=${textSize.name} scale=${textSize.scale}",
+        )
     }
 
     fun togglePlaybackMenu(menu: PlaybackMenu) {
@@ -1122,6 +1163,17 @@ class VideoPlayerViewModel(
                     VideoFormat.Format2D
                 }
 
+                val initialSubtitleFontFamily = AppSettingsStore.getSubtitleFontFamily(context)
+                    ?.let { savedName ->
+                        SubtitleFontFamily.entries.firstOrNull { it.name == savedName }
+                    }
+                    ?: SubtitleFontFamily.SansSerif
+                val initialSubtitleTextSize = AppSettingsStore.getSubtitleTextSize(context)
+                    ?.let { savedName ->
+                        SubtitleTextSize.entries.firstOrNull { it.name == savedName }
+                    }
+                    ?: SubtitleTextSize.Medium
+
                 autoDisplayInferencePending =
                     savedDisplaySettings == null ||
                             (
@@ -1142,6 +1194,8 @@ class VideoPlayerViewModel(
                     seekPreviewTargetPositionMs = 0L,
                     seekPreviewThumbnailPath = null,
                     subtitlesEnabled = true,
+                    subtitleFontFamily = initialSubtitleFontFamily,
+                    subtitleTextSize = initialSubtitleTextSize,
                     subtitleCues = emptyList(),
                     externalSubtitleFileName = null,
                 )

@@ -10,6 +10,8 @@ object AppSettingsStore {
     private const val KEY_CONTROLLER_HAND_TRACKING_PROMPT_HANDLED =
         "controller_hand_tracking_prompt_handled"
     private const val KEY_LOCAL_STORAGE_TREE_URI = "local_storage_tree_uri"
+    private const val KEY_SUBTITLE_FONT_FAMILY = "subtitle_font_family"
+    private const val KEY_SUBTITLE_TEXT_SIZE = "subtitle_text_size"
 
     private fun prefs(context: Context) =
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -63,6 +65,28 @@ object AppSettingsStore {
         prefs(context)
             .edit()
             .remove(KEY_LOCAL_STORAGE_TREE_URI)
+            .apply()
+    }
+
+    fun getSubtitleFontFamily(context: Context): String? {
+        return prefs(context).getString(KEY_SUBTITLE_FONT_FAMILY, null)
+    }
+
+    fun setSubtitleFontFamily(context: Context, fontFamily: String) {
+        prefs(context)
+            .edit()
+            .putString(KEY_SUBTITLE_FONT_FAMILY, fontFamily)
+            .apply()
+    }
+
+    fun getSubtitleTextSize(context: Context): String? {
+        return prefs(context).getString(KEY_SUBTITLE_TEXT_SIZE, null)
+    }
+
+    fun setSubtitleTextSize(context: Context, textSize: String) {
+        prefs(context)
+            .edit()
+            .putString(KEY_SUBTITLE_TEXT_SIZE, textSize)
             .apply()
     }
 }
