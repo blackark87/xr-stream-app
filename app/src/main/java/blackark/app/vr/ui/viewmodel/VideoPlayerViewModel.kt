@@ -15,6 +15,7 @@ import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
+import androidx.media3.common.Tracks
 import androidx.media3.common.text.Cue
 import androidx.media3.common.text.CueGroup
 import androidx.media3.common.util.UnstableApi
@@ -31,7 +32,7 @@ import blackark.app.vr.network.SMBFileItem
 import blackark.app.vr.player.ExternalSubtitle
 import blackark.app.vr.player.PlaybackSource
 import blackark.app.vr.player.SMBDataSource
-import blackark.app.vr.player.enableKoreanExternalSubtitle
+import blackark.app.vr.player.configureKoreanExternalSubtitle
 import blackark.app.vr.player.resolveKoreanExternalSubtitle
 import blackark.app.vr.utils.AppSettingsStore
 import blackark.app.vr.utils.InferredDisplayProfile
@@ -53,6 +54,9 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlin.math.abs
 import kotlin.math.roundToInt
+
+private const val PLAYER_LOG_TAG = "VideoPlayerViewModel"
+private const val SUBTITLE_LOG_PREFIX = "[SubtitleDebug]"
 
 sealed class PlayerEvent {
     object NavigateBack : PlayerEvent()
@@ -79,6 +83,7 @@ data class VideoPlayerState(
     val seekPreviewActive: Boolean = false,
     val seekPreviewTargetPositionMs: Long = 0,
     val seekPreviewThumbnailPath: String? = null,
+    val subtitlesEnabled: Boolean = true,
     val subtitleCues: List<Cue> = emptyList(),
     val externalSubtitleFileName: String? = null,
 )
@@ -225,6 +230,31 @@ class VideoPlayerViewModel(
 
         autoDisplayInferencePending = false
         scheduleDisplaySettingsPersistence()
+        scheduleControlsAutoHideIfNeeded()
+    }
+
+    fun toggleSubtitles() {
+        val currentState = _state.value
+        val nextEnabled = !currentState.subtitlesEnabled
+        val player = exoPlayer
+
+        _state.value = currentState.copy(
+            subtitlesEnabled = nextEnabled,
+            subtitleCues = if (nextEnabled) currentState.subtitleCues else emptyList(),
+        )
+        if (player != null) {
+            player.trackSelectionParameters = configureKoreanExternalSubtitle(
+                parameters = player.trackSelectionParameters,
+                enabled = nextEnabled,
+            )
+        }
+
+        Log.i(
+            PLAYER_LOG_TAG,
+            "$SUBTITLE_LOG_PREFIX toggled enabled=$nextEnabled " +
+                    "external=${currentState.externalSubtitleFileName ?: "none"}",
+        )
+        player?.currentTracks?.let(::logSubtitleTrackState)
         scheduleControlsAutoHideIfNeeded()
     }
 
@@ -1110,6 +1140,7 @@ class VideoPlayerViewModel(
                     seekPreviewActive = false,
                     seekPreviewTargetPositionMs = 0L,
                     seekPreviewThumbnailPath = null,
+                    subtitlesEnabled = true,
                     subtitleCues = emptyList(),
                     externalSubtitleFileName = null,
                 )
@@ -1134,10 +1165,34 @@ class VideoPlayerViewModel(
                 _state.value = _state.value.copy(
                     externalSubtitleFileName = externalSubtitle?.file?.name,
                 )
+                val siblingSubtitleNames = siblingFiles.orEmpty()
+                    .asSequence()
+                    .filter { !it.isDirectory }
+                    .map { it.name }
+                    .filter { name ->
+                        name.endsWith(".srt", ignoreCase = true) ||
+                                name.endsWith(".ass", ignoreCase = true)
+                    }
+                    .toList()
+                Log.i(
+                    PLAYER_LOG_TAG,
+                    "$SUBTITLE_LOG_PREFIX discovery video=${videoFile.name} " +
+                            "siblingListing=${siblingFiles != null} " +
+                            "subtitleFiles=${siblingSubtitleNames.ifEmpty { listOf("none") }}",
+                )
                 if (externalSubtitle != null) {
                     Log.i(
-                        "VideoPlayerViewModel",
-                        "Using external Korean subtitle: ${externalSubtitle.file.name}",
+                        PLAYER_LOG_TAG,
+                        "$SUBTITLE_LOG_PREFIX selected file=${externalSubtitle.file.name} " +
+                                "mime=${externalSubtitle.mimeType} " +
+                                "scheme=${externalSubtitle.file.path.toUri().scheme}",
+                    )
+                } else {
+                    val baseName = videoFile.name.substringBeforeLast('.', videoFile.name)
+                    Log.w(
+                        PLAYER_LOG_TAG,
+                        "$SUBTITLE_LOG_PREFIX no matching sidecar; expected=" +
+                                "$baseName.ko.ass or $baseName.ko.srt",
                     )
                 }
 
@@ -1166,8 +1221,10 @@ class VideoPlayerViewModel(
                     .build().apply {
                         volume = 1.0f
                         if (externalSubtitle != null) {
-                            trackSelectionParameters =
-                                enableKoreanExternalSubtitle(trackSelectionParameters)
+                            trackSelectionParameters = configureKoreanExternalSubtitle(
+                                parameters = trackSelectionParameters,
+                                enabled = true,
+                            )
                         }
                         // Set up player listener
                         addListener(object : Player.Listener {
@@ -1204,12 +1261,21 @@ class VideoPlayerViewModel(
                             }
 
                             override fun onCues(cueGroup: CueGroup) {
+                                val subtitlesEnabled = _state.value.subtitlesEnabled
+                                Log.d(
+                                    PLAYER_LOG_TAG,
+                                    "$SUBTITLE_LOG_PREFIX cues count=${cueGroup.cues.size} " +
+                                            "timeUs=${cueGroup.presentationTimeUs} " +
+                                            "enabled=$subtitlesEnabled",
+                                )
                                 _state.value = _state.value.copy(
-                                    subtitleCues = cueGroup.cues,
+                                    subtitleCues =
+                                        if (subtitlesEnabled) cueGroup.cues else emptyList(),
                                 )
                             }
 
-                            override fun onTracksChanged(tracks: androidx.media3.common.Tracks) {
+                            override fun onTracksChanged(tracks: Tracks) {
+                                logSubtitleTrackState(tracks)
                                 if (!autoDisplayInferencePending) {
                                     return
                                 }
@@ -1296,6 +1362,11 @@ class VideoPlayerViewModel(
                             }
 
                             override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                                Log.e(
+                                    PLAYER_LOG_TAG,
+                                    "$SUBTITLE_LOG_PREFIX player error code=${error.errorCodeName}",
+                                    error,
+                                )
                                 _state.value = _state.value.copy(
                                     isLoading = false,
                                     error = error.message ?: "Playback error occurred"
@@ -1351,6 +1422,11 @@ class VideoPlayerViewModel(
                 }
 
             } catch (e: Exception) {
+                Log.e(
+                    PLAYER_LOG_TAG,
+                    "$SUBTITLE_LOG_PREFIX player initialization failed",
+                    e,
+                )
                 _state.value = _state.value.copy(
                     isLoading = false,
                     error = e.message ?: "Failed to initialize player"
@@ -1369,6 +1445,11 @@ class VideoPlayerViewModel(
     ): MediaItem {
         val builder = MediaItem.Builder().setUri(videoUri)
         if (externalSubtitle != null) {
+            Log.i(
+                PLAYER_LOG_TAG,
+                "$SUBTITLE_LOG_PREFIX attaching MediaItem sidecar " +
+                        "file=${externalSubtitle.file.name} mime=${externalSubtitle.mimeType}",
+            )
             val subtitleConfiguration =
                 MediaItem.SubtitleConfiguration.Builder(externalSubtitle.file.path.toUri())
                     .setMimeType(externalSubtitle.mimeType)
@@ -1380,6 +1461,32 @@ class VideoPlayerViewModel(
             builder.setSubtitleConfigurations(listOf(subtitleConfiguration))
         }
         return builder.build()
+    }
+
+    private fun logSubtitleTrackState(tracks: Tracks) {
+        val textGroups = tracks.groups.filter { it.type == C.TRACK_TYPE_TEXT }
+        if (textGroups.isEmpty()) {
+            Log.w(
+                PLAYER_LOG_TAG,
+                "$SUBTITLE_LOG_PREFIX tracks changed: no text track groups",
+            )
+            return
+        }
+
+        textGroups.forEachIndexed { groupIndex, group ->
+            for (trackIndex in 0 until group.length) {
+                val format = group.getTrackFormat(trackIndex)
+                Log.i(
+                    PLAYER_LOG_TAG,
+                    "$SUBTITLE_LOG_PREFIX track group=$groupIndex index=$trackIndex " +
+                            "selected=${group.isTrackSelected(trackIndex)} " +
+                            "supported=${group.isTrackSupported(trackIndex)} " +
+                            "id=${format.id ?: "none"} language=${format.language ?: "none"} " +
+                            "label=${format.label ?: "none"} mime=${format.sampleMimeType ?: "none"} " +
+                            "selectionFlags=${format.selectionFlags} roleFlags=${format.roleFlags}",
+                )
+            }
+        }
     }
 
     private fun applyAutoDetectedDisplaySettings(
@@ -1856,6 +1963,7 @@ class VideoPlayerViewModel(
         exoPlayer = null
         _playerFlow.value = null
         _state.value = _state.value.copy(
+            subtitlesEnabled = true,
             subtitleCues = emptyList(),
             externalSubtitleFileName = null,
         )

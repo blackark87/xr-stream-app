@@ -40,6 +40,16 @@ class SMBDataSource(
             "open() called for ${dataSpec.uri}, position: ${dataSpec.position}, length: ${dataSpec.length}"
         )
         currentUri = dataSpec.uri
+        val requestName = dataSpec.uri.lastPathSegment.orEmpty()
+        val isSubtitleRequest =
+            requestName.endsWith(".srt", ignoreCase = true) ||
+                    requestName.endsWith(".ass", ignoreCase = true)
+        if (isSubtitleRequest) {
+            Log.i(
+                TAG,
+                "[SubtitleDebug] SMB open requested file=$requestName position=${dataSpec.position}",
+            )
+        }
         try {
             // Initialize CIFS context if not already done
             if (cifsContext == null) {
@@ -85,6 +95,13 @@ class SMBDataSource(
 
             val fileLength = randomAccessFile!!.length()
             Log.d(TAG, "File length: ${fileLength / 1024 / 1024}MB")
+            if (isSubtitleRequest) {
+                Log.i(
+                    TAG,
+                    "[SubtitleDebug] SMB subtitle opened file=$requestName " +
+                            "length=$fileLength",
+                )
+            }
 
             // Handle range request (seek)
             if (dataSpec.position > 0) {
@@ -105,6 +122,13 @@ class SMBDataSource(
             println("SMBDataSource: Stream opened, bytes remaining: ${bytesRemaining / 1024}KB")
             return if (bytesRemaining == 0L) C.LENGTH_UNSET.toLong() else bytesRemaining
         } catch (e: Exception) {
+            if (isSubtitleRequest) {
+                Log.e(
+                    TAG,
+                    "[SubtitleDebug] SMB subtitle open failed file=$requestName",
+                    e,
+                )
+            }
             Log.e(TAG, "Error opening: ${e.message}", e)
             throw IOException("Failed to open SMB data source", e)
         }

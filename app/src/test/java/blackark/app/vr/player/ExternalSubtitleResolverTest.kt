@@ -66,12 +66,26 @@ class ExternalSubtitleResolverTest {
 
     @Test
     fun `Korean external subtitles are explicitly selected`() {
-        val parameters = enableKoreanExternalSubtitle(TrackSelectionParameters.DEFAULT)
+        val parameters = configureKoreanExternalSubtitle(
+            parameters = TrackSelectionParameters.DEFAULT,
+            enabled = true,
+        )
 
         assertTrue(parameters.selectTextByDefault)
         assertEquals(listOf("ko"), parameters.preferredTextLanguages)
         assertTrue(parameters.selectUndeterminedTextLanguage)
         assertFalse(parameters.disabledTrackTypes.contains(C.TRACK_TYPE_TEXT))
+    }
+
+    @Test
+    fun `Korean external subtitles can be disabled`() {
+        val parameters = configureKoreanExternalSubtitle(
+            parameters = TrackSelectionParameters.DEFAULT,
+            enabled = false,
+        )
+
+        assertFalse(parameters.selectTextByDefault)
+        assertTrue(parameters.disabledTrackTypes.contains(C.TRACK_TYPE_TEXT))
     }
 
     private fun file(

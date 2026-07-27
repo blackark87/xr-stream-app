@@ -107,7 +107,8 @@ private val IMMERSIVE_CONTROLS_PANEL_HEIGHT = 800.dp
 private val IMMERSIVE_CONTROLS_PANEL_WIDTH_MONO = 1260.dp
 private val IMMERSIVE_CONTROLS_PANEL_WIDTH_STEREO = 1460.dp
 private const val IMMERSIVE_CONTROLS_FRONT_FACTOR = 0.84f
-private val IMMERSIVE_CONTROLS_DOWN_OFFSET = (-120).dp
+// Subspace uses positive Y upward, so a negative offset places controls lower.
+private val IMMERSIVE_CONTROLS_DOWN_OFFSET = (-220).dp
 private val IMMERSIVE_REVEAL_PANEL_WIDTH = 2400.dp
 private val IMMERSIVE_REVEAL_PANEL_HEIGHT = 1400.dp
 // Keep the hidden reveal target in front of subtitles, and controls in front of both.

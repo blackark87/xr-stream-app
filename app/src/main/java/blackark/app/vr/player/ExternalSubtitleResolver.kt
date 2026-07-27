@@ -31,12 +31,19 @@ internal fun resolveKoreanExternalSubtitle(
     }
 }
 
-internal fun enableKoreanExternalSubtitle(
+internal fun configureKoreanExternalSubtitle(
     parameters: TrackSelectionParameters,
-): TrackSelectionParameters =
-    parameters.buildUpon()
-        .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
-        .setSelectTextByDefault(true)
-        .setPreferredTextLanguage("ko")
-        .setSelectUndeterminedTextLanguage(true)
-        .build()
+    enabled: Boolean,
+): TrackSelectionParameters {
+    val builder = parameters.buildUpon()
+        .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, !enabled)
+        .setSelectTextByDefault(enabled)
+
+    if (enabled) {
+        builder
+            .setPreferredTextLanguage("ko")
+            .setSelectUndeterminedTextLanguage(true)
+    }
+
+    return builder.build()
+}

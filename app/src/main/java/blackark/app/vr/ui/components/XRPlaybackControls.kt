@@ -441,6 +441,29 @@ fun XRPlaybackControls(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
+                    Button(
+                        onClick = videoPlayerViewModel::toggleSubtitles,
+                        modifier = Modifier.height(44.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor =
+                                if (playerState.subtitlesEnabled) accentStrong else sectionSurface,
+                            contentColor =
+                                if (playerState.subtitlesEnabled) onAccent else textStrong,
+                        ),
+                        border = BorderStroke(
+                            width = if (playerState.subtitlesEnabled) 1.2.dp else 1.dp,
+                            color = sectionBorder,
+                        ),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                    ) {
+                        Text(
+                            text = if (playerState.subtitlesEnabled) "SUB ON" else "SUB OFF",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                        )
+                    }
+
                     PlaybackMenuIconButton(
                         imageVector = Icons.Filled.FastForward,
                         contentDescription = "Playback Speed",
