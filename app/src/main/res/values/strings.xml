@@ -111,7 +111,10 @@
     <string name="subtitle_size_description">Sets a consistent text size while preserving subtitle colors and emphasis.</string>
     <string name="immersive_subtitle_distance">Immersive subtitle depth</string>
     <string name="immersive_subtitle_distance_description">Adjust while watching a 180° or 360° video until both eyes see one clear subtitle. The apparent text size stays consistent.</string>
-    <string name="immersive_subtitle_distance_value">%1$.1f m</string>
+    <string name="immersive_subtitle_distance_value">%1$.2f m</string>
+    <string name="immersive_ui_horizontal_offset">Immersive UI horizontal position</string>
+    <string name="immersive_ui_horizontal_offset_description">Moves immersive subtitles and playback controls together. Negative values move left and positive values move right.</string>
+    <string name="immersive_ui_horizontal_offset_value">%1$+.0f cm</string>
     <string name="settings_action_clear">Clear</string>
     <string name="settings_action_clearing">Clearing...</string>
     <string name="settings_action_complete_title">Complete</string>

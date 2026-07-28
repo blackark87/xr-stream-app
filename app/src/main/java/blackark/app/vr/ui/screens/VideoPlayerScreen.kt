@@ -109,6 +109,7 @@ import blackark.app.vr.utils.AppSettingsStore
 import blackark.app.vr.utils.SubtitleFontCatalog
 import blackark.app.vr.utils.resolveImmersiveSubtitlePanelOffsetDp
 import blackark.app.vr.utils.resolveImmersiveSubtitlePlacement
+import blackark.app.vr.utils.resolveImmersiveUiHorizontalOffsetDp
 import kotlinx.coroutines.delay
 
 private const val TAG = "VideoPlayerScreen"
@@ -541,6 +542,7 @@ fun SpatialVideoPlayerContent(
                         density = density,
                         controlsVisible = showControls,
                         distanceMeters = playerState.immersiveSubtitleDistanceMeters,
+                        horizontalOffsetMeters = playerState.immersiveUiHorizontalOffsetMeters,
                     ),
                     interactionPolicy = clickInteractionPolicy(isEnabled = false),
                 ) {
@@ -588,6 +590,7 @@ fun SpatialVideoPlayerContent(
                         dashboardPanelPose = dashboardPanelPose,
                         density = density,
                         stereoMode = playerState.stereoMode,
+                        horizontalOffsetMeters = playerState.immersiveUiHorizontalOffsetMeters,
                     ),
                     interactionPolicy = clickInteractionPolicy(
                         isHandTrackingEnabled = isHandTrackingEnabled,
@@ -926,6 +929,7 @@ private fun buildImmersiveSubtitleModifier(
     density: Density,
     controlsVisible: Boolean,
     distanceMeters: Float,
+    horizontalOffsetMeters: Float,
 ): SubspaceModifier {
     val placement = resolveImmersiveSubtitlePlacement(distanceMeters)
     val verticalOffset =
@@ -941,7 +945,9 @@ private fun buildImmersiveSubtitleModifier(
         resolveImmersiveSubtitlePanelOffsetDp(
             baseTranslationPixels = baseTranslation,
             worldForward = rotation * Vector3.Forward,
+            worldRight = rotation * Vector3.Right,
             placement = placement,
+            horizontalOffsetMeters = horizontalOffsetMeters,
             pixelsPerDp = density.density,
             dpPerMeter = 1.meters.toDp().value,
         )
@@ -964,6 +970,7 @@ private fun buildImmersiveControlsModifier(
     dashboardPanelPose: Pose?,
     density: Density,
     stereoMode: blackark.app.vr.ui.viewmodel.StereoMode,
+    horizontalOffsetMeters: Float,
 ): SubspaceModifier {
     val panelWidth =
         if (stereoMode == blackark.app.vr.ui.viewmodel.StereoMode.Mono) {
@@ -976,9 +983,20 @@ private fun buildImmersiveControlsModifier(
         SubspaceModifier
             .width(panelWidth)
             .height(IMMERSIVE_CONTROLS_PANEL_HEIGHT)
+    val rotation = dashboardPanelPose?.rotation ?: Quaternion.Identity
+    val horizontalOffsetDp =
+        resolveImmersiveUiHorizontalOffsetDp(
+            worldRight = rotation * Vector3.Right,
+            horizontalOffsetMeters = horizontalOffsetMeters,
+            dpPerMeter = 1.meters.toDp().value,
+        )
 
     if (dashboardPanelPose == null) {
-        return baseModifier.offset(y = IMMERSIVE_CONTROLS_DOWN_OFFSET)
+        return baseModifier.offset(
+            x = horizontalOffsetDp.x.dp,
+            y = IMMERSIVE_CONTROLS_DOWN_OFFSET + horizontalOffsetDp.y.dp,
+            z = horizontalOffsetDp.z.dp,
+        )
     }
 
     val anchoredX =
@@ -990,11 +1008,11 @@ private fun buildImmersiveControlsModifier(
 
     return baseModifier
         .offset(
-            x = anchoredX,
-            y = anchoredY,
-            z = anchoredZ,
+            x = anchoredX + horizontalOffsetDp.x.dp,
+            y = anchoredY + horizontalOffsetDp.y.dp,
+            z = anchoredZ + horizontalOffsetDp.z.dp,
         )
-        .rotate(dashboardPanelPose.rotation)
+        .rotate(rotation)
 }
 
 private fun buildPanelModifierFromSavedPose(

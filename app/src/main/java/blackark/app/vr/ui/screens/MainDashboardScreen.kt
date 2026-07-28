@@ -190,6 +190,7 @@ import blackark.app.vr.ui.viewmodel.MainDashboardViewModel
 import blackark.app.vr.ui.viewmodel.SubtitleTextSize
 import blackark.app.vr.utils.AppSettingsStore
 import blackark.app.vr.utils.IMMERSIVE_SUBTITLE_DISTANCE_SLIDER_STEPS
+import blackark.app.vr.utils.IMMERSIVE_UI_HORIZONTAL_OFFSET_SLIDER_STEPS
 import blackark.app.vr.utils.ImageCacheVersionStore
 import blackark.app.vr.utils.JvrCastMetadata
 import blackark.app.vr.utils.JvrLibraryMetadataProvider
@@ -198,7 +199,9 @@ import blackark.app.vr.utils.ServerCredentialAutofillStore
 import blackark.app.vr.utils.SubtitleFontCatalog
 import blackark.app.vr.utils.SubtitleFontOption
 import blackark.app.vr.utils.MAX_IMMERSIVE_SUBTITLE_DISTANCE_METERS
+import blackark.app.vr.utils.MAX_IMMERSIVE_UI_HORIZONTAL_OFFSET_METERS
 import blackark.app.vr.utils.MIN_IMMERSIVE_SUBTITLE_DISTANCE_METERS
+import blackark.app.vr.utils.MIN_IMMERSIVE_UI_HORIZONTAL_OFFSET_METERS
 import blackark.app.vr.utils.ThumbnailImageLoaderProvider
 import blackark.app.vr.utils.VideoThumbnailFetcher
 import blackark.app.vr.utils.extractVirtualGroupKey
@@ -1840,6 +1843,9 @@ private fun SettingsPanel(
     var selectedImmersiveSubtitleDistanceMeters by remember {
         mutableStateOf(AppSettingsStore.getImmersiveSubtitleDistanceMeters(context))
     }
+    var selectedImmersiveUiHorizontalOffsetMeters by remember {
+        mutableStateOf(AppSettingsStore.getImmersiveUiHorizontalOffsetMeters(context))
+    }
 
     Card(
         modifier = modifier,
@@ -1907,6 +1913,18 @@ private fun SettingsPanel(
                     AppSettingsStore.setImmersiveSubtitleDistanceMeters(
                         context,
                         selectedImmersiveSubtitleDistanceMeters,
+                    )
+                },
+            )
+            SettingsImmersiveUiHorizontalOffsetPicker(
+                offsetMeters = selectedImmersiveUiHorizontalOffsetMeters,
+                onOffsetChange = { offsetMeters ->
+                    selectedImmersiveUiHorizontalOffsetMeters = offsetMeters
+                },
+                onOffsetChangeFinished = {
+                    AppSettingsStore.setImmersiveUiHorizontalOffsetMeters(
+                        context,
+                        selectedImmersiveUiHorizontalOffsetMeters,
                     )
                 },
             )
@@ -2204,6 +2222,78 @@ private fun SettingsImmersiveSubtitleDistancePicker(
                 text = stringResource(
                     R.string.immersive_subtitle_distance_value,
                     MAX_IMMERSIVE_SUBTITLE_DISTANCE_METERS,
+                ),
+                style = MaterialTheme.typography.labelSmall,
+                color = TextTertiary,
+            )
+        }
+    }
+}
+
+@Composable
+private fun SettingsImmersiveUiHorizontalOffsetPicker(
+    offsetMeters: Float,
+    onOffsetChange: (Float) -> Unit,
+    onOffsetChangeFinished: () -> Unit,
+) {
+    Column(
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = stringResource(R.string.immersive_ui_horizontal_offset),
+                style = MaterialTheme.typography.titleMedium,
+                color = TextPrimary,
+            )
+            Text(
+                text = stringResource(
+                    R.string.immersive_ui_horizontal_offset_value,
+                    offsetMeters * 100f,
+                ),
+                style = MaterialTheme.typography.titleMedium,
+                color = TextSecondary,
+            )
+        }
+        Text(
+            text = stringResource(R.string.immersive_ui_horizontal_offset_description),
+            style = MaterialTheme.typography.bodySmall,
+            color = TextTertiary,
+        )
+        Slider(
+            value = offsetMeters,
+            onValueChange = onOffsetChange,
+            onValueChangeFinished = onOffsetChangeFinished,
+            valueRange =
+                MIN_IMMERSIVE_UI_HORIZONTAL_OFFSET_METERS..
+                        MAX_IMMERSIVE_UI_HORIZONTAL_OFFSET_METERS,
+            steps = IMMERSIVE_UI_HORIZONTAL_OFFSET_SLIDER_STEPS,
+            colors = SliderDefaults.colors(
+                thumbColor = NetflixRed,
+                activeTrackColor = NetflixRed,
+                inactiveTrackColor = CardBackgroundHover,
+            ),
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text(
+                text = stringResource(
+                    R.string.immersive_ui_horizontal_offset_value,
+                    MIN_IMMERSIVE_UI_HORIZONTAL_OFFSET_METERS * 100f,
+                ),
+                style = MaterialTheme.typography.labelSmall,
+                color = TextTertiary,
+            )
+            Text(
+                text = stringResource(
+                    R.string.immersive_ui_horizontal_offset_value,
+                    MAX_IMMERSIVE_UI_HORIZONTAL_OFFSET_METERS * 100f,
                 ),
                 style = MaterialTheme.typography.labelSmall,
                 color = TextTertiary,

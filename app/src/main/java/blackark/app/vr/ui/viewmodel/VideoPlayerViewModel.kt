@@ -42,11 +42,13 @@ import blackark.app.vr.player.resolveKoreanExternalSubtitle
 import blackark.app.vr.player.resolvePlaybackPlaylist
 import blackark.app.vr.utils.AppSettingsStore
 import blackark.app.vr.utils.DEFAULT_IMMERSIVE_SUBTITLE_DISTANCE_METERS
+import blackark.app.vr.utils.DEFAULT_IMMERSIVE_UI_HORIZONTAL_OFFSET_METERS
 import blackark.app.vr.utils.InferredDisplayProfile
 import blackark.app.vr.utils.SubtitleFontCatalog
 import blackark.app.vr.utils.VideoFramePreviewExtractor
 import blackark.app.vr.utils.inferDisplayProfileFromFrame
 import blackark.app.vr.utils.normalizeImmersiveSubtitleDistanceMeters
+import blackark.app.vr.utils.normalizeImmersiveUiHorizontalOffsetMeters
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -116,6 +118,8 @@ data class VideoPlayerState(
     val subtitleFontId: String = SubtitleFontCatalog.DEFAULT_FONT_ID,
     val subtitleTextSize: SubtitleTextSize = SubtitleTextSize.Medium,
     val immersiveSubtitleDistanceMeters: Float = DEFAULT_IMMERSIVE_SUBTITLE_DISTANCE_METERS,
+    val immersiveUiHorizontalOffsetMeters: Float =
+        DEFAULT_IMMERSIVE_UI_HORIZONTAL_OFFSET_METERS,
     val subtitleCues: List<Cue> = emptyList(),
     val externalSubtitleFileName: String? = null,
 )
@@ -327,6 +331,26 @@ class VideoPlayerViewModel(
         Log.i(
             PLAYER_LOG_TAG,
             "$SUBTITLE_LOG_PREFIX immersive distance=${distanceMeters}m",
+        )
+    }
+
+    fun setImmersiveUiHorizontalOffsetMeters(offsetMeters: Float) {
+        val normalizedOffset = normalizeImmersiveUiHorizontalOffsetMeters(offsetMeters)
+        if (_state.value.immersiveUiHorizontalOffsetMeters == normalizedOffset) return
+
+        _state.value = _state.value.copy(
+            immersiveUiHorizontalOffsetMeters = normalizedOffset,
+        )
+    }
+
+    fun persistImmersiveUiHorizontalOffsetMeters() {
+        val offsetMeters = _state.value.immersiveUiHorizontalOffsetMeters
+        appContext?.let { context ->
+            AppSettingsStore.setImmersiveUiHorizontalOffsetMeters(context, offsetMeters)
+        }
+        Log.i(
+            PLAYER_LOG_TAG,
+            "$PLAYBACK_CONTROL_LOG_PREFIX immersive horizontal offset=${offsetMeters}m",
         )
     }
 
@@ -1203,6 +1227,8 @@ class VideoPlayerViewModel(
                     ?: SubtitleTextSize.Medium
                 val initialImmersiveSubtitleDistanceMeters =
                     AppSettingsStore.getImmersiveSubtitleDistanceMeters(context)
+                val initialImmersiveUiHorizontalOffsetMeters =
+                    AppSettingsStore.getImmersiveUiHorizontalOffsetMeters(context)
 
                 autoDisplayInferencePending =
                     savedDisplaySettings == null ||
@@ -1231,6 +1257,7 @@ class VideoPlayerViewModel(
                     subtitleFontId = initialSubtitleFontId,
                     subtitleTextSize = initialSubtitleTextSize,
                     immersiveSubtitleDistanceMeters = initialImmersiveSubtitleDistanceMeters,
+                    immersiveUiHorizontalOffsetMeters = initialImmersiveUiHorizontalOffsetMeters,
                     subtitleCues = emptyList(),
                     externalSubtitleFileName = null,
                 )

@@ -37,27 +37,48 @@ class ImmersiveSubtitleSettingsTest {
 
     @Test
     fun `farther subtitles preserve angular size with proportional scaling`() {
-        val placement = resolveImmersiveSubtitlePlacement(4.0f)
+        val placement = resolveImmersiveSubtitlePlacement(2.0f)
 
-        assertEquals(4.0f, placement.distanceMeters, 0.0001f)
-        assertEquals(2.25f, placement.forwardOffsetMeters, 0.0001f)
-        assertEquals(4.0f / 1.75f, placement.scale, 0.0001f)
+        assertEquals(2.0f, placement.distanceMeters, 0.0001f)
+        assertEquals(0.25f, placement.forwardOffsetMeters, 0.0001f)
+        assertEquals(2.0f / 1.75f, placement.scale, 0.0001f)
     }
 
     @Test
-    fun `panel pose translation stays in pixels while depth is converted from meters`() {
-        val placement = resolveImmersiveSubtitlePlacement(4.0f)
+    fun `panel pose stays in pixels while metric depth and horizontal offsets are applied`() {
+        val placement = resolveImmersiveSubtitlePlacement(2.0f)
         val offset =
             resolveImmersiveSubtitlePanelOffsetDp(
                 baseTranslationPixels = Vector3(230.4f, -115.2f, -460.8f),
                 worldForward = Vector3.Forward,
+                worldRight = Vector3.Right,
                 placement = placement,
+                horizontalOffsetMeters = -0.10f,
                 pixelsPerDp = 2.0f,
                 dpPerMeter = 1152.0f,
             )
 
-        assertEquals(115.2f, offset.x, 0.0001f)
+        assertEquals(0.0f, offset.x, 0.0001f)
         assertEquals(-57.6f, offset.y, 0.0001f)
-        assertEquals(-2822.4f, offset.z, 0.0001f)
+        assertEquals(-518.4f, offset.z, 0.0001f)
+    }
+
+    @Test
+    fun `horizontal offset defaults left and is clamped`() {
+        assertEquals(
+            DEFAULT_IMMERSIVE_UI_HORIZONTAL_OFFSET_METERS,
+            normalizeImmersiveUiHorizontalOffsetMeters(Float.NaN),
+            0.0001f,
+        )
+        assertEquals(
+            MIN_IMMERSIVE_UI_HORIZONTAL_OFFSET_METERS,
+            normalizeImmersiveUiHorizontalOffsetMeters(-1.0f),
+            0.0001f,
+        )
+        assertEquals(
+            MAX_IMMERSIVE_UI_HORIZONTAL_OFFSET_METERS,
+            normalizeImmersiveUiHorizontalOffsetMeters(1.0f),
+            0.0001f,
+        )
     }
 }

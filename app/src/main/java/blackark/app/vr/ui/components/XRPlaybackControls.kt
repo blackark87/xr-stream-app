@@ -75,8 +75,11 @@ import blackark.app.vr.ui.viewmodel.VideoFormat
 import blackark.app.vr.ui.viewmodel.VideoPlayerState
 import blackark.app.vr.ui.viewmodel.VideoPlayerViewModel
 import blackark.app.vr.utils.IMMERSIVE_SUBTITLE_DISTANCE_SLIDER_STEPS
+import blackark.app.vr.utils.IMMERSIVE_UI_HORIZONTAL_OFFSET_SLIDER_STEPS
 import blackark.app.vr.utils.MAX_IMMERSIVE_SUBTITLE_DISTANCE_METERS
+import blackark.app.vr.utils.MAX_IMMERSIVE_UI_HORIZONTAL_OFFSET_METERS
 import blackark.app.vr.utils.MIN_IMMERSIVE_SUBTITLE_DISTANCE_METERS
+import blackark.app.vr.utils.MIN_IMMERSIVE_UI_HORIZONTAL_OFFSET_METERS
 import blackark.app.vr.utils.ThumbnailImageLoaderProvider
 import coil3.compose.AsyncImage
 import coil3.request.CachePolicy
@@ -93,6 +96,7 @@ fun XRPlaybackControls(
     var isScrubbing by remember { mutableStateOf(false) }
     var isVolumeScrubbing by remember { mutableStateOf(false) }
     var isSubtitleDepthScrubbing by remember { mutableStateOf(false) }
+    var isImmersiveUiHorizontalScrubbing by remember { mutableStateOf(false) }
     var sliderPosition by remember { mutableFloatStateOf(0f) }
     var controlsRootLeftPx by remember { mutableFloatStateOf(0f) }
     var controlsRootTopPx by remember { mutableFloatStateOf(0f) }
@@ -139,6 +143,10 @@ fun XRPlaybackControls(
             }
             if (isSubtitleDepthScrubbing) {
                 videoPlayerViewModel.persistImmersiveSubtitleDistanceMeters()
+                videoPlayerViewModel.endControlsInputLock()
+            }
+            if (isImmersiveUiHorizontalScrubbing) {
+                videoPlayerViewModel.persistImmersiveUiHorizontalOffsetMeters()
                 videoPlayerViewModel.endControlsInputLock()
             }
         }
@@ -263,7 +271,7 @@ fun XRPlaybackControls(
                     PlaybackMenu.Display -> {
                         PlaybackFloatingMenuCard(
                             title = "Display",
-                            subtitle = "Projection, stereo, and subtitle depth",
+                            subtitle = "Projection, stereo, and immersive UI",
                             width = menuWidth,
                             containerColor = menuSurface,
                             borderColor = sectionBorder,
@@ -372,6 +380,60 @@ fun XRPlaybackControls(
                                 )
                                 Text(
                                     text = "Adjust until both eyes see one clear subtitle.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = textMuted,
+                                )
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(
+                                        text = "UI horizontal position",
+                                        style = MaterialTheme.typography.labelLarge,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = textMuted,
+                                    )
+                                    Text(
+                                        text = prettyImmersiveUiHorizontalOffset(
+                                            playerState.immersiveUiHorizontalOffsetMeters
+                                        ),
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = textStrong,
+                                    )
+                                }
+                                Slider(
+                                    value = playerState.immersiveUiHorizontalOffsetMeters,
+                                    onValueChange = { offsetMeters ->
+                                        if (!isImmersiveUiHorizontalScrubbing) {
+                                            videoPlayerViewModel.beginControlsInputLock()
+                                        }
+                                        isImmersiveUiHorizontalScrubbing = true
+                                        videoPlayerViewModel.setImmersiveUiHorizontalOffsetMeters(
+                                            offsetMeters
+                                        )
+                                    },
+                                    onValueChangeFinished = {
+                                        isImmersiveUiHorizontalScrubbing = false
+                                        videoPlayerViewModel
+                                            .persistImmersiveUiHorizontalOffsetMeters()
+                                        videoPlayerViewModel.endControlsInputLock()
+                                    },
+                                    valueRange =
+                                        MIN_IMMERSIVE_UI_HORIZONTAL_OFFSET_METERS..
+                                                MAX_IMMERSIVE_UI_HORIZONTAL_OFFSET_METERS,
+                                    steps = IMMERSIVE_UI_HORIZONTAL_OFFSET_SLIDER_STEPS,
+                                    colors = SliderDefaults.colors(
+                                        thumbColor = accentStrong,
+                                        activeTrackColor = accentStrong,
+                                        inactiveTrackColor = accentSoft,
+                                    ),
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
+                                Text(
+                                    text = "Moves subtitles and playback controls together.",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = textMuted,
                                 )
@@ -972,7 +1034,7 @@ private fun PlaybackMenu.menuWidth(videoFormat: VideoFormat): Dp = when (this) {
 
 private fun PlaybackMenu.menuEstimatedHeight(videoFormat: VideoFormat): Dp = when (this) {
     PlaybackMenu.Speed -> 170.dp
-    PlaybackMenu.Display -> if (videoFormat == VideoFormat.Format2D) 170.dp else 360.dp
+    PlaybackMenu.Display -> if (videoFormat == VideoFormat.Format2D) 170.dp else 500.dp
     PlaybackMenu.Volume -> 156.dp
     PlaybackMenu.None -> 0.dp
 }
@@ -1005,8 +1067,17 @@ private fun prettyStereoMode(mode: StereoMode): String = when (mode) {
 }
 
 private fun prettySubtitleDistance(distanceMeters: Float): String {
-    val tenths = (distanceMeters * 10f).roundToInt()
-    return "${tenths / 10}.${tenths % 10} m"
+    val hundredths = (distanceMeters * 100f).roundToInt()
+    return "${hundredths / 100}.${(hundredths % 100).toString().padStart(2, '0')} m"
+}
+
+private fun prettyImmersiveUiHorizontalOffset(offsetMeters: Float): String {
+    val centimeters = (offsetMeters * 100f).roundToInt()
+    return when {
+        centimeters < 0 -> "${-centimeters} cm left"
+        centimeters > 0 -> "$centimeters cm right"
+        else -> "Center"
+    }
 }
 
 @SuppressLint("DefaultLocale")
