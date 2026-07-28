@@ -109,6 +109,9 @@
     <string name="subtitle_font_preview">가나다라마바사 ABC abc 123</string>
     <string name="subtitle_size">Subtitle size</string>
     <string name="subtitle_size_description">Sets a consistent text size while preserving subtitle colors and emphasis.</string>
+    <string name="immersive_subtitle_distance">Immersive subtitle depth</string>
+    <string name="immersive_subtitle_distance_description">Adjust while watching a 180° or 360° video until both eyes see one clear subtitle. The apparent text size stays consistent.</string>
+    <string name="immersive_subtitle_distance_value">%1$.1f m</string>
     <string name="settings_action_clear">Clear</string>
     <string name="settings_action_clearing">Clearing...</string>
     <string name="settings_action_complete_title">Complete</string>

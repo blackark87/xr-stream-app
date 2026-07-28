@@ -41,10 +41,12 @@ import blackark.app.vr.player.resolveCurrentPlaylistIndex
 import blackark.app.vr.player.resolveKoreanExternalSubtitle
 import blackark.app.vr.player.resolvePlaybackPlaylist
 import blackark.app.vr.utils.AppSettingsStore
+import blackark.app.vr.utils.DEFAULT_IMMERSIVE_SUBTITLE_DISTANCE_METERS
 import blackark.app.vr.utils.InferredDisplayProfile
 import blackark.app.vr.utils.SubtitleFontCatalog
 import blackark.app.vr.utils.VideoFramePreviewExtractor
 import blackark.app.vr.utils.inferDisplayProfileFromFrame
+import blackark.app.vr.utils.normalizeImmersiveSubtitleDistanceMeters
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -113,6 +115,7 @@ data class VideoPlayerState(
     val subtitlesEnabled: Boolean = true,
     val subtitleFontId: String = SubtitleFontCatalog.DEFAULT_FONT_ID,
     val subtitleTextSize: SubtitleTextSize = SubtitleTextSize.Medium,
+    val immersiveSubtitleDistanceMeters: Float = DEFAULT_IMMERSIVE_SUBTITLE_DISTANCE_METERS,
     val subtitleCues: List<Cue> = emptyList(),
     val externalSubtitleFileName: String? = null,
 )
@@ -304,6 +307,26 @@ class VideoPlayerViewModel(
         Log.i(
             PLAYER_LOG_TAG,
             "$SUBTITLE_LOG_PREFIX text size=${textSize.name} scale=${textSize.scale}",
+        )
+    }
+
+    fun setImmersiveSubtitleDistanceMeters(distanceMeters: Float) {
+        val normalizedDistance = normalizeImmersiveSubtitleDistanceMeters(distanceMeters)
+        if (_state.value.immersiveSubtitleDistanceMeters == normalizedDistance) return
+
+        _state.value = _state.value.copy(
+            immersiveSubtitleDistanceMeters = normalizedDistance,
+        )
+    }
+
+    fun persistImmersiveSubtitleDistanceMeters() {
+        val distanceMeters = _state.value.immersiveSubtitleDistanceMeters
+        appContext?.let { context ->
+            AppSettingsStore.setImmersiveSubtitleDistanceMeters(context, distanceMeters)
+        }
+        Log.i(
+            PLAYER_LOG_TAG,
+            "$SUBTITLE_LOG_PREFIX immersive distance=${distanceMeters}m",
         )
     }
 
@@ -1178,6 +1201,8 @@ class VideoPlayerViewModel(
                         SubtitleTextSize.entries.firstOrNull { it.name == savedName }
                     }
                     ?: SubtitleTextSize.Medium
+                val initialImmersiveSubtitleDistanceMeters =
+                    AppSettingsStore.getImmersiveSubtitleDistanceMeters(context)
 
                 autoDisplayInferencePending =
                     savedDisplaySettings == null ||
@@ -1205,6 +1230,7 @@ class VideoPlayerViewModel(
                     subtitlesEnabled = true,
                     subtitleFontId = initialSubtitleFontId,
                     subtitleTextSize = initialSubtitleTextSize,
+                    immersiveSubtitleDistanceMeters = initialImmersiveSubtitleDistanceMeters,
                     subtitleCues = emptyList(),
                     externalSubtitleFileName = null,
                 )

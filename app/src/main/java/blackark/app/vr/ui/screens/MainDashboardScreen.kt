@@ -96,6 +96,8 @@ import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.NavigationRailItemDefaults
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -187,6 +189,7 @@ import blackark.app.vr.ui.viewmodel.FileBrowserViewMode
 import blackark.app.vr.ui.viewmodel.MainDashboardViewModel
 import blackark.app.vr.ui.viewmodel.SubtitleTextSize
 import blackark.app.vr.utils.AppSettingsStore
+import blackark.app.vr.utils.IMMERSIVE_SUBTITLE_DISTANCE_SLIDER_STEPS
 import blackark.app.vr.utils.ImageCacheVersionStore
 import blackark.app.vr.utils.JvrCastMetadata
 import blackark.app.vr.utils.JvrLibraryMetadataProvider
@@ -194,6 +197,8 @@ import blackark.app.vr.utils.JvrMovieMetadata
 import blackark.app.vr.utils.ServerCredentialAutofillStore
 import blackark.app.vr.utils.SubtitleFontCatalog
 import blackark.app.vr.utils.SubtitleFontOption
+import blackark.app.vr.utils.MAX_IMMERSIVE_SUBTITLE_DISTANCE_METERS
+import blackark.app.vr.utils.MIN_IMMERSIVE_SUBTITLE_DISTANCE_METERS
 import blackark.app.vr.utils.ThumbnailImageLoaderProvider
 import blackark.app.vr.utils.VideoThumbnailFetcher
 import blackark.app.vr.utils.extractVirtualGroupKey
@@ -1832,6 +1837,9 @@ private fun SettingsPanel(
                 ?: SubtitleTextSize.Medium
         )
     }
+    var selectedImmersiveSubtitleDistanceMeters by remember {
+        mutableStateOf(AppSettingsStore.getImmersiveSubtitleDistanceMeters(context))
+    }
 
     Card(
         modifier = modifier,
@@ -1888,6 +1896,18 @@ private fun SettingsPanel(
                 onSizeSelected = { size ->
                     selectedSubtitleTextSize = size
                     AppSettingsStore.setSubtitleTextSize(context, size.name)
+                },
+            )
+            SettingsImmersiveSubtitleDistancePicker(
+                distanceMeters = selectedImmersiveSubtitleDistanceMeters,
+                onDistanceChange = { distanceMeters ->
+                    selectedImmersiveSubtitleDistanceMeters = distanceMeters
+                },
+                onDistanceChangeFinished = {
+                    AppSettingsStore.setImmersiveSubtitleDistanceMeters(
+                        context,
+                        selectedImmersiveSubtitleDistanceMeters,
+                    )
                 },
             )
 
@@ -2116,6 +2136,78 @@ private fun SettingsSubtitleSizePicker(
                     Text(text = "${(size.scale * 100).roundToInt()}%")
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun SettingsImmersiveSubtitleDistancePicker(
+    distanceMeters: Float,
+    onDistanceChange: (Float) -> Unit,
+    onDistanceChangeFinished: () -> Unit,
+) {
+    Column(
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = stringResource(R.string.immersive_subtitle_distance),
+                style = MaterialTheme.typography.titleMedium,
+                color = TextPrimary,
+            )
+            Text(
+                text = stringResource(
+                    R.string.immersive_subtitle_distance_value,
+                    distanceMeters,
+                ),
+                style = MaterialTheme.typography.titleMedium,
+                color = TextSecondary,
+            )
+        }
+        Text(
+            text = stringResource(R.string.immersive_subtitle_distance_description),
+            style = MaterialTheme.typography.bodySmall,
+            color = TextTertiary,
+        )
+        Slider(
+            value = distanceMeters,
+            onValueChange = onDistanceChange,
+            onValueChangeFinished = onDistanceChangeFinished,
+            valueRange =
+                MIN_IMMERSIVE_SUBTITLE_DISTANCE_METERS..
+                        MAX_IMMERSIVE_SUBTITLE_DISTANCE_METERS,
+            steps = IMMERSIVE_SUBTITLE_DISTANCE_SLIDER_STEPS,
+            colors = SliderDefaults.colors(
+                thumbColor = NetflixRed,
+                activeTrackColor = NetflixRed,
+                inactiveTrackColor = CardBackgroundHover,
+            ),
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text(
+                text = stringResource(
+                    R.string.immersive_subtitle_distance_value,
+                    MIN_IMMERSIVE_SUBTITLE_DISTANCE_METERS,
+                ),
+                style = MaterialTheme.typography.labelSmall,
+                color = TextTertiary,
+            )
+            Text(
+                text = stringResource(
+                    R.string.immersive_subtitle_distance_value,
+                    MAX_IMMERSIVE_SUBTITLE_DISTANCE_METERS,
+                ),
+                style = MaterialTheme.typography.labelSmall,
+                color = TextTertiary,
+            )
         }
     }
 }

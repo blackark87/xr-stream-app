@@ -25,6 +25,12 @@ XR Video Player - An Android XR application for streaming and playing videos fro
 ./gradlew installDebug
 ```
 
+## Codex CLI Environment Limitation
+
+- The Codex CLI environment used for this repository does not have the Android SDK installed or configured.
+- Android Gradle tasks such as `./gradlew build` and `./gradlew test` cannot run unless a valid SDK is provided through `ANDROID_HOME`, `ANDROID_SDK_ROOT`, or `local.properties` (`sdk.dir`).
+- Do not report Gradle tests or Android builds as completed when they stop because the SDK is unavailable. Record them as unrun and use focused pure Kotlin tests, static checks, and resource validation where possible.
+
 ## Architecture
 
 ### Core Technology Stack

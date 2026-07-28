@@ -12,6 +12,8 @@ object AppSettingsStore {
     private const val KEY_LOCAL_STORAGE_TREE_URI = "local_storage_tree_uri"
     private const val KEY_SUBTITLE_FONT_FAMILY = "subtitle_font_family"
     private const val KEY_SUBTITLE_TEXT_SIZE = "subtitle_text_size"
+    private const val KEY_IMMERSIVE_SUBTITLE_DISTANCE_METERS =
+        "immersive_subtitle_distance_meters"
 
     private fun prefs(context: Context) =
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -87,6 +89,25 @@ object AppSettingsStore {
         prefs(context)
             .edit()
             .putString(KEY_SUBTITLE_TEXT_SIZE, textSize)
+            .apply()
+    }
+
+    fun getImmersiveSubtitleDistanceMeters(context: Context): Float {
+        return normalizeImmersiveSubtitleDistanceMeters(
+            prefs(context).getFloat(
+                KEY_IMMERSIVE_SUBTITLE_DISTANCE_METERS,
+                DEFAULT_IMMERSIVE_SUBTITLE_DISTANCE_METERS,
+            )
+        )
+    }
+
+    fun setImmersiveSubtitleDistanceMeters(context: Context, distanceMeters: Float) {
+        prefs(context)
+            .edit()
+            .putFloat(
+                KEY_IMMERSIVE_SUBTITLE_DISTANCE_METERS,
+                normalizeImmersiveSubtitleDistanceMeters(distanceMeters),
+            )
             .apply()
     }
 }

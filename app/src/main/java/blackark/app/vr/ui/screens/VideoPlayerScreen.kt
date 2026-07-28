@@ -76,6 +76,7 @@ import androidx.xr.compose.subspace.SpatialExternalSurfaceScope
 import androidx.xr.compose.subspace.SpatialMainPanel
 import androidx.xr.compose.subspace.SpatialPanel
 import androidx.xr.compose.subspace.StereoMode
+import androidx.xr.compose.subspace.draw.scale
 import androidx.xr.compose.subspace.layout.InteractionPolicy
 import androidx.xr.compose.subspace.layout.SubspaceModifier
 import androidx.xr.compose.subspace.layout.fillMaxSize
@@ -84,6 +85,7 @@ import androidx.xr.compose.subspace.layout.offset
 import androidx.xr.compose.subspace.layout.rotate
 import androidx.xr.compose.subspace.layout.width
 import androidx.xr.compose.unit.DpVolumeSize
+import androidx.xr.compose.unit.Meter.Companion.meters
 import androidx.xr.runtime.DeviceTrackingMode
 import androidx.xr.runtime.SessionConfigureSuccess
 import androidx.xr.runtime.math.Pose
@@ -105,6 +107,7 @@ import blackark.app.vr.ui.viewmodel.VideoPlayerViewModel
 import blackark.app.vr.ui.viewmodel.VideoPlayerViewModelFactory
 import blackark.app.vr.utils.AppSettingsStore
 import blackark.app.vr.utils.SubtitleFontCatalog
+import blackark.app.vr.utils.resolveImmersiveSubtitlePlacement
 import kotlinx.coroutines.delay
 
 private const val TAG = "VideoPlayerScreen"
@@ -122,7 +125,6 @@ private val IMMERSIVE_REVEAL_PANEL_HEIGHT = 1400.dp
 private const val IMMERSIVE_REVEAL_FRONT_FACTOR = 0.86f
 private val IMMERSIVE_SUBTITLE_PANEL_WIDTH = 1280.dp
 private val IMMERSIVE_SUBTITLE_PANEL_HEIGHT = 720.dp
-private const val IMMERSIVE_SUBTITLE_FRONT_FACTOR = 0.90f
 private val IMMERSIVE_SUBTITLE_CONTROLS_VISIBLE_UP_OFFSET = 260.dp
 private const val SUBTITLE_DEFAULT_BOTTOM_PADDING_FRACTION = 0.08f
 private const val SUBTITLE_CONTROLS_VISIBLE_BOTTOM_PADDING_FRACTION = 0.44f
@@ -535,8 +537,8 @@ fun SpatialVideoPlayerContent(
                 SpatialPanel(
                     modifier = buildImmersiveSubtitleModifier(
                         dashboardPanelPose = dashboardPanelPose,
-                        density = density,
                         controlsVisible = showControls,
+                        distanceMeters = playerState.immersiveSubtitleDistanceMeters,
                     ),
                     interactionPolicy = clickInteractionPolicy(isEnabled = false),
                 ) {
@@ -919,31 +921,33 @@ private fun buildImmersiveRevealInputModifier(
 
 private fun buildImmersiveSubtitleModifier(
     dashboardPanelPose: Pose?,
-    density: Density,
     controlsVisible: Boolean,
+    distanceMeters: Float,
 ): SubspaceModifier {
+    val placement = resolveImmersiveSubtitlePlacement(distanceMeters)
     val verticalOffset =
-        if (controlsVisible) IMMERSIVE_SUBTITLE_CONTROLS_VISIBLE_UP_OFFSET else 0.dp
+        if (controlsVisible) {
+            IMMERSIVE_SUBTITLE_CONTROLS_VISIBLE_UP_OFFSET * placement.scale
+        } else {
+            0.dp
+        }
+    val rotation = dashboardPanelPose?.rotation ?: Quaternion.Identity
+    val baseTranslation = dashboardPanelPose?.translation ?: Vector3.Zero
+    val targetTranslation =
+        baseTranslation + (rotation * Vector3.Forward * placement.forwardOffsetMeters)
     val baseModifier =
         SubspaceModifier
             .width(IMMERSIVE_SUBTITLE_PANEL_WIDTH)
             .height(IMMERSIVE_SUBTITLE_PANEL_HEIGHT)
-
-    if (dashboardPanelPose == null) {
-        return baseModifier.offset(y = verticalOffset)
-    }
+            .scale(placement.scale)
 
     return baseModifier
         .offset(
-            x = with(density) {
-                dashboardPanelPose.translation.x.toDp()
-            } * IMMERSIVE_SUBTITLE_FRONT_FACTOR,
-            y = with(density) { dashboardPanelPose.translation.y.toDp() } + verticalOffset,
-            z = with(density) {
-                dashboardPanelPose.translation.z.toDp()
-            } * IMMERSIVE_SUBTITLE_FRONT_FACTOR,
+            x = targetTranslation.x.meters.toDp(),
+            y = targetTranslation.y.meters.toDp() + verticalOffset,
+            z = targetTranslation.z.meters.toDp(),
         )
-        .rotate(dashboardPanelPose.rotation)
+        .rotate(rotation)
 }
 
 private fun buildImmersiveControlsModifier(
