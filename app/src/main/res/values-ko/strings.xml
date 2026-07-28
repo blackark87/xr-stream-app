@@ -103,6 +103,9 @@
     <string name="immersive_subtitle_distance">몰입형 자막 깊이</string>
     <string name="immersive_subtitle_distance_description">180° 또는 360° 영상을 보면서 양쪽 눈에 자막이 하나로 또렷하게 보일 때까지 조절합니다. 화면에서 보이는 글자 크기는 일정하게 유지됩니다.</string>
     <string name="immersive_subtitle_distance_value">%1$.2f m</string>
+    <string name="immersive_subtitle_vertical_offset">몰입형 자막 상하 위치</string>
+    <string name="immersive_subtitle_vertical_offset_description">자막만 위아래로 이동합니다. 음수는 아래, 양수는 위이며 재생 컨트롤은 자막 아래에 유지됩니다.</string>
+    <string name="immersive_subtitle_vertical_offset_value">%1$+.0f cm</string>
     <string name="immersive_ui_horizontal_offset">몰입형 UI 가로 위치</string>
     <string name="immersive_ui_horizontal_offset_description">몰입형 자막과 재생 컨트롤을 함께 좌우로 이동합니다. 음수는 왼쪽, 양수는 오른쪽입니다.</string>
     <string name="immersive_ui_horizontal_offset_value">%1$+.0f cm</string>

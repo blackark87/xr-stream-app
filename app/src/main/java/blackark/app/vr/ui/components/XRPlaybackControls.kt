@@ -75,10 +75,13 @@ import blackark.app.vr.ui.viewmodel.VideoFormat
 import blackark.app.vr.ui.viewmodel.VideoPlayerState
 import blackark.app.vr.ui.viewmodel.VideoPlayerViewModel
 import blackark.app.vr.utils.IMMERSIVE_SUBTITLE_DISTANCE_SLIDER_STEPS
+import blackark.app.vr.utils.IMMERSIVE_SUBTITLE_VERTICAL_OFFSET_SLIDER_STEPS
 import blackark.app.vr.utils.IMMERSIVE_UI_HORIZONTAL_OFFSET_SLIDER_STEPS
 import blackark.app.vr.utils.MAX_IMMERSIVE_SUBTITLE_DISTANCE_METERS
+import blackark.app.vr.utils.MAX_IMMERSIVE_SUBTITLE_VERTICAL_OFFSET_METERS
 import blackark.app.vr.utils.MAX_IMMERSIVE_UI_HORIZONTAL_OFFSET_METERS
 import blackark.app.vr.utils.MIN_IMMERSIVE_SUBTITLE_DISTANCE_METERS
+import blackark.app.vr.utils.MIN_IMMERSIVE_SUBTITLE_VERTICAL_OFFSET_METERS
 import blackark.app.vr.utils.MIN_IMMERSIVE_UI_HORIZONTAL_OFFSET_METERS
 import blackark.app.vr.utils.ThumbnailImageLoaderProvider
 import coil3.compose.AsyncImage
@@ -96,6 +99,7 @@ fun XRPlaybackControls(
     var isScrubbing by remember { mutableStateOf(false) }
     var isVolumeScrubbing by remember { mutableStateOf(false) }
     var isSubtitleDepthScrubbing by remember { mutableStateOf(false) }
+    var isSubtitleVerticalScrubbing by remember { mutableStateOf(false) }
     var isImmersiveUiHorizontalScrubbing by remember { mutableStateOf(false) }
     var sliderPosition by remember { mutableFloatStateOf(0f) }
     var controlsRootLeftPx by remember { mutableFloatStateOf(0f) }
@@ -143,6 +147,10 @@ fun XRPlaybackControls(
             }
             if (isSubtitleDepthScrubbing) {
                 videoPlayerViewModel.persistImmersiveSubtitleDistanceMeters()
+                videoPlayerViewModel.endControlsInputLock()
+            }
+            if (isSubtitleVerticalScrubbing) {
+                videoPlayerViewModel.persistImmersiveSubtitleVerticalOffsetMeters()
                 videoPlayerViewModel.endControlsInputLock()
             }
             if (isImmersiveUiHorizontalScrubbing) {
@@ -380,6 +388,59 @@ fun XRPlaybackControls(
                                 )
                                 Text(
                                     text = "Adjust until both eyes see one clear subtitle.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = textMuted,
+                                )
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(
+                                        text = "Subtitle vertical position",
+                                        style = MaterialTheme.typography.labelLarge,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = textMuted,
+                                    )
+                                    Text(
+                                        text = prettySubtitleVerticalOffset(
+                                            playerState.immersiveSubtitleVerticalOffsetMeters
+                                        ),
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = textStrong,
+                                    )
+                                }
+                                Slider(
+                                    value = playerState.immersiveSubtitleVerticalOffsetMeters,
+                                    onValueChange = { offsetMeters ->
+                                        if (!isSubtitleVerticalScrubbing) {
+                                            videoPlayerViewModel.beginControlsInputLock()
+                                        }
+                                        isSubtitleVerticalScrubbing = true
+                                        videoPlayerViewModel
+                                            .setImmersiveSubtitleVerticalOffsetMeters(offsetMeters)
+                                    },
+                                    onValueChangeFinished = {
+                                        isSubtitleVerticalScrubbing = false
+                                        videoPlayerViewModel
+                                            .persistImmersiveSubtitleVerticalOffsetMeters()
+                                        videoPlayerViewModel.endControlsInputLock()
+                                    },
+                                    valueRange =
+                                        MIN_IMMERSIVE_SUBTITLE_VERTICAL_OFFSET_METERS..
+                                                MAX_IMMERSIVE_SUBTITLE_VERTICAL_OFFSET_METERS,
+                                    steps = IMMERSIVE_SUBTITLE_VERTICAL_OFFSET_SLIDER_STEPS,
+                                    colors = SliderDefaults.colors(
+                                        thumbColor = accentStrong,
+                                        activeTrackColor = accentStrong,
+                                        inactiveTrackColor = accentSoft,
+                                    ),
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
+                                Text(
+                                    text = "Moves subtitles only. Controls stay below them.",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = textMuted,
                                 )
@@ -1034,7 +1095,7 @@ private fun PlaybackMenu.menuWidth(videoFormat: VideoFormat): Dp = when (this) {
 
 private fun PlaybackMenu.menuEstimatedHeight(videoFormat: VideoFormat): Dp = when (this) {
     PlaybackMenu.Speed -> 170.dp
-    PlaybackMenu.Display -> if (videoFormat == VideoFormat.Format2D) 170.dp else 500.dp
+    PlaybackMenu.Display -> if (videoFormat == VideoFormat.Format2D) 170.dp else 640.dp
     PlaybackMenu.Volume -> 156.dp
     PlaybackMenu.None -> 0.dp
 }
@@ -1076,6 +1137,15 @@ private fun prettyImmersiveUiHorizontalOffset(offsetMeters: Float): String {
     return when {
         centimeters < 0 -> "${-centimeters} cm left"
         centimeters > 0 -> "$centimeters cm right"
+        else -> "Center"
+    }
+}
+
+private fun prettySubtitleVerticalOffset(offsetMeters: Float): String {
+    val centimeters = (offsetMeters * 100f).roundToInt()
+    return when {
+        centimeters < 0 -> "${-centimeters} cm down"
+        centimeters > 0 -> "$centimeters cm up"
         else -> "Center"
     }
 }

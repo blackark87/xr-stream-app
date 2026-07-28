@@ -52,14 +52,16 @@ class ImmersiveSubtitleSettingsTest {
                 baseTranslationPixels = Vector3(230.4f, -115.2f, -460.8f),
                 worldForward = Vector3.Forward,
                 worldRight = Vector3.Right,
+                worldUp = Vector3.Up,
                 placement = placement,
                 horizontalOffsetMeters = -0.10f,
+                verticalOffsetMeters = 0.15f,
                 pixelsPerDp = 2.0f,
                 dpPerMeter = 1152.0f,
             )
 
         assertEquals(0.0f, offset.x, 0.0001f)
-        assertEquals(-57.6f, offset.y, 0.0001f)
+        assertEquals(115.2f, offset.y, 0.0001f)
         assertEquals(-518.4f, offset.z, 0.0001f)
     }
 
@@ -78,6 +80,62 @@ class ImmersiveSubtitleSettingsTest {
         assertEquals(
             MAX_IMMERSIVE_UI_HORIZONTAL_OFFSET_METERS,
             normalizeImmersiveUiHorizontalOffsetMeters(1.0f),
+            0.0001f,
+        )
+    }
+
+    @Test
+    fun `subtitle vertical offset defaults upward and is clamped`() {
+        assertEquals(
+            DEFAULT_IMMERSIVE_SUBTITLE_VERTICAL_OFFSET_METERS,
+            normalizeImmersiveSubtitleVerticalOffsetMeters(Float.NaN),
+            0.0001f,
+        )
+        assertEquals(
+            MIN_IMMERSIVE_SUBTITLE_VERTICAL_OFFSET_METERS,
+            normalizeImmersiveSubtitleVerticalOffsetMeters(-1.0f),
+            0.0001f,
+        )
+        assertEquals(
+            MAX_IMMERSIVE_SUBTITLE_VERTICAL_OFFSET_METERS,
+            normalizeImmersiveSubtitleVerticalOffsetMeters(1.0f),
+            0.0001f,
+        )
+    }
+
+    @Test
+    fun `visible subtitles push controls lower and downward subtitle moves are followed`() {
+        assertEquals(
+            -320f,
+            resolveSubtitleAwareControlsVerticalOffsetDp(
+                baseDownOffsetDp = -320f,
+                subtitlesVisible = false,
+                subtitleClearanceDp = 240f,
+                subtitleVerticalOffsetMeters = -0.20f,
+                dpPerMeter = 1152f,
+            ),
+            0.0001f,
+        )
+        assertEquals(
+            -560f,
+            resolveSubtitleAwareControlsVerticalOffsetDp(
+                baseDownOffsetDp = -320f,
+                subtitlesVisible = true,
+                subtitleClearanceDp = 240f,
+                subtitleVerticalOffsetMeters = 0.15f,
+                dpPerMeter = 1152f,
+            ),
+            0.0001f,
+        )
+        assertEquals(
+            -790.4f,
+            resolveSubtitleAwareControlsVerticalOffsetDp(
+                baseDownOffsetDp = -320f,
+                subtitlesVisible = true,
+                subtitleClearanceDp = 240f,
+                subtitleVerticalOffsetMeters = -0.20f,
+                dpPerMeter = 1152f,
+            ),
             0.0001f,
         )
     }

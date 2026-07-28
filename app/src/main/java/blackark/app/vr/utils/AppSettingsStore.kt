@@ -16,6 +16,8 @@ object AppSettingsStore {
         "immersive_subtitle_distance_meters"
     private const val KEY_IMMERSIVE_UI_HORIZONTAL_OFFSET_METERS =
         "immersive_ui_horizontal_offset_meters"
+    private const val KEY_IMMERSIVE_SUBTITLE_VERTICAL_OFFSET_METERS =
+        "immersive_subtitle_vertical_offset_meters"
 
     private fun prefs(context: Context) =
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -128,6 +130,25 @@ object AppSettingsStore {
             .putFloat(
                 KEY_IMMERSIVE_UI_HORIZONTAL_OFFSET_METERS,
                 normalizeImmersiveUiHorizontalOffsetMeters(offsetMeters),
+            )
+            .apply()
+    }
+
+    fun getImmersiveSubtitleVerticalOffsetMeters(context: Context): Float {
+        return normalizeImmersiveSubtitleVerticalOffsetMeters(
+            prefs(context).getFloat(
+                KEY_IMMERSIVE_SUBTITLE_VERTICAL_OFFSET_METERS,
+                DEFAULT_IMMERSIVE_SUBTITLE_VERTICAL_OFFSET_METERS,
+            )
+        )
+    }
+
+    fun setImmersiveSubtitleVerticalOffsetMeters(context: Context, offsetMeters: Float) {
+        prefs(context)
+            .edit()
+            .putFloat(
+                KEY_IMMERSIVE_SUBTITLE_VERTICAL_OFFSET_METERS,
+                normalizeImmersiveSubtitleVerticalOffsetMeters(offsetMeters),
             )
             .apply()
     }

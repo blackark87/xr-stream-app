@@ -11,6 +11,10 @@ const val MIN_IMMERSIVE_UI_HORIZONTAL_OFFSET_METERS = -0.30f
 const val MAX_IMMERSIVE_UI_HORIZONTAL_OFFSET_METERS = 0.30f
 const val DEFAULT_IMMERSIVE_UI_HORIZONTAL_OFFSET_METERS = -0.10f
 const val IMMERSIVE_UI_HORIZONTAL_OFFSET_SLIDER_STEPS = 11
+const val MIN_IMMERSIVE_SUBTITLE_VERTICAL_OFFSET_METERS = -0.30f
+const val MAX_IMMERSIVE_SUBTITLE_VERTICAL_OFFSET_METERS = 0.50f
+const val DEFAULT_IMMERSIVE_SUBTITLE_VERTICAL_OFFSET_METERS = 0.15f
+const val IMMERSIVE_SUBTITLE_VERTICAL_OFFSET_SLIDER_STEPS = 15
 
 internal data class ImmersiveSubtitlePlacement(
     val distanceMeters: Float,
@@ -44,6 +48,16 @@ internal fun normalizeImmersiveUiHorizontalOffsetMeters(offsetMeters: Float): Fl
     )
 }
 
+internal fun normalizeImmersiveSubtitleVerticalOffsetMeters(offsetMeters: Float): Float {
+    if (!offsetMeters.isFinite()) {
+        return DEFAULT_IMMERSIVE_SUBTITLE_VERTICAL_OFFSET_METERS
+    }
+    return offsetMeters.coerceIn(
+        MIN_IMMERSIVE_SUBTITLE_VERTICAL_OFFSET_METERS,
+        MAX_IMMERSIVE_SUBTITLE_VERTICAL_OFFSET_METERS,
+    )
+}
+
 internal fun resolveImmersiveSubtitlePlacement(
     distanceMeters: Float,
 ): ImmersiveSubtitlePlacement {
@@ -60,8 +74,10 @@ internal fun resolveImmersiveSubtitlePanelOffsetDp(
     baseTranslationPixels: Vector3,
     worldForward: Vector3,
     worldRight: Vector3,
+    worldUp: Vector3,
     placement: ImmersiveSubtitlePlacement,
     horizontalOffsetMeters: Float,
+    verticalOffsetMeters: Float,
     pixelsPerDp: Float,
     dpPerMeter: Float,
 ): ImmersivePanelOffsetDp {
@@ -70,20 +86,25 @@ internal fun resolveImmersiveSubtitlePanelOffsetDp(
     val depthOffsetDp = placement.forwardOffsetMeters * safeDpPerMeter
     val horizontalOffsetDp =
         normalizeImmersiveUiHorizontalOffsetMeters(horizontalOffsetMeters) * safeDpPerMeter
+    val verticalOffsetDp =
+        normalizeImmersiveSubtitleVerticalOffsetMeters(verticalOffsetMeters) * safeDpPerMeter
 
     return ImmersivePanelOffsetDp(
         x =
             (baseTranslationPixels.x / safePixelsPerDp) +
                     (worldForward.x * depthOffsetDp) +
-                    (worldRight.x * horizontalOffsetDp),
+                    (worldRight.x * horizontalOffsetDp) +
+                    (worldUp.x * verticalOffsetDp),
         y =
             (baseTranslationPixels.y / safePixelsPerDp) +
                     (worldForward.y * depthOffsetDp) +
-                    (worldRight.y * horizontalOffsetDp),
+                    (worldRight.y * horizontalOffsetDp) +
+                    (worldUp.y * verticalOffsetDp),
         z =
             (baseTranslationPixels.z / safePixelsPerDp) +
                     (worldForward.z * depthOffsetDp) +
-                    (worldRight.z * horizontalOffsetDp),
+                    (worldRight.z * horizontalOffsetDp) +
+                    (worldUp.z * verticalOffsetDp),
     )
 }
 
@@ -100,4 +121,20 @@ internal fun resolveImmersiveUiHorizontalOffsetDp(
         y = worldRight.y * offsetDp,
         z = worldRight.z * offsetDp,
     )
+}
+
+internal fun resolveSubtitleAwareControlsVerticalOffsetDp(
+    baseDownOffsetDp: Float,
+    subtitlesVisible: Boolean,
+    subtitleClearanceDp: Float,
+    subtitleVerticalOffsetMeters: Float,
+    dpPerMeter: Float,
+): Float {
+    if (!subtitlesVisible) return baseDownOffsetDp
+
+    val safeDpPerMeter = dpPerMeter.takeIf { it.isFinite() && it > 0f } ?: 0f
+    val downwardSubtitleOffsetDp =
+        normalizeImmersiveSubtitleVerticalOffsetMeters(subtitleVerticalOffsetMeters)
+            .coerceAtMost(0f) * safeDpPerMeter
+    return baseDownOffsetDp - subtitleClearanceDp.coerceAtLeast(0f) + downwardSubtitleOffsetDp
 }
