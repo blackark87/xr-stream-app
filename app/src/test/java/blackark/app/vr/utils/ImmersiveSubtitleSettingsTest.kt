@@ -1,5 +1,6 @@
 package blackark.app.vr.utils
 
+import androidx.xr.runtime.math.Vector3
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -41,5 +42,22 @@ class ImmersiveSubtitleSettingsTest {
         assertEquals(4.0f, placement.distanceMeters, 0.0001f)
         assertEquals(2.25f, placement.forwardOffsetMeters, 0.0001f)
         assertEquals(4.0f / 1.75f, placement.scale, 0.0001f)
+    }
+
+    @Test
+    fun `panel pose translation stays in pixels while depth is converted from meters`() {
+        val placement = resolveImmersiveSubtitlePlacement(4.0f)
+        val offset =
+            resolveImmersiveSubtitlePanelOffsetDp(
+                baseTranslationPixels = Vector3(230.4f, -115.2f, -460.8f),
+                worldForward = Vector3.Forward,
+                placement = placement,
+                pixelsPerDp = 2.0f,
+                dpPerMeter = 1152.0f,
+            )
+
+        assertEquals(115.2f, offset.x, 0.0001f)
+        assertEquals(-57.6f, offset.y, 0.0001f)
+        assertEquals(-2822.4f, offset.z, 0.0001f)
     }
 }

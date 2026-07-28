@@ -107,6 +107,7 @@ import blackark.app.vr.ui.viewmodel.VideoPlayerViewModel
 import blackark.app.vr.ui.viewmodel.VideoPlayerViewModelFactory
 import blackark.app.vr.utils.AppSettingsStore
 import blackark.app.vr.utils.SubtitleFontCatalog
+import blackark.app.vr.utils.resolveImmersiveSubtitlePanelOffsetDp
 import blackark.app.vr.utils.resolveImmersiveSubtitlePlacement
 import kotlinx.coroutines.delay
 
@@ -537,6 +538,7 @@ fun SpatialVideoPlayerContent(
                 SpatialPanel(
                     modifier = buildImmersiveSubtitleModifier(
                         dashboardPanelPose = dashboardPanelPose,
+                        density = density,
                         controlsVisible = showControls,
                         distanceMeters = playerState.immersiveSubtitleDistanceMeters,
                     ),
@@ -921,6 +923,7 @@ private fun buildImmersiveRevealInputModifier(
 
 private fun buildImmersiveSubtitleModifier(
     dashboardPanelPose: Pose?,
+    density: Density,
     controlsVisible: Boolean,
     distanceMeters: Float,
 ): SubspaceModifier {
@@ -933,8 +936,15 @@ private fun buildImmersiveSubtitleModifier(
         }
     val rotation = dashboardPanelPose?.rotation ?: Quaternion.Identity
     val baseTranslation = dashboardPanelPose?.translation ?: Vector3.Zero
-    val targetTranslation =
-        baseTranslation + (rotation * Vector3.Forward * placement.forwardOffsetMeters)
+    // Subspace poses report translation in pixels; only the user-controlled depth is in meters.
+    val panelOffsetDp =
+        resolveImmersiveSubtitlePanelOffsetDp(
+            baseTranslationPixels = baseTranslation,
+            worldForward = rotation * Vector3.Forward,
+            placement = placement,
+            pixelsPerDp = density.density,
+            dpPerMeter = 1.meters.toDp().value,
+        )
     val baseModifier =
         SubspaceModifier
             .width(IMMERSIVE_SUBTITLE_PANEL_WIDTH)
@@ -943,9 +953,9 @@ private fun buildImmersiveSubtitleModifier(
 
     return baseModifier
         .offset(
-            x = targetTranslation.x.meters.toDp(),
-            y = targetTranslation.y.meters.toDp() + verticalOffset,
-            z = targetTranslation.z.meters.toDp(),
+            x = panelOffsetDp.x.dp,
+            y = panelOffsetDp.y.dp + verticalOffset,
+            z = panelOffsetDp.z.dp,
         )
         .rotate(rotation)
 }
