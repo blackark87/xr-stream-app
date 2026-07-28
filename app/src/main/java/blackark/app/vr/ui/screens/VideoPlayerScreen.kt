@@ -129,7 +129,7 @@ private val IMMERSIVE_REVEAL_PANEL_HEIGHT = 1400.dp
 private const val IMMERSIVE_REVEAL_FRONT_FACTOR = 0.86f
 private val IMMERSIVE_SUBTITLE_PANEL_WIDTH = 1280.dp
 private val IMMERSIVE_SUBTITLE_PANEL_HEIGHT = 720.dp
-private val IMMERSIVE_SUBTITLE_CONTROLS_VISIBLE_UP_OFFSET = 260.dp
+private val IMMERSIVE_SUBTITLE_BASE_UP_OFFSET = 260.dp
 private const val SUBTITLE_DEFAULT_BOTTOM_PADDING_FRACTION = 0.08f
 private const val SUBTITLE_CONTROLS_VISIBLE_BOTTOM_PADDING_FRACTION = 0.44f
 
@@ -548,7 +548,6 @@ fun SpatialVideoPlayerContent(
                     modifier = buildImmersiveSubtitleModifier(
                         dashboardPanelPose = dashboardPanelPose,
                         density = density,
-                        controlsVisible = showControls,
                         distanceMeters = playerState.immersiveSubtitleDistanceMeters,
                         horizontalOffsetMeters = playerState.immersiveUiHorizontalOffsetMeters,
                         verticalOffsetMeters =
@@ -940,18 +939,12 @@ private fun buildImmersiveRevealInputModifier(
 private fun buildImmersiveSubtitleModifier(
     dashboardPanelPose: Pose?,
     density: Density,
-    controlsVisible: Boolean,
     distanceMeters: Float,
     horizontalOffsetMeters: Float,
     verticalOffsetMeters: Float,
 ): SubspaceModifier {
     val placement = resolveImmersiveSubtitlePlacement(distanceMeters)
-    val verticalOffset =
-        if (controlsVisible) {
-            IMMERSIVE_SUBTITLE_CONTROLS_VISIBLE_UP_OFFSET * placement.scale
-        } else {
-            0.dp
-        }
+    val baseUpOffset = IMMERSIVE_SUBTITLE_BASE_UP_OFFSET * placement.scale
     val rotation = dashboardPanelPose?.rotation ?: Quaternion.Identity
     val baseTranslation = dashboardPanelPose?.translation ?: Vector3.Zero
     // Subspace poses report translation in pixels; user-controlled offsets are stored in meters.
@@ -976,7 +969,7 @@ private fun buildImmersiveSubtitleModifier(
     return baseModifier
         .offset(
             x = panelOffsetDp.x.dp,
-            y = panelOffsetDp.y.dp + verticalOffset,
+            y = panelOffsetDp.y.dp + baseUpOffset,
             z = panelOffsetDp.z.dp,
         )
         .rotate(rotation)

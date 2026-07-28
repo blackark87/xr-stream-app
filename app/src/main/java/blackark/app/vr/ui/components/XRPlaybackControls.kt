@@ -59,6 +59,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -199,7 +200,12 @@ fun XRPlaybackControls(
         val menuWidth = activeMenu.menuWidth(playerState.videoFormat)
         val menuHeight = activeMenu.menuEstimatedHeight(playerState.videoFormat)
         val menuWidthPx = with(density) { menuWidth.roundToPx() }
-        val menuHeightPx = with(density) { menuHeight.roundToPx() }
+        var measuredMenuHeightPx by remember(activeMenu, playerState.videoFormat) {
+            mutableIntStateOf(0)
+        }
+        val menuHeightPx =
+            measuredMenuHeightPx.takeIf { it > 0 }
+                ?: with(density) { menuHeight.roundToPx() }
         val menuGapPx = with(density) { 10.dp.roundToPx() }
         val activeMenuAnchor = when (activeMenu) {
             PlaybackMenu.Speed -> IntOffset(speedAnchorCenterXPx, speedAnchorTopPx)
@@ -209,11 +215,18 @@ fun XRPlaybackControls(
         }
         val activeMenuOffset =
             if (activeMenu != PlaybackMenu.None && activeMenuAnchor != null) {
-                val minX = 0
-                val maxX = (controlsRootWidthPx - menuWidthPx).coerceAtLeast(minX)
+                val rootLeftPx = controlsRootLeftPx.roundToInt()
+                val rootTopPx = controlsRootTopPx.roundToInt()
+                val minRootX = rootLeftPx
+                val maxRootX =
+                    (rootLeftPx + controlsRootWidthPx - menuWidthPx).coerceAtLeast(minRootX)
+                val menuRootX =
+                    (activeMenuAnchor.x - (menuWidthPx / 2)).coerceIn(minRootX, maxRootX)
+                val menuRootY =
+                    (activeMenuAnchor.y - menuHeightPx - menuGapPx).coerceAtLeast(0)
                 IntOffset(
-                    x = (activeMenuAnchor.x - (menuWidthPx / 2)).coerceIn(minX, maxX),
-                    y = activeMenuAnchor.y - menuHeightPx - menuGapPx,
+                    x = menuRootX - rootLeftPx,
+                    y = menuRootY - rootTopPx,
                 )
             } else {
                 null
@@ -236,6 +249,7 @@ fun XRPlaybackControls(
                 modifier = Modifier
                     .align(Alignment.TopStart)
                     .zIndex(2f)
+                    .onSizeChanged { measuredMenuHeightPx = it.height }
                     .offset { activeMenuOffset },
             ) {
                 when (activeMenu) {
