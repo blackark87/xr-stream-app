@@ -572,67 +572,51 @@ fun SpatialVideoPlayerContent(
                 }
             }
 
-            SpatialPanel(
-                modifier = buildImmersiveRevealInputModifier(
-                    dashboardPanelPose = dashboardPanelPose,
-                    density = density,
-                ),
-                interactionPolicy =
-                    when {
-                        playbackLayerPolicy.showRevealInputLayer ->
-                            clickInteractionPolicy(
-                                isHandTrackingEnabled = isHandTrackingEnabled,
-                            ) {
-                                videoPlayerViewModel.setControlsVisibility(true)
-                            }
-
-                        playbackLayerPolicy.enableSurfaceHideInput ->
-                            clickInteractionPolicy(
-                                isHandTrackingEnabled = isHandTrackingEnabled,
-                            ) {
-                                videoPlayerViewModel.setControlsVisibility(false)
-                            }
-
-                        else -> clickInteractionPolicy(isEnabled = false)
+            if (playbackLayerPolicy.showRevealInputLayer) {
+                SpatialPanel(
+                    modifier = buildImmersiveRevealInputModifier(
+                        dashboardPanelPose = dashboardPanelPose,
+                        density = density,
+                    ),
+                    interactionPolicy = clickInteractionPolicy(
+                        isHandTrackingEnabled = isHandTrackingEnabled,
+                    ) {
+                        videoPlayerViewModel.setControlsVisibility(true)
                     },
-            ) {
-                PlaybackScrollInputOverlay(
-                    showControls = false,
-                    inputEnabled = playbackLayerPolicy.showRevealInputLayer,
-                    onKeyUp = { event ->
-                        videoPlayerViewModel.dispatchPlaybackKeyEvent(event)
-                    },
-                    controlsInputLocked = playerState.controlsInputLocked,
-                    seekPreviewActive = playerState.seekPreviewActive,
-                    onHorizontalScrollDelta = { delta ->
-                        videoPlayerViewModel.handlePlaybackHorizontalScroll(delta)
-                    },
-                    onVerticalScrollDelta = { delta ->
-                        videoPlayerViewModel.handlePlaybackVerticalScroll(delta)
-                    },
-                )
+                ) {
+                    PlaybackScrollInputOverlay(
+                        showControls = false,
+                        inputEnabled = true,
+                        onKeyUp = { event ->
+                            videoPlayerViewModel.dispatchPlaybackKeyEvent(event)
+                        },
+                        controlsInputLocked = playerState.controlsInputLocked,
+                        seekPreviewActive = playerState.seekPreviewActive,
+                        onHorizontalScrollDelta = { delta ->
+                            videoPlayerViewModel.handlePlaybackHorizontalScroll(delta)
+                        },
+                        onVerticalScrollDelta = { delta ->
+                            videoPlayerViewModel.handlePlaybackVerticalScroll(delta)
+                        },
+                    )
+                }
             }
 
-            SpatialPanel(
-                modifier = buildImmersiveControlsModifier(
-                    dashboardPanelPose = dashboardPanelPose,
-                    density = density,
-                    stereoMode = playerState.stereoMode,
-                    horizontalOffsetMeters = playerState.immersiveUiHorizontalOffsetMeters,
-                    subtitlesPresent = subtitlesPresent,
-                    subtitleVerticalOffsetMeters =
-                        playerState.immersiveSubtitleVerticalOffsetMeters,
-                ),
-                interactionPolicy =
-                    if (playbackLayerPolicy.showControlsLayer) {
-                        clickInteractionPolicy(
-                            isHandTrackingEnabled = isHandTrackingEnabled,
-                        )
-                    } else {
-                        clickInteractionPolicy(isEnabled = false)
-                    },
-            ) {
-                if (playbackLayerPolicy.showControlsLayer) {
+            if (playbackLayerPolicy.showControlsLayer) {
+                SpatialPanel(
+                    modifier = buildImmersiveControlsModifier(
+                        dashboardPanelPose = dashboardPanelPose,
+                        density = density,
+                        stereoMode = playerState.stereoMode,
+                        horizontalOffsetMeters = playerState.immersiveUiHorizontalOffsetMeters,
+                        subtitlesPresent = subtitlesPresent,
+                        subtitleVerticalOffsetMeters =
+                            playerState.immersiveSubtitleVerticalOffsetMeters,
+                    ),
+                    interactionPolicy = clickInteractionPolicy(
+                        isHandTrackingEnabled = isHandTrackingEnabled,
+                    ),
+                ) {
                     Box(
                         modifier = Modifier.fillMaxSize(),
                         contentAlignment = Alignment.Center,
