@@ -14,7 +14,6 @@ import androidx.activity.compose.BackHandler
 import androidx.annotation.OptIn
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.rememberScrollableState
@@ -58,7 +57,6 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.compose.ui.zIndex
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.media3.common.text.Cue
 import androidx.media3.common.util.UnstableApi
@@ -118,7 +116,7 @@ import kotlinx.coroutines.delay
 private const val TAG = "VideoPlayerScreen"
 private val HIDDEN_MAIN_PANEL_OFFSET = 4000.dp
 private val HIDDEN_MAIN_PANEL_ANCHOR_SIZE = 2.dp
-private val IMMERSIVE_CONTROLS_PANEL_HEIGHT = 1600.dp
+private val IMMERSIVE_CONTROLS_PANEL_HEIGHT = 1200.dp
 private val IMMERSIVE_CONTROLS_PANEL_WIDTH_MONO = 1260.dp
 private val IMMERSIVE_CONTROLS_PANEL_WIDTH_STEREO = 1460.dp
 private const val IMMERSIVE_CONTROLS_FRONT_FACTOR = 0.84f
@@ -173,7 +171,6 @@ private fun PlaybackScrollInputOverlay(
     inputEnabled: Boolean = !showControls,
     controlsInputLocked: Boolean,
     seekPreviewActive: Boolean,
-    onBackgroundClick: (() -> Unit)? = null,
     onKeyUp: ((android.view.KeyEvent) -> Boolean)? = null,
     onHorizontalScrollDelta: (Float) -> Unit = {},
     onVerticalScrollDelta: (Float) -> Unit = {},
@@ -214,12 +211,6 @@ private fun PlaybackScrollInputOverlay(
                     return@onPreviewKeyEvent false
                 }
                 onKeyUp?.invoke(keyEvent.nativeKeyEvent) ?: false
-            }
-            // Keep dismissal on the parent so nested playback controls consume taps first.
-            .clickable(
-                enabled = showControls && onBackgroundClick != null && !inputLocked,
-            ) {
-                onBackgroundClick?.invoke()
             }
             .focusable(enabled = inputEnabled)
             .scrollable(
@@ -643,22 +634,11 @@ fun SpatialVideoPlayerContent(
             ) {
                 if (playbackLayerPolicy.showControlsLayer) {
                     Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            // A parent handler does not sit on top of the control/menu hit targets.
-                            .clickable(
-                                enabled =
-                                    !playerState.controlsInputLocked &&
-                                            !playerState.seekPreviewActive,
-                            ) {
-                                videoPlayerViewModel.setControlsVisibility(false)
-                            },
+                        modifier = Modifier.fillMaxSize(),
                         contentAlignment = Alignment.Center,
                     ) {
                         Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .zIndex(1f),
+                            modifier = Modifier.fillMaxWidth(),
                         ) {
                             XRPlaybackControls(
                                 videoPlayerViewModel = videoPlayerViewModel,
@@ -814,9 +794,6 @@ private fun Standard2DPlayer(
                                 inputEnabled = !showControls,
                                 controlsInputLocked = playerState.controlsInputLocked,
                                 seekPreviewActive = playerState.seekPreviewActive,
-                                onBackgroundClick = {
-                                    videoPlayerViewModel.setControlsVisibility(false)
-                                },
                                 onKeyUp = { event ->
                                     videoPlayerViewModel.dispatchPlaybackKeyEvent(event)
                                 },
