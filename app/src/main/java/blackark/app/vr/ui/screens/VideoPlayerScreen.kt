@@ -58,6 +58,7 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.zIndex
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.media3.common.text.Cue
 import androidx.media3.common.util.UnstableApi
@@ -214,6 +215,12 @@ private fun PlaybackScrollInputOverlay(
                 }
                 onKeyUp?.invoke(keyEvent.nativeKeyEvent) ?: false
             }
+            // Keep dismissal on the parent so nested playback controls consume taps first.
+            .clickable(
+                enabled = showControls && onBackgroundClick != null && !inputLocked,
+            ) {
+                onBackgroundClick?.invoke()
+            }
             .focusable(enabled = inputEnabled)
             .scrollable(
                 state = verticalScrollState,
@@ -227,16 +234,6 @@ private fun PlaybackScrollInputOverlay(
             ),
         contentAlignment = Alignment.Center,
     ) {
-        if (showControls && onBackgroundClick != null) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .clickable(
-                        enabled = !inputLocked,
-                        onClick = onBackgroundClick,
-                    ),
-            )
-        }
         if (showControls && controlsContent != null) {
             Box(
                 modifier = controlsModifier
@@ -646,22 +643,22 @@ fun SpatialVideoPlayerContent(
             ) {
                 if (playbackLayerPolicy.showControlsLayer) {
                     Box(
-                        modifier = Modifier.fillMaxSize(),
+                        modifier = Modifier
+                            .fillMaxSize()
+                            // A parent handler does not sit on top of the control/menu hit targets.
+                            .clickable(
+                                enabled =
+                                    !playerState.controlsInputLocked &&
+                                            !playerState.seekPreviewActive,
+                            ) {
+                                videoPlayerViewModel.setControlsVisibility(false)
+                            },
                         contentAlignment = Alignment.Center,
                     ) {
                         Box(
                             modifier = Modifier
-                                .fillMaxSize()
-                                .clickable(
-                                    enabled =
-                                        !playerState.controlsInputLocked &&
-                                                !playerState.seekPreviewActive,
-                                ) {
-                                    videoPlayerViewModel.setControlsVisibility(false)
-                                },
-                        )
-                        Box(
-                            modifier = Modifier.fillMaxWidth(),
+                                .fillMaxWidth()
+                                .zIndex(1f),
                         ) {
                             XRPlaybackControls(
                                 videoPlayerViewModel = videoPlayerViewModel,
