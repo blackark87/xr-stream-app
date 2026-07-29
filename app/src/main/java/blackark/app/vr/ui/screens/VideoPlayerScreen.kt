@@ -14,6 +14,7 @@ import androidx.activity.compose.BackHandler
 import androidx.annotation.OptIn
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.rememberScrollableState
@@ -116,7 +117,7 @@ import kotlinx.coroutines.delay
 private const val TAG = "VideoPlayerScreen"
 private val HIDDEN_MAIN_PANEL_OFFSET = 4000.dp
 private val HIDDEN_MAIN_PANEL_ANCHOR_SIZE = 2.dp
-private val IMMERSIVE_CONTROLS_PANEL_HEIGHT = 1200.dp
+private val IMMERSIVE_CONTROLS_PANEL_HEIGHT = 1600.dp
 private val IMMERSIVE_CONTROLS_PANEL_WIDTH_MONO = 1260.dp
 private val IMMERSIVE_CONTROLS_PANEL_WIDTH_STEREO = 1460.dp
 private const val IMMERSIVE_CONTROLS_FRONT_FACTOR = 0.84f
@@ -125,7 +126,7 @@ private val IMMERSIVE_CONTROLS_DOWN_OFFSET = (-320).dp
 private val IMMERSIVE_CONTROLS_SUBTITLE_CLEARANCE = 240.dp
 private val IMMERSIVE_REVEAL_PANEL_WIDTH = 2400.dp
 private val IMMERSIVE_REVEAL_PANEL_HEIGHT = 1400.dp
-// Keep the hidden reveal target in front of subtitles, and controls in front of both.
+// Keep stable spatial input layers so control visibility changes do not recreate XR panels.
 private const val IMMERSIVE_REVEAL_FRONT_FACTOR = 0.86f
 private val IMMERSIVE_SUBTITLE_PANEL_WIDTH = 1280.dp
 private val IMMERSIVE_SUBTITLE_PANEL_HEIGHT = 720.dp
@@ -168,8 +169,10 @@ private fun rememberPlaybackScrollState(
 @Composable
 private fun PlaybackScrollInputOverlay(
     showControls: Boolean,
+    inputEnabled: Boolean = !showControls,
     controlsInputLocked: Boolean,
     seekPreviewActive: Boolean,
+    onBackgroundClick: (() -> Unit)? = null,
     onKeyUp: ((android.view.KeyEvent) -> Boolean)? = null,
     onHorizontalScrollDelta: (Float) -> Unit = {},
     onVerticalScrollDelta: (Float) -> Unit = {},
@@ -184,13 +187,14 @@ private fun PlaybackScrollInputOverlay(
     val focusRequester = remember { FocusRequester() }
     var hasFocus by remember { mutableStateOf(false) }
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(inputEnabled) {
+        if (!inputEnabled) return@LaunchedEffect
         delay(80)
         runCatching { focusRequester.requestFocus() }
     }
 
-    LaunchedEffect(hasFocus) {
-        if (!hasFocus) {
+    LaunchedEffect(hasFocus, inputEnabled) {
+        if (inputEnabled && !hasFocus) {
             delay(120)
             focusRequester.requestFocus()
         }
@@ -210,19 +214,29 @@ private fun PlaybackScrollInputOverlay(
                 }
                 onKeyUp?.invoke(keyEvent.nativeKeyEvent) ?: false
             }
-            .focusable()
+            .focusable(enabled = inputEnabled)
             .scrollable(
                 state = verticalScrollState,
                 orientation = Orientation.Vertical,
-                enabled = !inputLocked && !showControls,
+                enabled = !inputLocked && inputEnabled,
             )
             .scrollable(
                 state = horizontalScrollState,
                 orientation = Orientation.Horizontal,
-                enabled = !inputLocked && !showControls,
+                enabled = !inputLocked && inputEnabled,
             ),
         contentAlignment = Alignment.Center,
     ) {
+        if (showControls && onBackgroundClick != null) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clickable(
+                        enabled = !inputLocked,
+                        onClick = onBackgroundClick,
+                    ),
+            )
+        }
         if (showControls && controlsContent != null) {
             Box(
                 modifier = controlsModifier
@@ -505,13 +519,19 @@ fun SpatialVideoPlayerContent(
         blackark.app.vr.ui.viewmodel.StereoMode.TopBottom -> StereoMode.TopBottom
     }
 
-    val revealInteractionPolicy =
-        if (playbackLayerPolicy.enableSurfaceRevealInput) {
-            clickInteractionPolicy(isHandTrackingEnabled = isHandTrackingEnabled) {
-                videoPlayerViewModel.setControlsVisibility(true)
-            }
-        } else {
-            null
+    val surfaceControlsInteractionPolicy =
+        when {
+            playbackLayerPolicy.enableSurfaceRevealInput ->
+                clickInteractionPolicy(isHandTrackingEnabled = isHandTrackingEnabled) {
+                    videoPlayerViewModel.setControlsVisibility(true)
+                }
+
+            playbackLayerPolicy.enableSurfaceHideInput ->
+                clickInteractionPolicy(isHandTrackingEnabled = isHandTrackingEnabled) {
+                    videoPlayerViewModel.setControlsVisibility(false)
+                }
+
+            else -> null
         }
 
     if (exoPlayer == null) {
@@ -534,7 +554,7 @@ fun SpatialVideoPlayerContent(
             exoPlayer = exoPlayer,
             videoFormat = playerState.videoFormat,
             stereoMode = xrStereoMode,
-            interactionPolicy = revealInteractionPolicy,
+            interactionPolicy = surfaceControlsInteractionPolicy,
             headLockedRotation180 =
                 when {
                     enableHeadFollowIn180Stereo -> headFollowPose?.rotation
@@ -543,7 +563,7 @@ fun SpatialVideoPlayerContent(
         )
 
         if (isSurfaceReady) {
-            if (playerState.subtitleCues.isNotEmpty()) {
+            if (subtitlesPresent) {
                 SpatialPanel(
                     modifier = buildImmersiveSubtitleModifier(
                         dashboardPanelPose = dashboardPanelPose,
@@ -564,55 +584,82 @@ fun SpatialVideoPlayerContent(
                 }
             }
 
-            if (playbackLayerPolicy.showRevealInputLayer) {
-                SpatialPanel(
-                    modifier = buildImmersiveRevealInputModifier(
-                        dashboardPanelPose = dashboardPanelPose,
-                        density = density,
-                    ),
-                    interactionPolicy = clickInteractionPolicy(
-                        isHandTrackingEnabled = isHandTrackingEnabled,
-                    ) {
-                        videoPlayerViewModel.setControlsVisibility(true)
+            SpatialPanel(
+                modifier = buildImmersiveRevealInputModifier(
+                    dashboardPanelPose = dashboardPanelPose,
+                    density = density,
+                ),
+                interactionPolicy =
+                    when {
+                        playbackLayerPolicy.showRevealInputLayer ->
+                            clickInteractionPolicy(
+                                isHandTrackingEnabled = isHandTrackingEnabled,
+                            ) {
+                                videoPlayerViewModel.setControlsVisibility(true)
+                            }
+
+                        playbackLayerPolicy.enableSurfaceHideInput ->
+                            clickInteractionPolicy(
+                                isHandTrackingEnabled = isHandTrackingEnabled,
+                            ) {
+                                videoPlayerViewModel.setControlsVisibility(false)
+                            }
+
+                        else -> clickInteractionPolicy(isEnabled = false)
                     },
-                ) {
-                    PlaybackScrollInputOverlay(
-                        showControls = false,
-                        onKeyUp = { event ->
-                            videoPlayerViewModel.dispatchPlaybackKeyEvent(event)
-                        },
-                        controlsInputLocked = playerState.controlsInputLocked,
-                        seekPreviewActive = playerState.seekPreviewActive,
-                        onHorizontalScrollDelta = { delta ->
-                            videoPlayerViewModel.handlePlaybackHorizontalScroll(delta)
-                        },
-                        onVerticalScrollDelta = { delta ->
-                            videoPlayerViewModel.handlePlaybackVerticalScroll(delta)
-                        },
-                    )
-                }
+            ) {
+                PlaybackScrollInputOverlay(
+                    showControls = false,
+                    inputEnabled = playbackLayerPolicy.showRevealInputLayer,
+                    onKeyUp = { event ->
+                        videoPlayerViewModel.dispatchPlaybackKeyEvent(event)
+                    },
+                    controlsInputLocked = playerState.controlsInputLocked,
+                    seekPreviewActive = playerState.seekPreviewActive,
+                    onHorizontalScrollDelta = { delta ->
+                        videoPlayerViewModel.handlePlaybackHorizontalScroll(delta)
+                    },
+                    onVerticalScrollDelta = { delta ->
+                        videoPlayerViewModel.handlePlaybackVerticalScroll(delta)
+                    },
+                )
             }
 
-            if (playbackLayerPolicy.showControlsLayer) {
-                SpatialPanel(
-                    modifier = buildImmersiveControlsModifier(
-                        dashboardPanelPose = dashboardPanelPose,
-                        density = density,
-                        stereoMode = playerState.stereoMode,
-                        horizontalOffsetMeters = playerState.immersiveUiHorizontalOffsetMeters,
-                        subtitlesPresent = subtitlesPresent,
-                        subtitleVerticalOffsetMeters =
-                            playerState.immersiveSubtitleVerticalOffsetMeters,
-                    ),
-                    interactionPolicy = clickInteractionPolicy(
-                        isHandTrackingEnabled = isHandTrackingEnabled,
-                    ),
-                ) {
+            SpatialPanel(
+                modifier = buildImmersiveControlsModifier(
+                    dashboardPanelPose = dashboardPanelPose,
+                    density = density,
+                    stereoMode = playerState.stereoMode,
+                    horizontalOffsetMeters = playerState.immersiveUiHorizontalOffsetMeters,
+                    subtitlesPresent = subtitlesPresent,
+                    subtitleVerticalOffsetMeters =
+                        playerState.immersiveSubtitleVerticalOffsetMeters,
+                ),
+                interactionPolicy =
+                    if (playbackLayerPolicy.showControlsLayer) {
+                        clickInteractionPolicy(
+                            isHandTrackingEnabled = isHandTrackingEnabled,
+                        )
+                    } else {
+                        clickInteractionPolicy(isEnabled = false)
+                    },
+            ) {
+                if (playbackLayerPolicy.showControlsLayer) {
                     Box(
                         modifier = Modifier.fillMaxSize(),
                         contentAlignment = Alignment.Center,
                     ) {
-
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .clickable(
+                                    enabled =
+                                        !playerState.controlsInputLocked &&
+                                                !playerState.seekPreviewActive,
+                                ) {
+                                    videoPlayerViewModel.setControlsVisibility(false)
+                                },
+                        )
                         Box(
                             modifier = Modifier.fillMaxWidth(),
                         ) {
@@ -630,7 +677,7 @@ fun SpatialVideoPlayerContent(
         Standard2DPlayer(
             exoPlayer = exoPlayer,
             stereoMode = xrStereoMode,
-            interactionPolicy = revealInteractionPolicy,
+            interactionPolicy = surfaceControlsInteractionPolicy,
             showControls = showControls,
             isSurfaceReady = isSurfaceReady,
             videoPlayerViewModel = videoPlayerViewModel,
@@ -767,8 +814,12 @@ private fun Standard2DPlayer(
 
                             PlaybackScrollInputOverlay(
                                 showControls = showControls,
+                                inputEnabled = !showControls,
                                 controlsInputLocked = playerState.controlsInputLocked,
                                 seekPreviewActive = playerState.seekPreviewActive,
+                                onBackgroundClick = {
+                                    videoPlayerViewModel.setControlsVisibility(false)
+                                },
                                 onKeyUp = { event ->
                                     videoPlayerViewModel.dispatchPlaybackKeyEvent(event)
                                 },

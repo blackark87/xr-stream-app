@@ -103,6 +103,9 @@ fun XRPlaybackControls(
     var isSubtitleVerticalScrubbing by remember { mutableStateOf(false) }
     var isImmersiveUiHorizontalScrubbing by remember { mutableStateOf(false) }
     var sliderPosition by remember { mutableFloatStateOf(0f) }
+    var immersiveUiHorizontalSliderPosition by remember {
+        mutableFloatStateOf(playerState.immersiveUiHorizontalOffsetMeters)
+    }
     var controlsRootLeftPx by remember { mutableFloatStateOf(0f) }
     var controlsRootTopPx by remember { mutableFloatStateOf(0f) }
     var controlsRootWidthPx by remember { mutableIntStateOf(0) }
@@ -138,6 +141,13 @@ fun XRPlaybackControls(
         }
     }
 
+    LaunchedEffect(playerState.immersiveUiHorizontalOffsetMeters) {
+        if (!isImmersiveUiHorizontalScrubbing) {
+            immersiveUiHorizontalSliderPosition =
+                playerState.immersiveUiHorizontalOffsetMeters
+        }
+    }
+
     DisposableEffect(Unit) {
         onDispose {
             if (isScrubbing) {
@@ -155,7 +165,9 @@ fun XRPlaybackControls(
                 videoPlayerViewModel.endControlsInputLock()
             }
             if (isImmersiveUiHorizontalScrubbing) {
-                videoPlayerViewModel.persistImmersiveUiHorizontalOffsetMeters()
+                videoPlayerViewModel.applyImmersiveUiHorizontalOffsetMetersAfterInteraction(
+                    immersiveUiHorizontalSliderPosition
+                )
                 videoPlayerViewModel.endControlsInputLock()
             }
         }
@@ -314,6 +326,7 @@ fun XRPlaybackControls(
                                         selected = playerState.videoFormat == format,
                                         onClick = {
                                             videoPlayerViewModel.setVideoFormat(format)
+                                            videoPlayerViewModel.dismissPlaybackMenu()
                                         },
                                         selectedContainerColor = accentStrong,
                                         selectedContentColor = onAccent,
@@ -342,6 +355,7 @@ fun XRPlaybackControls(
                                             selected = playerState.stereoMode == mode,
                                             onClick = {
                                                 videoPlayerViewModel.setStereoMode(mode)
+                                                videoPlayerViewModel.dismissPlaybackMenu()
                                             },
                                             selectedContainerColor = accentStrong,
                                             selectedContentColor = onAccent,
@@ -359,7 +373,7 @@ fun XRPlaybackControls(
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
                                     Text(
-                                        text = "Subtitle depth",
+                                        text = "Subtitle eye overlap / depth",
                                         style = MaterialTheme.typography.labelLarge,
                                         fontWeight = FontWeight.SemiBold,
                                         color = textMuted,
@@ -388,6 +402,7 @@ fun XRPlaybackControls(
                                         isSubtitleDepthScrubbing = false
                                         videoPlayerViewModel.persistImmersiveSubtitleDistanceMeters()
                                         videoPlayerViewModel.endControlsInputLock()
+                                        videoPlayerViewModel.dismissPlaybackMenu()
                                     },
                                     valueRange =
                                         MIN_IMMERSIVE_SUBTITLE_DISTANCE_METERS..
@@ -401,7 +416,7 @@ fun XRPlaybackControls(
                                     modifier = Modifier.fillMaxWidth(),
                                 )
                                 Text(
-                                    text = "Adjust until both eyes see one clear subtitle.",
+                                    text = "Fine-tune in 1 cm steps until both eyes see one subtitle.",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = textMuted,
                                 )
@@ -441,6 +456,7 @@ fun XRPlaybackControls(
                                         videoPlayerViewModel
                                             .persistImmersiveSubtitleVerticalOffsetMeters()
                                         videoPlayerViewModel.endControlsInputLock()
+                                        videoPlayerViewModel.dismissPlaybackMenu()
                                     },
                                     valueRange =
                                         MIN_IMMERSIVE_SUBTITLE_VERTICAL_OFFSET_METERS..
@@ -472,7 +488,7 @@ fun XRPlaybackControls(
                                     )
                                     Text(
                                         text = prettyImmersiveUiHorizontalOffset(
-                                            playerState.immersiveUiHorizontalOffsetMeters
+                                            immersiveUiHorizontalSliderPosition
                                         ),
                                         style = MaterialTheme.typography.titleMedium,
                                         fontWeight = FontWeight.SemiBold,
@@ -480,21 +496,22 @@ fun XRPlaybackControls(
                                     )
                                 }
                                 Slider(
-                                    value = playerState.immersiveUiHorizontalOffsetMeters,
+                                    value = immersiveUiHorizontalSliderPosition,
                                     onValueChange = { offsetMeters ->
                                         if (!isImmersiveUiHorizontalScrubbing) {
                                             videoPlayerViewModel.beginControlsInputLock()
                                         }
                                         isImmersiveUiHorizontalScrubbing = true
-                                        videoPlayerViewModel.setImmersiveUiHorizontalOffsetMeters(
-                                            offsetMeters
-                                        )
+                                        immersiveUiHorizontalSliderPosition = offsetMeters
                                     },
                                     onValueChangeFinished = {
                                         isImmersiveUiHorizontalScrubbing = false
                                         videoPlayerViewModel
-                                            .persistImmersiveUiHorizontalOffsetMeters()
+                                            .applyImmersiveUiHorizontalOffsetMetersAfterInteraction(
+                                                immersiveUiHorizontalSliderPosition
+                                            )
                                         videoPlayerViewModel.endControlsInputLock()
+                                        videoPlayerViewModel.dismissPlaybackMenu()
                                     },
                                     valueRange =
                                         MIN_IMMERSIVE_UI_HORIZONTAL_OFFSET_METERS..

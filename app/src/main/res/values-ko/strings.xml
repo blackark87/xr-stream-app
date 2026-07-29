@@ -100,8 +100,8 @@
     <string name="subtitle_font_preview">가나다라마바사 ABC abc 123</string>
     <string name="subtitle_size">자막 크기</string>
     <string name="subtitle_size_description">자막의 색상과 강조는 유지하면서 글자 크기를 일정하게 적용합니다.</string>
-    <string name="immersive_subtitle_distance">몰입형 자막 깊이</string>
-    <string name="immersive_subtitle_distance_description">180° 또는 360° 영상을 보면서 양쪽 눈에 자막이 하나로 또렷하게 보일 때까지 조절합니다. 화면에서 보이는 글자 크기는 일정하게 유지됩니다.</string>
+    <string name="immersive_subtitle_distance">몰입형 자막 양안 겹침/깊이</string>
+    <string name="immersive_subtitle_distance_description">180° 또는 360° 영상에서 양쪽 눈의 자막이 하나로 또렷하게 겹쳐 보이도록 앞뒤 위치를 1cm 단위로 조절합니다. 화면에서 보이는 글자 크기는 일정하게 유지됩니다.</string>
     <string name="immersive_subtitle_distance_value">%1$.2f m</string>
     <string name="immersive_subtitle_vertical_offset">몰입형 자막 상하 위치</string>
     <string name="immersive_subtitle_vertical_offset_description">자막만 위아래로 이동합니다. 음수는 아래, 양수는 위이며 재생 컨트롤은 자막 아래에 유지됩니다.</string>

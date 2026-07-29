@@ -227,6 +227,7 @@ class VideoPlayerViewModel(
     private var lastPlaybackVerticalDirection = 0
     private var playbackHorizontalRepeatJob: Job? = null
     private var controlsAutoHideJob: Job? = null
+    private var immersiveUiHorizontalOffsetApplyJob: Job? = null
     private var suppressControlsToggleUntilMs = 0L
     private var pendingInitializationPath: String? = null
     private var pendingVideoFormatToPersist: VideoFormat? = null
@@ -237,6 +238,7 @@ class VideoPlayerViewModel(
     private val releaseMutex = Mutex()
     private val controlsAutoHideDelayMs = 3_500L
     private val controlsToggleSuppressAfterInputMs = 300L
+    private val immersiveUiHorizontalOffsetApplyDelayMs = 220L
 
     init {
         // Observe global key events.
@@ -376,6 +378,23 @@ class VideoPlayerViewModel(
             PLAYER_LOG_TAG,
             "$PLAYBACK_CONTROL_LOG_PREFIX immersive horizontal offset=${offsetMeters}m",
         )
+    }
+
+    fun applyImmersiveUiHorizontalOffsetMetersAfterInteraction(offsetMeters: Float) {
+        val normalizedOffset = normalizeImmersiveUiHorizontalOffsetMeters(offsetMeters)
+        immersiveUiHorizontalOffsetApplyJob?.cancel()
+        immersiveUiHorizontalOffsetApplyJob =
+            viewModelScope.launch {
+                delay(immersiveUiHorizontalOffsetApplyDelayMs)
+                setImmersiveUiHorizontalOffsetMeters(normalizedOffset)
+                persistImmersiveUiHorizontalOffsetMeters()
+            }.also { job ->
+                job.invokeOnCompletion {
+                    if (immersiveUiHorizontalOffsetApplyJob === job) {
+                        immersiveUiHorizontalOffsetApplyJob = null
+                    }
+                }
+            }
     }
 
     fun togglePlaybackMenu(menu: PlaybackMenu) {
