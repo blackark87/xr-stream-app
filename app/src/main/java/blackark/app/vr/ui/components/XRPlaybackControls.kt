@@ -90,13 +90,19 @@ import coil3.request.CachePolicy
 import coil3.request.ImageRequest
 import kotlin.math.roundToInt
 
+enum class XRPlaybackControlsContent {
+    ControlsWithMenu,
+    ControlsOnly,
+    MenuOnly,
+}
+
 @OptIn(UnstableApi::class)
 @Composable
 fun XRPlaybackControls(
     videoPlayerViewModel: VideoPlayerViewModel,
     playerState: VideoPlayerState,
     onNavigateBack: () -> Unit,
-    reserveImmersiveMenuSpace: Boolean = false,
+    content: XRPlaybackControlsContent = XRPlaybackControlsContent.ControlsWithMenu,
 ) {
     var isScrubbing by remember { mutableStateOf(false) }
     var isVolumeScrubbing by remember { mutableStateOf(false) }
@@ -176,7 +182,11 @@ fun XRPlaybackControls(
     }
 
     val controlsHostModifier =
-        if (reserveImmersiveMenuSpace) Modifier.fillMaxSize() else Modifier.fillMaxWidth()
+        if (content == XRPlaybackControlsContent.MenuOnly) {
+            Modifier.fillMaxSize()
+        } else {
+            Modifier.fillMaxWidth()
+        }
 
     Box(
         modifier = controlsHostModifier
@@ -212,9 +222,14 @@ fun XRPlaybackControls(
         val previewOffsetY =
             (progressSectionTopPx - previewCardHeightPx - previewCardGapPx).coerceAtLeast(0)
 
-        val activeMenu = playerState.activePlaybackMenu
-        val menuWidth = activeMenu.menuWidth(playerState.videoFormat)
-        val menuHeight = activeMenu.menuEstimatedHeight(playerState.videoFormat)
+        val activeMenu =
+            if (content == XRPlaybackControlsContent.ControlsOnly) {
+                PlaybackMenu.None
+            } else {
+                playerState.activePlaybackMenu
+            }
+        val menuWidth = activeMenu.playbackMenuWidth(playerState.videoFormat)
+        val menuHeight = activeMenu.playbackMenuEstimatedHeight(playerState.videoFormat)
         val menuWidthPx = with(density) { menuWidth.roundToPx() }
         var measuredMenuHeightPx by remember(activeMenu, playerState.videoFormat) {
             mutableIntStateOf(0)
@@ -230,7 +245,11 @@ fun XRPlaybackControls(
             PlaybackMenu.None -> null
         }
         val activeMenuOffset =
-            if (activeMenu != PlaybackMenu.None && activeMenuAnchor != null) {
+            if (
+                content == XRPlaybackControlsContent.ControlsWithMenu &&
+                    activeMenu != PlaybackMenu.None &&
+                    activeMenuAnchor != null
+            ) {
                 calculatePlaybackMenuOffset(
                     controlsWidthPx = controlsRootWidthPx,
                     anchorCenterXPx = activeMenuAnchor.x,
@@ -238,13 +257,15 @@ fun XRPlaybackControls(
                     menuWidthPx = menuWidthPx,
                     menuHeightPx = menuHeightPx,
                     gapPx = menuGapPx,
-                    keepInsideHostTop = reserveImmersiveMenuSpace,
                 )
             } else {
                 null
             }
 
-        if (playerState.seekPreviewActive) {
+        if (
+            content != XRPlaybackControlsContent.MenuOnly &&
+                playerState.seekPreviewActive
+        ) {
             PlaybackSeekPreviewCard(
                 targetPositionMs = playerState.seekPreviewTargetPositionMs,
                 previewPath = playerState.seekPreviewThumbnailPath,
@@ -256,13 +277,23 @@ fun XRPlaybackControls(
             )
         }
 
-        if (activeMenuOffset != null) {
+        if (
+            activeMenu != PlaybackMenu.None &&
+                (content == XRPlaybackControlsContent.MenuOnly || activeMenuOffset != null)
+        ) {
             Box(
-                modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .zIndex(2f)
-                    .onSizeChanged { measuredMenuHeightPx = it.height }
-                    .offset { activeMenuOffset },
+                modifier =
+                    if (content == XRPlaybackControlsContent.MenuOnly) {
+                        Modifier
+                            .align(Alignment.Center)
+                            .zIndex(2f)
+                    } else {
+                        Modifier
+                            .align(Alignment.TopStart)
+                            .zIndex(2f)
+                            .onSizeChanged { measuredMenuHeightPx = it.height }
+                            .offset { checkNotNull(activeMenuOffset) }
+                    },
             ) {
                 when (activeMenu) {
                     PlaybackMenu.Speed -> {
@@ -586,17 +617,11 @@ fun XRPlaybackControls(
             }
         }
 
-        val controlsPanelModifier =
-            if (reserveImmersiveMenuSpace) {
-                Modifier
-                    .align(Alignment.Center)
-                    .fillMaxWidth()
-            } else {
-                Modifier.fillMaxWidth()
-            }
+        if (content == XRPlaybackControlsContent.MenuOnly) return@Box
 
         Column(
-            modifier = controlsPanelModifier
+            modifier = Modifier
+                .fillMaxWidth()
                 .shadow(
                     elevation = 18.dp,
                     shape = RoundedCornerShape(28.dp),
@@ -1124,14 +1149,14 @@ private fun PlaybackOptionButton(
 private fun playbackSpeedRows(): List<List<Float>> =
     listOf(0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f).chunked(3)
 
-private fun PlaybackMenu.menuWidth(videoFormat: VideoFormat): Dp = when (this) {
+internal fun PlaybackMenu.playbackMenuWidth(videoFormat: VideoFormat): Dp = when (this) {
     PlaybackMenu.Speed -> 276.dp
     PlaybackMenu.Display -> if (videoFormat == VideoFormat.Format2D) 360.dp else 420.dp
     PlaybackMenu.Volume -> 264.dp
     PlaybackMenu.None -> 0.dp
 }
 
-private fun PlaybackMenu.menuEstimatedHeight(videoFormat: VideoFormat): Dp = when (this) {
+internal fun PlaybackMenu.playbackMenuEstimatedHeight(videoFormat: VideoFormat): Dp = when (this) {
     PlaybackMenu.Speed -> 170.dp
     PlaybackMenu.Display -> if (videoFormat == VideoFormat.Format2D) 170.dp else 640.dp
     PlaybackMenu.Volume -> 156.dp
@@ -1145,15 +1170,12 @@ internal fun calculatePlaybackMenuOffset(
     menuWidthPx: Int,
     menuHeightPx: Int,
     gapPx: Int,
-    keepInsideHostTop: Boolean = false,
 ): IntOffset {
     val maxOffsetX = (controlsWidthPx - menuWidthPx).coerceAtLeast(0)
     val desiredOffsetY = anchorTopYPx - menuHeightPx - gapPx
     return IntOffset(
         x = (anchorCenterXPx - (menuWidthPx / 2)).coerceIn(0, maxOffsetX),
-        // 2D hosts intentionally allow the menu to extend above their compact controls root.
-        // Immersive hosts reserve vertical space, so keep the menu inside the SpatialPanel.
-        y = if (keepInsideHostTop) desiredOffsetY.coerceAtLeast(0) else desiredOffsetY,
+        y = desiredOffsetY,
     )
 }
 
