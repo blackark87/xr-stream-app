@@ -129,9 +129,12 @@ private const val IMMERSIVE_CONTROLS_FRONT_FACTOR = 0.84f
 private val IMMERSIVE_CONTROLS_DOWN_OFFSET = (-320).dp
 private val IMMERSIVE_MENU_PANEL_PADDING = 96.dp
 private val IMMERSIVE_MENU_CONTROLS_GAP = 20.dp
+private val IMMERSIVE_DISPLAY_PANEL_HEIGHT = 620.dp
+private val IMMERSIVE_DISPLAY_CONTENT_MAX_HEIGHT = 440.dp
+private val IMMERSIVE_MENU_FRONT_OFFSET = 16.dp
 private val IMMERSIVE_REVEAL_PANEL_WIDTH = 2400.dp
 private val IMMERSIVE_REVEAL_PANEL_HEIGHT = 1400.dp
-private val IMMERSIVE_REVEAL_FOLLOW_DISTANCE = 700.dp
+private val IMMERSIVE_REVEAL_FOLLOW_DISTANCE = 480.dp
 // Used only while controls are hidden; the panel follows the viewer's current field of view.
 private const val IMMERSIVE_REVEAL_FRONT_FACTOR = 0.86f
 private val IMMERSIVE_SUBTITLE_PANEL_WIDTH = 1280.dp
@@ -179,10 +182,11 @@ private fun rememberPlaybackScrollState(
 private fun PlaybackScrollInputOverlay(
     showControls: Boolean,
     inputEnabled: Boolean = !showControls,
+    backgroundToggleEnabled: Boolean = true,
     controlsInputLocked: Boolean,
     seekPreviewActive: Boolean,
     onKeyUp: ((android.view.KeyEvent) -> Boolean)? = null,
-    onRevealControls: () -> Unit = {},
+    onToggleControls: () -> Unit = {},
     onHorizontalScrollDelta: (Float) -> Unit = {},
     onVerticalScrollDelta: (Float) -> Unit = {},
     controlsAlignment: Alignment = Alignment.Center,
@@ -217,8 +221,8 @@ private fun PlaybackScrollInputOverlay(
             .clickable(
                 interactionSource = revealInteractionSource,
                 indication = null,
-                enabled = !inputLocked && inputEnabled,
-                onClick = onRevealControls,
+                enabled = !inputLocked && backgroundToggleEnabled,
+                onClick = onToggleControls,
             )
             .focusRequester(focusRequester)
             .onFocusChanged { focusState ->
@@ -455,7 +459,7 @@ fun SpatialVideoPlayerContent(
 
     val enableHeadFollowIn2D = playerState.videoFormat == VideoFormat.Format2D
     val enableImmersiveRevealHeadFollow =
-        shouldUseImmersiveDome && playbackLayerPolicy.showRevealInputLayer
+        shouldUseImmersiveDome && playbackLayerPolicy.showFallbackRevealLayer
     // Disabled for 180 stereo because the custom lock-rotation path can blank hemisphere rendering.
     val enableHeadFollowIn180Stereo = false
 
@@ -572,11 +576,15 @@ fun SpatialVideoPlayerContent(
         blackark.app.vr.ui.viewmodel.StereoMode.TopBottom -> StereoMode.TopBottom
     }
 
+    val targetControlsVisible = !showControls
     val surfaceControlsInteractionPolicy =
         when {
-            playbackLayerPolicy.enableSurfaceRevealInput ->
+            playbackLayerPolicy.enableSurfaceToggleInput ->
                 clickInteractionPolicy(isHandTrackingEnabled = isHandTrackingEnabled) {
-                    videoPlayerViewModel.setControlsVisibility(true)
+                    videoPlayerViewModel.setControlsVisibility(
+                        visible = targetControlsVisible,
+                        source = "video-surface",
+                    )
                 }
 
             else -> null
@@ -632,7 +640,7 @@ fun SpatialVideoPlayerContent(
                 }
             }
 
-            if (playbackLayerPolicy.showRevealInputLayer) {
+            if (playbackLayerPolicy.showFallbackRevealLayer) {
                 SpatialPanel(
                     modifier = buildImmersiveRevealInputModifier(
                         dashboardPanelPose = dashboardPanelPose,
@@ -642,7 +650,10 @@ fun SpatialVideoPlayerContent(
                     interactionPolicy = clickInteractionPolicy(
                         isHandTrackingEnabled = isHandTrackingEnabled,
                     ) {
-                        videoPlayerViewModel.setControlsVisibility(true)
+                        videoPlayerViewModel.setControlsVisibility(
+                            visible = targetControlsVisible,
+                            source = "immersive-fallback-panel",
+                        )
                     },
                 ) {
                     PlaybackScrollInputOverlay(
@@ -651,8 +662,11 @@ fun SpatialVideoPlayerContent(
                         onKeyUp = { event ->
                             videoPlayerViewModel.dispatchPlaybackKeyEvent(event)
                         },
-                        onRevealControls = {
-                            videoPlayerViewModel.setControlsVisibility(true)
+                        onToggleControls = {
+                            videoPlayerViewModel.setControlsVisibility(
+                                visible = targetControlsVisible,
+                                source = "immersive-fallback-overlay",
+                            )
                         },
                         controlsInputLocked = playerState.controlsInputLocked,
                         seekPreviewActive = playerState.seekPreviewActive,
@@ -693,21 +707,29 @@ fun SpatialVideoPlayerContent(
                 playbackLayerPolicy.showControlsLayer &&
                     playerState.activePlaybackMenu != PlaybackMenu.None
             ) {
-                SpatialPanel(
-                    modifier = buildImmersivePlaybackMenuModifier(
-                        dashboardPanelPose = dashboardPanelPose,
-                        density = density,
-                        activeMenu = playerState.activePlaybackMenu,
-                        videoFormat = playerState.videoFormat,
-                        horizontalOffsetMeters = playerState.immersiveUiHorizontalOffsetMeters,
-                    ),
-                ) {
-                    XRPlaybackControls(
-                        videoPlayerViewModel = videoPlayerViewModel,
-                        playerState = playerState,
-                        onNavigateBack = { videoPlayerViewModel.requestNavigateBack() },
-                        content = XRPlaybackControlsContent.MenuOnly,
-                    )
+                key(playerState.activePlaybackMenu) {
+                    SpatialPanel(
+                        modifier = buildImmersivePlaybackMenuModifier(
+                            dashboardPanelPose = dashboardPanelPose,
+                            density = density,
+                            activeMenu = playerState.activePlaybackMenu,
+                            videoFormat = playerState.videoFormat,
+                            horizontalOffsetMeters = playerState.immersiveUiHorizontalOffsetMeters,
+                        ),
+                    ) {
+                        XRPlaybackControls(
+                            videoPlayerViewModel = videoPlayerViewModel,
+                            playerState = playerState,
+                            onNavigateBack = { videoPlayerViewModel.requestNavigateBack() },
+                            content = XRPlaybackControlsContent.MenuOnly,
+                            menuContentMaxHeight =
+                                if (playerState.activePlaybackMenu == PlaybackMenu.Display) {
+                                    IMMERSIVE_DISPLAY_CONTENT_MAX_HEIGHT
+                                } else {
+                                    null
+                                },
+                        )
+                    }
                 }
             }
         }
@@ -853,13 +875,17 @@ private fun Standard2DPlayer(
                             PlaybackScrollInputOverlay(
                                 showControls = showControls,
                                 inputEnabled = !showControls,
+                                backgroundToggleEnabled = true,
                                 controlsInputLocked = playerState.controlsInputLocked,
                                 seekPreviewActive = playerState.seekPreviewActive,
                                 onKeyUp = { event ->
                                     videoPlayerViewModel.dispatchPlaybackKeyEvent(event)
                                 },
-                                onRevealControls = {
-                                    videoPlayerViewModel.setControlsVisibility(true)
+                                onToggleControls = {
+                                    videoPlayerViewModel.setControlsVisibility(
+                                        visible = !showControls,
+                                        source = "2d-background-overlay",
+                                    )
                                 },
                                 controlsAlignment = Alignment.BottomCenter,
                                 controlsPadding = PaddingValues(
@@ -1132,8 +1158,7 @@ private fun buildImmersivePlaybackMenuModifier(
 ): SubspaceModifier {
     val panelWidth =
         activeMenu.playbackMenuWidth(videoFormat) + IMMERSIVE_MENU_PANEL_PADDING
-    val panelHeight =
-        activeMenu.playbackMenuEstimatedHeight(videoFormat) + IMMERSIVE_MENU_PANEL_PADDING
+    val panelHeight = resolveImmersivePlaybackMenuPanelHeight(activeMenu, videoFormat)
     val menuUpOffset =
         (IMMERSIVE_CONTROLS_PANEL_HEIGHT + panelHeight) / 2f +
             IMMERSIVE_MENU_CONTROLS_GAP
@@ -1149,15 +1174,19 @@ private fun buildImmersivePlaybackMenuModifier(
             dpPerMeter = 1.meters.toDp().value,
         )
     val worldUp = rotation * Vector3.Up
+    val worldForward = rotation * Vector3.Forward
     val menuUpX = (worldUp.x * menuUpOffset.value).dp
     val menuUpY = (worldUp.y * menuUpOffset.value).dp
     val menuUpZ = (worldUp.z * menuUpOffset.value).dp
+    val menuFrontX = (-worldForward.x * IMMERSIVE_MENU_FRONT_OFFSET.value).dp
+    val menuFrontY = (-worldForward.y * IMMERSIVE_MENU_FRONT_OFFSET.value).dp
+    val menuFrontZ = (-worldForward.z * IMMERSIVE_MENU_FRONT_OFFSET.value).dp
 
     if (dashboardPanelPose == null) {
         return baseModifier.offset(
-            x = horizontalOffsetDp.x.dp + menuUpX,
-            y = IMMERSIVE_CONTROLS_DOWN_OFFSET + horizontalOffsetDp.y.dp + menuUpY,
-            z = horizontalOffsetDp.z.dp + menuUpZ,
+            x = horizontalOffsetDp.x.dp + menuUpX + menuFrontX,
+            y = IMMERSIVE_CONTROLS_DOWN_OFFSET + horizontalOffsetDp.y.dp + menuUpY + menuFrontY,
+            z = horizontalOffsetDp.z.dp + menuUpZ + menuFrontZ,
         )
     }
 
@@ -1173,12 +1202,22 @@ private fun buildImmersivePlaybackMenuModifier(
 
     return baseModifier
         .offset(
-            x = anchoredX + horizontalOffsetDp.x.dp + menuUpX,
-            y = anchoredY + horizontalOffsetDp.y.dp + menuUpY,
-            z = anchoredZ + horizontalOffsetDp.z.dp + menuUpZ,
+            x = anchoredX + horizontalOffsetDp.x.dp + menuUpX + menuFrontX,
+            y = anchoredY + horizontalOffsetDp.y.dp + menuUpY + menuFrontY,
+            z = anchoredZ + horizontalOffsetDp.z.dp + menuUpZ + menuFrontZ,
         )
         .rotate(rotation)
 }
+
+internal fun resolveImmersivePlaybackMenuPanelHeight(
+    activeMenu: PlaybackMenu,
+    videoFormat: VideoFormat,
+): Dp =
+    if (activeMenu == PlaybackMenu.Display && videoFormat != VideoFormat.Format2D) {
+        IMMERSIVE_DISPLAY_PANEL_HEIGHT
+    } else {
+        activeMenu.playbackMenuEstimatedHeight(videoFormat) + IMMERSIVE_MENU_PANEL_PADDING
+    }
 
 private fun buildPanelModifierFromSavedPose(
     dashboardPanelPose: Pose?,
