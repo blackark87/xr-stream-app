@@ -278,10 +278,7 @@ class MainDashboardViewModel(
             return null
         }
 
-        val normalizedCode = preferredBaseName
-            ?.let(::extractNormalizedCodeFromFileName)
-            ?: extractNormalizedCodeFromFileName(file.name)
-            ?: return null
+        val normalizedCode = extractNormalizedCodeFromFileName(file.name) ?: return null
         val folderPath = extractFolderPath(file.path)
         val lookupKey = normalizedCode to folderPath
 
@@ -977,7 +974,10 @@ class MainDashboardViewModel(
     ): JvrMovieMetadata? {
         if (file.isDirectory || !SMBClient.isVideoFile(file.name)) return null
 
-        val normalizedCode = extractNormalizedCodeFromFileName(file.name) ?: return null
+        val normalizedCode = preferredBaseName
+            ?.let(::extractNormalizedCodeFromFileName)
+            ?: extractNormalizedCodeFromFileName(file.name)
+            ?: return null
         val sourceScope = currentSourceScope()
         val asset = sourceScope?.let { scope ->
             avLibraryRepository.findAssetForPathOrCode(

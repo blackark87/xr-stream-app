@@ -208,6 +208,7 @@ import blackark.app.vr.utils.MIN_IMMERSIVE_SUBTITLE_VERTICAL_OFFSET_METERS
 import blackark.app.vr.utils.MIN_IMMERSIVE_UI_HORIZONTAL_OFFSET_METERS
 import blackark.app.vr.utils.ThumbnailImageLoaderProvider
 import blackark.app.vr.utils.VideoThumbnailFetcher
+import blackark.app.vr.utils.extractNormalizedCodeFromFileName
 import blackark.app.vr.utils.extractVirtualGroupKey
 import blackark.app.vr.utils.groupMultipartVideoFiles
 import blackark.app.vr.utils.BrowserFolderArtworkKind
@@ -1256,6 +1257,7 @@ private fun DashboardPreviewPanel(
     previewItem: DashboardPreviewItem?,
     modifier: Modifier = Modifier,
 ) {
+    val context = LocalContext.current
     val previewScrollState = rememberScrollState()
     val previewMetadata = rememberPreviewMetadata(previewItem)
     val resolvedTitle = previewMetadata?.title?.takeIf { it.isNotBlank() } ?: previewItem?.title
