@@ -109,6 +109,7 @@ fun XRPlaybackControls(
     onNavigateBack: () -> Unit,
     content: XRPlaybackControlsContent = XRPlaybackControlsContent.ControlsWithMenu,
     menuContentMaxHeight: Dp? = null,
+    onPanelBackgroundClick: (() -> Unit)? = null,
 ) {
     var isScrubbing by remember { mutableStateOf(false) }
     var isVolumeScrubbing by remember { mutableStateOf(false) }
@@ -148,7 +149,8 @@ fun XRPlaybackControls(
     val displayMenuSurface = colors.surface
     val chipActive = colors.primary.copy(alpha = 0.18f)
     val chipIdle = colors.surfaceVariant.copy(alpha = 0.5f)
-    val controlsInputInteractionSource = remember { MutableInteractionSource() }
+    val controlsCardInteractionSource = remember { MutableInteractionSource() }
+    val panelBackgroundInteractionSource = remember { MutableInteractionSource() }
 
     LaunchedEffect(playerState.currentPosition, playerState.duration) {
         if (!isScrubbing && playerState.duration > 0) {
@@ -195,13 +197,19 @@ fun XRPlaybackControls(
             Modifier.fillMaxWidth()
         }
 
-    Box(
-        modifier = controlsHostModifier
-            .clickable(
-                interactionSource = controlsInputInteractionSource,
+    val interactiveControlsHostModifier =
+        if (onPanelBackgroundClick != null) {
+            controlsHostModifier.clickable(
+                interactionSource = panelBackgroundInteractionSource,
                 indication = null,
-                onClick = {},
+                onClick = onPanelBackgroundClick,
             )
+        } else {
+            controlsHostModifier
+        }
+
+    Box(
+        modifier = interactiveControlsHostModifier
             .padding(horizontal = 18.dp, vertical = 16.dp)
             .onGloballyPositioned { coordinates ->
                 val position = coordinates.positionInRoot()
@@ -635,6 +643,11 @@ fun XRPlaybackControls(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .clickable(
+                    interactionSource = controlsCardInteractionSource,
+                    indication = null,
+                    onClick = {},
+                )
                 .shadow(
                     elevation = 18.dp,
                     shape = RoundedCornerShape(28.dp),

@@ -9,6 +9,7 @@ internal data class PlaybackLayerPolicy(
 
 internal fun resolvePlaybackLayerPolicy(
     isSurfaceReady: Boolean,
+    isImmersive: Boolean,
     showControls: Boolean,
     controlsInputLocked: Boolean,
     seekPreviewActive: Boolean,
@@ -18,8 +19,13 @@ internal fun resolvePlaybackLayerPolicy(
                 !controlsInputLocked &&
                 !seekPreviewActive
     return PlaybackLayerPolicy(
-        showFallbackRevealLayer = canHandleBackgroundToggle && !showControls,
-        enableSurfaceToggleInput = canHandleBackgroundToggle,
+        showFallbackRevealLayer = isImmersive && canHandleBackgroundToggle && !showControls,
+        enableSurfaceToggleInput = isImmersive && canHandleBackgroundToggle,
         showControlsLayer = isSurfaceReady && showControls,
     )
 }
+
+internal fun shouldShowImmersiveSubtitlePanel(
+    subtitlesPresent: Boolean,
+    showControls: Boolean,
+): Boolean = subtitlesPresent && !showControls
