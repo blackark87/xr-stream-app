@@ -1,10 +1,17 @@
 package blackark.app.vr.ui.screens
 
+import androidx.xr.scenecore.InputEvent
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PlaybackLayerPolicyTest {
+
+    @Test
+    fun `spatial release reveals controls without requiring a hit position`() {
+        assertTrue(isSpatialRevealClick(InputEvent.Action.UP))
+        assertFalse(isSpatialRevealClick(InputEvent.Action.DOWN))
+    }
 
     @Test
     fun `hidden controls expose only reveal input layers`() {

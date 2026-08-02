@@ -1,5 +1,8 @@
 package blackark.app.vr.ui.components
 
+import androidx.compose.ui.unit.dp
+import blackark.app.vr.ui.viewmodel.PlaybackMenu
+import blackark.app.vr.ui.viewmodel.VideoFormat
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -22,35 +25,15 @@ class XRPlaybackControlsPlacementTest {
     }
 
     @Test
-    fun `immersive display menu stays above controls inside reserved host`() {
-        val offset = calculatePlaybackMenuOffset(
-            controlsWidthPx = 1260,
-            anchorCenterXPx = 1040,
-            anchorTopYPx = 800,
-            menuWidthPx = 420,
-            menuHeightPx = 640,
-            gapPx = 10,
-            keepInsideHostTop = true,
+    fun `immersive display menu receives its own full size panel bounds`() {
+        assertEquals(
+            420.dp,
+            PlaybackMenu.Display.playbackMenuWidth(VideoFormat.Format180),
         )
-
-        assertEquals(830, offset.x)
-        assertEquals(150, offset.y)
-        assertEquals(790, offset.y + 640)
-    }
-
-    @Test
-    fun `immersive menu never escapes the top of its host`() {
-        val offset = calculatePlaybackMenuOffset(
-            controlsWidthPx = 1260,
-            anchorCenterXPx = 1040,
-            anchorTopYPx = 60,
-            menuWidthPx = 420,
-            menuHeightPx = 640,
-            gapPx = 10,
-            keepInsideHostTop = true,
+        assertEquals(
+            640.dp,
+            PlaybackMenu.Display.playbackMenuEstimatedHeight(VideoFormat.Format180),
         )
-
-        assertEquals(0, offset.y)
     }
 
     @Test

@@ -236,7 +236,8 @@ class VideoPlayerViewModel(
     private var lastHandledKeyCode = Int.MIN_VALUE
     private var hasDispatchedNavigateBack = false
     private val releaseMutex = Mutex()
-    private val controlsAutoHideDelayMs = 3_500L
+    // XR controllers need additional time to acquire small spatial button targets.
+    private val controlsAutoHideDelayMs = 10_000L
     private val controlsToggleSuppressAfterInputMs = 300L
     private val immersiveUiHorizontalOffsetApplyDelayMs = 220L
 
