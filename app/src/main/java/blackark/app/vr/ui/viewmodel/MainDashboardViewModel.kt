@@ -19,6 +19,7 @@ import blackark.app.vr.network.SMBClient
 import blackark.app.vr.network.SMBConfig
 import blackark.app.vr.network.SMBFileItem
 import blackark.app.vr.utils.AppSettingsStore
+import blackark.app.vr.utils.ActorFolderArtworkResolver
 import blackark.app.vr.utils.JvrLibraryMetadataProvider
 import blackark.app.vr.utils.JvrMovieMetadata
 import blackark.app.vr.utils.LocalNfoMetadataResolver
@@ -34,6 +35,7 @@ import blackark.app.vr.utils.extractVirtualGroupPart
 import blackark.app.vr.utils.isTrailerFile
 import jcifs.smb.SmbRandomAccessFile
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
@@ -44,8 +46,11 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.async
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import java.io.RandomAccessFile
 import java.security.MessageDigest
@@ -158,6 +163,9 @@ class MainDashboardViewModel(
     private var avCastRepairJob: Job? = null
     private var avCastRepairSourceScope: String? = null
     private val avCastRepairAttemptedCacheKeys = mutableSetOf<String>()
+    private val actorFolderArtworkCacheLock = Any()
+    private val actorFolderArtworkCache = mutableMapOf<String, Deferred<String?>>()
+    private val actorFolderArtworkSemaphore = Semaphore(2)
     private val systemZoneId: ZoneId = ZoneId.systemDefault()
 
     private data class IndexedMetadataResolution(
@@ -342,6 +350,7 @@ class MainDashboardViewModel(
             )
 
             try {
+                clearActorFolderArtworkCache()
                 smbClient?.disconnect()
                 smbClient = null
                 localClient?.disconnect()
@@ -483,6 +492,7 @@ class MainDashboardViewModel(
         avCastRepairJob = null
         avCastRepairSourceScope = null
         avCastRepairAttemptedCacheKeys.clear()
+        clearActorFolderArtworkCache()
         smbClient?.disconnect()
         smbClient = null
         localClient?.disconnect()
@@ -974,6 +984,40 @@ class MainDashboardViewModel(
             forceMetadataRefresh = false,
             persistLocalComposite = false,
         ).metadata
+    }
+
+    suspend fun resolveActorFolderArtwork(folder: SMBFileItem): String? {
+        if (!folder.isDirectory) return null
+
+        val selectedServer = _uiState.value.selectedServer ?: return null
+        val refreshToken = _uiState.value.fileMetadataRefreshToken
+        val cacheKey = buildString {
+            append(selectedServer.serverAddress)
+            append('|')
+            append(selectedServer.shareName)
+            append('|')
+            append(folder.path)
+            append('|')
+            append(folder.lastModified)
+            append('|')
+            append(refreshToken)
+        }
+        val activeSmbClient = smbClient
+        val activeLocalClient = localClient
+        val deferred = synchronized(actorFolderArtworkCacheLock) {
+            actorFolderArtworkCache.getOrPut(cacheKey) {
+                viewModelScope.async(Dispatchers.IO) {
+                    actorFolderArtworkSemaphore.withPermit {
+                        ActorFolderArtworkResolver(
+                            smbClient = activeSmbClient,
+                            localClient = activeLocalClient,
+                        ).resolveActorFolderArtwork(folder)
+                    }
+                }
+            }
+        }
+
+        return deferred.await()
     }
 
     suspend fun resolveBrowserGroupMetadata(
@@ -1756,6 +1800,7 @@ class MainDashboardViewModel(
     }
 
     private fun bumpFileMetadataRefreshToken() {
+        clearActorFolderArtworkCache()
         _uiState.value = _uiState.value.copy(
             fileMetadataRefreshToken = _uiState.value.fileMetadataRefreshToken + 1L,
         )
@@ -1773,6 +1818,15 @@ class MainDashboardViewModel(
             FileBrowserSortMode.FilenameAscending,
             FileBrowserSortMode.FilenameDescending -> Unit
         }
+    }
+
+    private fun clearActorFolderArtworkCache() {
+        val pending = synchronized(actorFolderArtworkCacheLock) {
+            actorFolderArtworkCache.values.toList().also {
+                actorFolderArtworkCache.clear()
+            }
+        }
+        pending.forEach { deferred -> deferred.cancel() }
     }
 
     private fun currentSourceScope(): String? {

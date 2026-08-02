@@ -65,14 +65,21 @@ class SMBClient(private val config: SMBConfig) {
         }
     }
 
-    suspend fun listFiles(path: String = ""): Result<List<SMBFileItem>> =
+    suspend fun listFiles(
+        path: String = "",
+        includeHidden: Boolean = false,
+    ): Result<List<SMBFileItem>> =
         withContext(Dispatchers.IO) {
             try {
                 val context = cifsContext ?: return@withContext Result.failure(
                     IllegalStateException("Not connected. Call connect() first.")
                 )
 
-                val url = buildSmbUrl(path)
+                val url = if (path.startsWith("smb://", ignoreCase = true)) {
+                    path.trimEnd('/') + "/"
+                } else {
+                    buildSmbUrl(path)
+                }
                 println("SMBClient: Listing files at URL: $url")
                 val smbFile = SmbFile(url, context)
 
@@ -91,7 +98,10 @@ class SMBClient(private val config: SMBConfig) {
                 val files = smbFile.listFiles()?.mapNotNull { file ->
                     try {
                         val name = file.name.removeSuffix("/")
-                        if (name.startsWith('.') || name.equals("extrafanart", ignoreCase = true)) {
+                        if (
+                            !includeHidden &&
+                            (name.startsWith('.') || name.equals("extrafanart", ignoreCase = true))
+                        ) {
                             return@mapNotNull null
                         }
 

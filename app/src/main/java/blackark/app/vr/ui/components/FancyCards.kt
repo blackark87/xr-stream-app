@@ -556,6 +556,8 @@ fun FancyFileCard(
     val isHovered by interactionSource.collectIsHoveredAsState()
     val isFocused by interactionSource.collectIsFocusedAsState()
     val detailText = supportingText ?: fileSize
+    val showThumbnail = thumbnailModel != null &&
+        ((isVideoFile && videoPath != null) || isDirectory)
 
 
     val backgroundColor by animateColorAsState(
@@ -594,32 +596,35 @@ fun FancyFileCard(
             // File Icon or Thumbnail
             Box(
                 modifier = Modifier
-                    .size(if (isVideoFile) 80.dp else 32.dp, if (isVideoFile) 60.dp else 32.dp)
-                    .clip(RoundedCornerShape(if (isVideoFile) 8.dp else 0.dp)),
+                    .size(if (showThumbnail || isVideoFile) 80.dp else 32.dp, if (showThumbnail || isVideoFile) 60.dp else 32.dp)
+                    .clip(RoundedCornerShape(if (showThumbnail || isVideoFile) 8.dp else 0.dp)),
                 contentAlignment = Alignment.Center
             ) {
-                if (isVideoFile && videoPath != null) {
-                    // Show thumbnail for video files with fallback icon
-                    android.util.Log.d("FancyFileCard", "Rendering thumbnail for: $videoPath")
+                if (showThumbnail) {
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
                             .background(DividerGray),
                         contentAlignment = Alignment.Center
                     ) {
+                        val imageRequestBuilder = coil3.request.ImageRequest.Builder(
+                            androidx.compose.ui.platform.LocalContext.current
+                        )
+                            .data(thumbnailModel)
+                            .diskCachePolicy(coil3.request.CachePolicy.ENABLED)
+                            .memoryCachePolicy(coil3.request.CachePolicy.ENABLED)
+                        if (thumbnailDiskCacheKey != null) {
+                            imageRequestBuilder.diskCacheKey(thumbnailDiskCacheKey)
+                        }
+
                         AsyncImage(
-                            model = coil3.request.ImageRequest.Builder(androidx.compose.ui.platform.LocalContext.current)
-                                .data(thumbnailModel ?: VideoThumbnailFetcher.Model(videoPath))
-                                .diskCacheKey(
-                                    thumbnailDiskCacheKey ?: VideoThumbnailFetcher.diskCacheKey(
-                                        videoPath
-                                    )
-                                )
-                                .diskCachePolicy(coil3.request.CachePolicy.ENABLED)
-                                .memoryCachePolicy(coil3.request.CachePolicy.ENABLED)
-                                .build(),
+                            model = imageRequestBuilder.build(),
                             imageLoader = ThumbnailImageLoaderProvider.get(androidx.compose.ui.platform.LocalContext.current),
-                            contentDescription = stringResource(R.string.video_thumbnail),
+                            contentDescription = if (isDirectory) {
+                                fileName
+                            } else {
+                                stringResource(R.string.video_thumbnail)
+                            },
                             modifier = Modifier.fillMaxSize(),
                             contentScale = ContentScale.Crop,
                             onState = { state ->
