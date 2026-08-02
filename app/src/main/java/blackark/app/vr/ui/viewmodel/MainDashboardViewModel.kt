@@ -20,6 +20,8 @@ import blackark.app.vr.network.SMBConfig
 import blackark.app.vr.network.SMBFileItem
 import blackark.app.vr.utils.AppSettingsStore
 import blackark.app.vr.utils.ActorFolderArtworkResolver
+import blackark.app.vr.utils.BrowserFolderArtworkResolution
+import blackark.app.vr.utils.BrowserFolderArtworkKind
 import blackark.app.vr.utils.JvrLibraryMetadataProvider
 import blackark.app.vr.utils.JvrMovieMetadata
 import blackark.app.vr.utils.LocalNfoMetadataResolver
@@ -33,6 +35,7 @@ import blackark.app.vr.utils.extractNormalizedCodeFromFileName
 import blackark.app.vr.utils.extractVirtualGroupKey
 import blackark.app.vr.utils.extractVirtualGroupPart
 import blackark.app.vr.utils.isTrailerFile
+import blackark.app.vr.utils.selectFolderRepresentativeVideo
 import jcifs.smb.SmbRandomAccessFile
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Deferred
@@ -164,7 +167,8 @@ class MainDashboardViewModel(
     private var avCastRepairSourceScope: String? = null
     private val avCastRepairAttemptedCacheKeys = mutableSetOf<String>()
     private val actorFolderArtworkCacheLock = Any()
-    private val actorFolderArtworkCache = mutableMapOf<String, Deferred<String?>>()
+    private val actorFolderArtworkCache =
+        mutableMapOf<String, Deferred<BrowserFolderArtworkResolution>>()
     private val actorFolderArtworkSemaphore = Semaphore(2)
     private val systemZoneId: ZoneId = ZoneId.systemDefault()
 
@@ -274,7 +278,10 @@ class MainDashboardViewModel(
             return null
         }
 
-        val normalizedCode = extractNormalizedCodeFromFileName(file.name) ?: return null
+        val normalizedCode = preferredBaseName
+            ?.let(::extractNormalizedCodeFromFileName)
+            ?: extractNormalizedCodeFromFileName(file.name)
+            ?: return null
         val folderPath = extractFolderPath(file.path)
         val lookupKey = normalizedCode to folderPath
 
@@ -964,7 +971,10 @@ class MainDashboardViewModel(
         }
     }
 
-    suspend fun resolveBrowserFileMetadata(file: SMBFileItem): JvrMovieMetadata? {
+    suspend fun resolveBrowserFileMetadata(
+        file: SMBFileItem,
+        preferredBaseName: String? = null,
+    ): JvrMovieMetadata? {
         if (file.isDirectory || !SMBClient.isVideoFile(file.name)) return null
 
         val normalizedCode = extractNormalizedCodeFromFileName(file.name) ?: return null
@@ -977,19 +987,38 @@ class MainDashboardViewModel(
             )
         }
 
-        return resolveMetadataChain(
+        val resolution = resolveMetadataChain(
             file = file,
             normalizedCode = normalizedCode,
             resolvedAsset = asset,
             forceMetadataRefresh = false,
-            persistLocalComposite = false,
-        ).metadata
+            persistLocalComposite = true,
+            preferredBaseName = preferredBaseName,
+        )
+        persistBrowserLocalMetadata(
+            file = file,
+            normalizedCode = normalizedCode,
+            existingAsset = asset,
+            resolution = resolution,
+        )
+        return resolution.metadata
     }
 
     suspend fun resolveActorFolderArtwork(folder: SMBFileItem): String? {
-        if (!folder.isDirectory) return null
+        return resolveBrowserFolderArtwork(
+            folder = folder,
+            kind = BrowserFolderArtworkKind.ACTOR,
+        ).actorArtworkUrl
+    }
 
-        val selectedServer = _uiState.value.selectedServer ?: return null
+    suspend fun resolveBrowserFolderArtwork(
+        folder: SMBFileItem,
+        kind: BrowserFolderArtworkKind,
+    ): BrowserFolderArtworkResolution {
+        if (!folder.isDirectory) return BrowserFolderArtworkResolution()
+
+        val selectedServer = _uiState.value.selectedServer
+            ?: return BrowserFolderArtworkResolution()
         val refreshToken = _uiState.value.fileMetadataRefreshToken
         val cacheKey = buildString {
             append(selectedServer.serverAddress)
@@ -1000,6 +1029,8 @@ class MainDashboardViewModel(
             append('|')
             append(folder.lastModified)
             append('|')
+            append(kind.name)
+            append('|')
             append(refreshToken)
         }
         val activeSmbClient = smbClient
@@ -1008,10 +1039,81 @@ class MainDashboardViewModel(
             actorFolderArtworkCache.getOrPut(cacheKey) {
                 viewModelScope.async(Dispatchers.IO) {
                     actorFolderArtworkSemaphore.withPermit {
-                        ActorFolderArtworkResolver(
-                            smbClient = activeSmbClient,
-                            localClient = activeLocalClient,
-                        ).resolveActorFolderArtwork(folder)
+                        if (kind == BrowserFolderArtworkKind.ACTOR) {
+                            val actorArtworkUrl = ActorFolderArtworkResolver(
+                                smbClient = activeSmbClient,
+                                localClient = activeLocalClient,
+                            ).resolveActorFolderArtwork(folder)
+                            Log.d(
+                                "FolderArtwork",
+                                "Resolved actor folder=${folder.path} actorArtwork=${actorArtworkUrl ?: "<none>"}",
+                            )
+                            return@withPermit BrowserFolderArtworkResolution(
+                                actorArtworkUrl = actorArtworkUrl,
+                            )
+                        }
+
+                        val folderChildren = when {
+                            activeLocalClient != null -> {
+                                activeLocalClient.listFiles(folder.path)
+                            }
+
+                            activeSmbClient != null -> {
+                                activeSmbClient.listFiles(folder.path)
+                            }
+
+                            else -> Result.success(emptyList<SMBFileItem>())
+                        }.getOrNull().orEmpty()
+                        val folderCode = extractNormalizedCodeFromFileName(folder.name)
+                        val representativeVideo = selectFolderRepresentativeVideo(
+                            folderName = folder.name,
+                            files = folderChildren,
+                        )
+
+                        if (representativeVideo != null) {
+                            val normalizedCode = folderCode
+                                ?: extractNormalizedCodeFromFileName(representativeVideo.name)
+                            val asset = normalizedCode?.let { code ->
+                                currentSourceScope()?.let { scope ->
+                                    avLibraryRepository.findAssetForPathOrCode(
+                                        filePath = representativeVideo.path,
+                                        sourceScope = scope,
+                                        normalizedCode = code,
+                                    )
+                                }
+                            }
+                            val metadata = normalizedCode?.let { code ->
+                                val resolution = resolveMetadataChain(
+                                    file = representativeVideo,
+                                    normalizedCode = code,
+                                    resolvedAsset = asset,
+                                    forceMetadataRefresh = false,
+                                    persistLocalComposite = true,
+                                    preferredBaseName = folder.name,
+                                )
+                                persistBrowserLocalMetadata(
+                                    file = representativeVideo,
+                                    normalizedCode = code,
+                                    existingAsset = asset,
+                                    resolution = resolution,
+                                )
+                                resolution.metadata
+                            }
+                            Log.d(
+                                "FolderArtwork",
+                                "Resolved work folder=${folder.path} representative=${representativeVideo.path} poster=${metadata?.posterUrl ?: "<none>"}",
+                            )
+                            BrowserFolderArtworkResolution(
+                                metadata = metadata,
+                                representativeVideo = representativeVideo,
+                            )
+                        } else {
+                            Log.d(
+                                "FolderArtwork",
+                                "No representative video in content folder=${folder.path}",
+                            )
+                            BrowserFolderArtworkResolution()
+                        }
                     }
                 }
             }
@@ -1023,6 +1125,7 @@ class MainDashboardViewModel(
     suspend fun resolveBrowserGroupMetadata(
         groupKey: String,
         representativeFile: SMBFileItem?,
+        groupFiles: List<SMBFileItem>,
     ): JvrMovieMetadata? {
         val file = representativeFile ?: return null
         val normalizedCode = extractNormalizedCodeFromFileName(groupKey)
@@ -1033,13 +1136,22 @@ class MainDashboardViewModel(
             avLibraryRepository.getAssetBySourceAndCode(scope, normalizedCode)
         }
 
-        return resolveMetadataChain(
+        val resolution = resolveMetadataChain(
             file = file,
             normalizedCode = normalizedCode,
             resolvedAsset = asset,
             forceMetadataRefresh = false,
-            persistLocalComposite = false,
-        ).metadata
+            persistLocalComposite = true,
+            preferredBaseName = groupKey,
+        )
+        persistBrowserLocalMetadata(
+            file = file,
+            normalizedCode = normalizedCode,
+            existingAsset = asset,
+            resolution = resolution,
+            linkedFiles = groupFiles,
+        )
+        return resolution.metadata
     }
 
     fun setAvBackgroundIndexingEnabled(enabled: Boolean) {
@@ -1428,12 +1540,14 @@ class MainDashboardViewModel(
         resolvedAsset: AvLibraryAsset?,
         forceMetadataRefresh: Boolean,
         persistLocalComposite: Boolean,
+        preferredBaseName: String? = null,
     ): MetadataChainResolution {
         val folderPath = extractFolderPath(file.path)
         val resolvedSource = JvrLibraryMetadataProvider.resolveMetadataSource(folderPath)
         val localSidecar = createLocalNfoMetadataResolver().resolve(
             video = file,
             fallbackCode = normalizedCode,
+            preferredBaseName = preferredBaseName,
         )
         val localMetadata = localSidecar.metadata
         val localPosterUrl = localSidecar.posterUrl?.takeIf { it.isNotBlank() }
@@ -1527,6 +1641,58 @@ class MainDashboardViewModel(
             metadataSource = unresolvedSource,
             metadataCacheKey = unresolvedCacheKey,
         )
+    }
+
+    private suspend fun persistBrowserLocalMetadata(
+        file: SMBFileItem,
+        normalizedCode: String,
+        existingAsset: AvLibraryAsset?,
+        resolution: MetadataChainResolution,
+        linkedFiles: List<SMBFileItem> = listOf(file),
+    ) {
+        val metadata = resolution.metadata ?: return
+        if (resolution.metadataSource != LocalNfoMetadataResolver.SOURCE) return
+        val sourceScope = currentSourceScope() ?: return
+        val now = System.currentTimeMillis()
+        val assetKey = existingAsset?.assetKey ?: buildAssetKey(sourceScope, normalizedCode)
+        avLibraryRepository.upsertAsset(
+            (existingAsset ?: AvLibraryAsset(
+                assetKey = assetKey,
+                sourceScope = sourceScope,
+                normalizedCode = normalizedCode,
+            )).copy(
+                metadataCacheKey = resolution.metadataCacheKey,
+                metadataSource = resolution.metadataSource,
+                representativePath = existingAsset?.representativePath ?: file.path,
+                representativeFileName = existingAsset?.representativeFileName ?: file.name,
+                representativeFolderPath = existingAsset?.representativeFolderPath
+                    ?: extractFolderPath(file.path),
+                cachedTitle = metadata.title,
+                cachedPosterUrl = metadata.posterUrl,
+                cachedStudio = metadata.studio,
+                cachedReleaseDateEpochDay = metadata.releaseDate?.toEpochDay(),
+                hasMetadata = true,
+                lastSeenAt = now,
+                metadataResolvedAt = now,
+            )
+        )
+        linkedFiles.distinctBy(SMBFileItem::path).forEach { linkedFile ->
+            val existingLocation = avLibraryRepository.getLocationByPath(linkedFile.path)
+            avLibraryRepository.upsertLocation(
+                AvAssetLocation(
+                filePath = linkedFile.path,
+                assetKey = assetKey,
+                sourceScope = sourceScope,
+                fileName = linkedFile.name,
+                partNumber = extractVirtualGroupPart(linkedFile.name),
+                size = linkedFile.size,
+                lastModified = linkedFile.lastModified,
+                contentFingerprint = existingLocation?.contentFingerprint,
+                lastSeenAt = now,
+                isPresent = true,
+                )
+            )
+        }
     }
 
     private suspend fun processScannedVideo(

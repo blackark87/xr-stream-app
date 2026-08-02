@@ -70,7 +70,6 @@ import blackark.app.vr.ui.theme.TextPrimary
 import blackark.app.vr.ui.theme.TextSecondary
 import blackark.app.vr.ui.theme.TextTertiary
 import blackark.app.vr.utils.ThumbnailImageLoaderProvider
-import blackark.app.vr.utils.VideoThumbnailFetcher
 import coil3.compose.AsyncImage
 
 /**
@@ -318,7 +317,9 @@ fun FancyMovieCard(
     video: LibraryVideoItem,
     isFavorite: Boolean,
     displayTitleOverride: String? = null,
-    allowMetadataPoster: Boolean = true,
+    thumbnailModel: Any? = null,
+    thumbnailDiskCacheKey: String? = null,
+    onThumbnailLoadError: (() -> Unit)? = null,
     isPreviewFocused: Boolean = false,
     onClick: () -> Unit,
     onFavoriteToggle: () -> Unit,
@@ -348,19 +349,6 @@ fun FancyMovieCard(
         animationSpec = tween(300),
         label = "scale"
     )
-    val generatedThumbnailModel = remember(video.filePath, allowMetadataPoster) {
-        VideoThumbnailFetcher.Model(
-            path = video.filePath,
-            allowMetadataPoster = allowMetadataPoster,
-        )
-    }
-    val generatedThumbnailDiskCacheKey = remember(video.filePath, allowMetadataPoster) {
-        VideoThumbnailFetcher.diskCacheKey(
-            path = video.filePath,
-            allowMetadataPoster = allowMetadataPoster,
-        )
-    }
-
     Card(
         modifier = modifier
             .fillMaxWidth()
@@ -413,13 +401,16 @@ fun FancyMovieCard(
                         ),
                     contentAlignment = Alignment.Center
                 ) {
-                    if (video.filePath.isNotEmpty()) {
+                    if (thumbnailModel != null) {
                         AsyncImage(
                             model = coil3.request.ImageRequest.Builder(androidx.compose.ui.platform.LocalContext.current)
-                                .data(generatedThumbnailModel)
-                                .diskCacheKey(generatedThumbnailDiskCacheKey)
+                                .data(thumbnailModel)
+                                .diskCacheKey(thumbnailDiskCacheKey)
                                 .diskCachePolicy(coil3.request.CachePolicy.ENABLED)
                                 .memoryCachePolicy(coil3.request.CachePolicy.ENABLED)
+                                .listener(
+                                    onError = { _, _ -> onThumbnailLoadError?.invoke() },
+                                )
                                 .build(),
                             imageLoader = ThumbnailImageLoaderProvider.get(androidx.compose.ui.platform.LocalContext.current),
                             contentDescription = stringResource(R.string.video_thumbnail),
@@ -544,6 +535,7 @@ fun FancyFileCard(
     videoPath: String? = null,
     thumbnailModel: Any? = null,
     thumbnailDiskCacheKey: String? = null,
+    thumbnailDiskCachePolicy: coil3.request.CachePolicy = coil3.request.CachePolicy.ENABLED,
     onThumbnailLoadSuccess: (() -> Unit)? = null,
     onThumbnailLoadError: ((Throwable?) -> Unit)? = null,
     onFavoriteToggle: (() -> Unit)? = null,
@@ -611,7 +603,7 @@ fun FancyFileCard(
                             androidx.compose.ui.platform.LocalContext.current
                         )
                             .data(thumbnailModel)
-                            .diskCachePolicy(coil3.request.CachePolicy.ENABLED)
+                            .diskCachePolicy(thumbnailDiskCachePolicy)
                             .memoryCachePolicy(coil3.request.CachePolicy.ENABLED)
                         if (thumbnailDiskCacheKey != null) {
                             imageRequestBuilder.diskCacheKey(thumbnailDiskCacheKey)

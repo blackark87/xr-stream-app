@@ -65,6 +65,20 @@ class ActorFolderArtworkResolverTest {
         assertEquals("MO\u0308RI\u3000HINAKO.PNG", selected?.name)
     }
 
+    @Test
+    fun `selects a work folder video before considering actor artwork`() {
+        val selected = selectFolderRepresentativeVideo(
+            folderName = "MIKR-109",
+            files = listOf(
+                image("모리 히나코.jpg"),
+                image("MIKR-109-trailer.mp4"),
+                image("MIKR-109.mp4"),
+            ),
+        )
+
+        assertEquals("MIKR-109.mp4", selected?.name)
+    }
+
     private fun image(
         name: String,
         isDirectory: Boolean = false,

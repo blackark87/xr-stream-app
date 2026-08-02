@@ -1,8 +1,11 @@
 package blackark.app.vr.utils
 
+import blackark.app.vr.network.SMBClient
+import blackark.app.vr.network.SMBFileItem
+
 private val videoFileCodePattern = Regex("""(?i)([a-z]{2,10})[-_](\d{2,5})(?!\d)""")
 private val multipartVideoPattern = Regex(
-    """^(.*?)(?:[ _-](?:(cd|pt|part)?(\d{1,2})))$""",
+    """^(.*?)[ _-](?:(?:cd|pt|part)[ _-]?)?(\d{1,2})$""",
     RegexOption.IGNORE_CASE,
 )
 
@@ -15,7 +18,7 @@ internal fun parseMultipartVideoName(fileName: String): MultipartVideoMatch? {
     val stem = fileName.substringBeforeLast('.', fileName).trim()
     val match = multipartVideoPattern.matchEntire(stem) ?: return null
     val baseName = match.groupValues[1].trimEnd('-', '_', ' ')
-    val partNumber = match.groupValues[3].toIntOrNull() ?: return null
+    val partNumber = match.groupValues[2].toIntOrNull() ?: return null
     return baseName.takeIf { it.isNotBlank() }?.let { normalizedBaseName ->
         MultipartVideoMatch(
             baseName = normalizedBaseName,
@@ -34,6 +37,30 @@ fun extractVirtualGroupKey(fileName: String): String? {
 
 fun extractVirtualGroupPart(fileName: String): Int? {
     return parseMultipartVideoName(fileName)?.partNumber
+}
+
+internal fun groupMultipartVideoFiles(
+    files: List<SMBFileItem>,
+): Map<String, List<SMBFileItem>> {
+    return files
+        .asSequence()
+        .filter { !it.isDirectory && SMBClient.isVideoFile(it.name) }
+        .mapNotNull { file ->
+            extractVirtualGroupKey(file.name)?.let { groupKey -> groupKey to file }
+        }
+        .groupBy(
+            keySelector = { it.first },
+            valueTransform = { it.second },
+        )
+        .filterValues { it.size >= 2 }
+        .mapValues { (_, groupedFiles) ->
+            groupedFiles.sortedWith(
+                compareBy<SMBFileItem>(
+                    { extractVirtualGroupPart(it.name) ?: Int.MAX_VALUE },
+                    { it.name.lowercase() },
+                )
+            )
+        }
 }
 
 fun extractNormalizedCodeFromFileName(fileName: String): String? {
