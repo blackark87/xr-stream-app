@@ -514,11 +514,6 @@ fun SpatialVideoPlayerContent(
                     videoPlayerViewModel.setControlsVisibility(true)
                 }
 
-            playbackLayerPolicy.enableSurfaceHideInput ->
-                clickInteractionPolicy(isHandTrackingEnabled = isHandTrackingEnabled) {
-                    videoPlayerViewModel.setControlsVisibility(false)
-                }
-
             else -> null
         }
 
