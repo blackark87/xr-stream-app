@@ -227,18 +227,13 @@ fun XRPlaybackControls(
         }
         val activeMenuOffset =
             if (activeMenu != PlaybackMenu.None && activeMenuAnchor != null) {
-                val rootLeftPx = controlsRootLeftPx.roundToInt()
-                val rootTopPx = controlsRootTopPx.roundToInt()
-                val minRootX = rootLeftPx
-                val maxRootX =
-                    (rootLeftPx + controlsRootWidthPx - menuWidthPx).coerceAtLeast(minRootX)
-                val menuRootX =
-                    (activeMenuAnchor.x - (menuWidthPx / 2)).coerceIn(minRootX, maxRootX)
-                val menuRootY =
-                    (activeMenuAnchor.y - menuHeightPx - menuGapPx).coerceAtLeast(0)
-                IntOffset(
-                    x = menuRootX - rootLeftPx,
-                    y = menuRootY - rootTopPx,
+                calculatePlaybackMenuOffset(
+                    controlsWidthPx = controlsRootWidthPx,
+                    anchorCenterXPx = activeMenuAnchor.x,
+                    anchorTopYPx = activeMenuAnchor.y,
+                    menuWidthPx = menuWidthPx,
+                    menuHeightPx = menuHeightPx,
+                    gapPx = menuGapPx,
                 )
             } else {
                 null
@@ -1129,6 +1124,23 @@ private fun PlaybackMenu.menuEstimatedHeight(videoFormat: VideoFormat): Dp = whe
     PlaybackMenu.Display -> if (videoFormat == VideoFormat.Format2D) 170.dp else 640.dp
     PlaybackMenu.Volume -> 156.dp
     PlaybackMenu.None -> 0.dp
+}
+
+internal fun calculatePlaybackMenuOffset(
+    controlsWidthPx: Int,
+    anchorCenterXPx: Int,
+    anchorTopYPx: Int,
+    menuWidthPx: Int,
+    menuHeightPx: Int,
+    gapPx: Int,
+): IntOffset {
+    val maxOffsetX = (controlsWidthPx - menuWidthPx).coerceAtLeast(0)
+    return IntOffset(
+        x = (anchorCenterXPx - (menuWidthPx / 2)).coerceIn(0, maxOffsetX),
+        // The anchor is already local to the controls root. A negative Y lets the
+        // floating menu render above the controls instead of overlapping them.
+        y = anchorTopYPx - menuHeightPx - gapPx,
+    )
 }
 
 private fun buildPlaybackSummary(playerState: VideoPlayerState): String {
