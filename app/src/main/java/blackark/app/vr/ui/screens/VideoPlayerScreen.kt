@@ -110,7 +110,6 @@ import blackark.app.vr.utils.SubtitleFontCatalog
 import blackark.app.vr.utils.resolveImmersiveSubtitlePanelOffsetDp
 import blackark.app.vr.utils.resolveImmersiveSubtitlePlacement
 import blackark.app.vr.utils.resolveImmersiveUiHorizontalOffsetDp
-import blackark.app.vr.utils.resolveSubtitleAwareControlsVerticalOffsetDp
 import kotlinx.coroutines.delay
 
 private const val TAG = "VideoPlayerScreen"
@@ -124,7 +123,6 @@ private val IMMERSIVE_CONTROLS_PANEL_WIDTH_STEREO = 1460.dp
 private const val IMMERSIVE_CONTROLS_FRONT_FACTOR = 0.84f
 // Subspace uses positive Y upward, so a negative offset places controls lower.
 private val IMMERSIVE_CONTROLS_DOWN_OFFSET = (-320).dp
-private val IMMERSIVE_CONTROLS_SUBTITLE_CLEARANCE = 240.dp
 private val IMMERSIVE_REVEAL_PANEL_WIDTH = 2400.dp
 private val IMMERSIVE_REVEAL_PANEL_HEIGHT = 1400.dp
 // Keep stable spatial input layers so control visibility changes do not recreate XR panels.
@@ -606,9 +604,6 @@ fun SpatialVideoPlayerContent(
                         density = density,
                         stereoMode = playerState.stereoMode,
                         horizontalOffsetMeters = playerState.immersiveUiHorizontalOffsetMeters,
-                        subtitlesPresent = subtitlesPresent,
-                        subtitleVerticalOffsetMeters =
-                            playerState.immersiveSubtitleVerticalOffsetMeters,
                     ),
                     interactionPolicy = clickInteractionPolicy(
                         isHandTrackingEnabled = isHandTrackingEnabled,
@@ -987,8 +982,6 @@ private fun buildImmersiveControlsModifier(
     density: Density,
     stereoMode: blackark.app.vr.ui.viewmodel.StereoMode,
     horizontalOffsetMeters: Float,
-    subtitlesPresent: Boolean,
-    subtitleVerticalOffsetMeters: Float,
 ): SubspaceModifier {
     val panelWidth =
         if (stereoMode == blackark.app.vr.ui.viewmodel.StereoMode.Mono) {
@@ -1008,19 +1001,10 @@ private fun buildImmersiveControlsModifier(
             horizontalOffsetMeters = horizontalOffsetMeters,
             dpPerMeter = 1.meters.toDp().value,
         )
-    val controlsVerticalOffsetDp =
-        resolveSubtitleAwareControlsVerticalOffsetDp(
-            baseDownOffsetDp = IMMERSIVE_CONTROLS_DOWN_OFFSET.value,
-            subtitlesVisible = subtitlesPresent,
-            subtitleClearanceDp = IMMERSIVE_CONTROLS_SUBTITLE_CLEARANCE.value,
-            subtitleVerticalOffsetMeters = subtitleVerticalOffsetMeters,
-            dpPerMeter = 1.meters.toDp().value,
-        ).dp
-
     if (dashboardPanelPose == null) {
         return baseModifier.offset(
             x = horizontalOffsetDp.x.dp,
-            y = controlsVerticalOffsetDp + horizontalOffsetDp.y.dp,
+            y = IMMERSIVE_CONTROLS_DOWN_OFFSET + horizontalOffsetDp.y.dp,
             z = horizontalOffsetDp.z.dp,
         )
     }
@@ -1028,7 +1012,7 @@ private fun buildImmersiveControlsModifier(
     val anchoredX =
         with(density) { dashboardPanelPose.translation.x.toDp() } * IMMERSIVE_CONTROLS_FRONT_FACTOR
     val anchoredY =
-        with(density) { dashboardPanelPose.translation.y.toDp() } + controlsVerticalOffsetDp
+        with(density) { dashboardPanelPose.translation.y.toDp() } + IMMERSIVE_CONTROLS_DOWN_OFFSET
     val anchoredZ =
         with(density) { dashboardPanelPose.translation.z.toDp() } * IMMERSIVE_CONTROLS_FRONT_FACTOR
 
