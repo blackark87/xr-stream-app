@@ -96,6 +96,7 @@ fun XRPlaybackControls(
     videoPlayerViewModel: VideoPlayerViewModel,
     playerState: VideoPlayerState,
     onNavigateBack: () -> Unit,
+    reserveImmersiveMenuSpace: Boolean = false,
 ) {
     var isScrubbing by remember { mutableStateOf(false) }
     var isVolumeScrubbing by remember { mutableStateOf(false) }
@@ -174,9 +175,11 @@ fun XRPlaybackControls(
         }
     }
 
+    val controlsHostModifier =
+        if (reserveImmersiveMenuSpace) Modifier.fillMaxSize() else Modifier.fillMaxWidth()
+
     Box(
-        modifier = Modifier
-            .fillMaxWidth()
+        modifier = controlsHostModifier
             .padding(horizontal = 18.dp, vertical = 16.dp)
             .onGloballyPositioned { coordinates ->
                 val position = coordinates.positionInRoot()
@@ -235,6 +238,7 @@ fun XRPlaybackControls(
                     menuWidthPx = menuWidthPx,
                     menuHeightPx = menuHeightPx,
                     gapPx = menuGapPx,
+                    keepInsideHostTop = reserveImmersiveMenuSpace,
                 )
             } else {
                 null
@@ -582,9 +586,17 @@ fun XRPlaybackControls(
             }
         }
 
+        val controlsPanelModifier =
+            if (reserveImmersiveMenuSpace) {
+                Modifier
+                    .align(Alignment.Center)
+                    .fillMaxWidth()
+            } else {
+                Modifier.fillMaxWidth()
+            }
+
         Column(
-            modifier = Modifier
-                .fillMaxWidth()
+            modifier = controlsPanelModifier
                 .shadow(
                     elevation = 18.dp,
                     shape = RoundedCornerShape(28.dp),
@@ -1133,13 +1145,15 @@ internal fun calculatePlaybackMenuOffset(
     menuWidthPx: Int,
     menuHeightPx: Int,
     gapPx: Int,
+    keepInsideHostTop: Boolean = false,
 ): IntOffset {
     val maxOffsetX = (controlsWidthPx - menuWidthPx).coerceAtLeast(0)
+    val desiredOffsetY = anchorTopYPx - menuHeightPx - gapPx
     return IntOffset(
         x = (anchorCenterXPx - (menuWidthPx / 2)).coerceIn(0, maxOffsetX),
-        // The anchor is already local to the controls root. A negative Y lets the
-        // floating menu render above the controls instead of overlapping them.
-        y = anchorTopYPx - menuHeightPx - gapPx,
+        // 2D hosts intentionally allow the menu to extend above their compact controls root.
+        // Immersive hosts reserve vertical space, so keep the menu inside the SpatialPanel.
+        y = if (keepInsideHostTop) desiredOffsetY.coerceAtLeast(0) else desiredOffsetY,
     )
 }
 
