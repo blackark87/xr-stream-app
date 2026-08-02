@@ -132,6 +132,7 @@ fun XRPlaybackControls(
     val sectionSurface = colors.surfaceVariant.copy(alpha = 0.4f)
     val sectionBorder = colors.outline.copy(alpha = 0.28f)
     val menuSurface = colors.surface.copy(alpha = 0.84f)
+    val displayMenuSurface = colors.surface
     val chipActive = colors.primary.copy(alpha = 0.18f)
     val chipIdle = colors.surfaceVariant.copy(alpha = 0.5f)
 
@@ -302,7 +303,9 @@ fun XRPlaybackControls(
                             title = "Display",
                             subtitle = "Projection, stereo, and immersive UI",
                             width = menuWidth,
-                            containerColor = menuSurface,
+                            // Subtitles remain visible while this menu is open. Keep the settings
+                            // surface opaque so cue text cannot obscure the adjustment controls.
+                            containerColor = displayMenuSurface,
                             borderColor = sectionBorder,
                         ) {
                             Text(
@@ -397,7 +400,6 @@ fun XRPlaybackControls(
                                         isSubtitleDepthScrubbing = false
                                         videoPlayerViewModel.persistImmersiveSubtitleDistanceMeters()
                                         videoPlayerViewModel.endControlsInputLock()
-                                        videoPlayerViewModel.dismissPlaybackMenu()
                                     },
                                     valueRange =
                                         MIN_IMMERSIVE_SUBTITLE_DISTANCE_METERS..
@@ -451,7 +453,6 @@ fun XRPlaybackControls(
                                         videoPlayerViewModel
                                             .persistImmersiveSubtitleVerticalOffsetMeters()
                                         videoPlayerViewModel.endControlsInputLock()
-                                        videoPlayerViewModel.dismissPlaybackMenu()
                                     },
                                     valueRange =
                                         MIN_IMMERSIVE_SUBTITLE_VERTICAL_OFFSET_METERS..
@@ -506,7 +507,6 @@ fun XRPlaybackControls(
                                                 immersiveUiHorizontalSliderPosition
                                             )
                                         videoPlayerViewModel.endControlsInputLock()
-                                        videoPlayerViewModel.dismissPlaybackMenu()
                                     },
                                     valueRange =
                                         MIN_IMMERSIVE_UI_HORIZONTAL_OFFSET_METERS..
