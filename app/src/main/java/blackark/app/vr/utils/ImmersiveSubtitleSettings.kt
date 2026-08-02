@@ -122,19 +122,3 @@ internal fun resolveImmersiveUiHorizontalOffsetDp(
         z = worldRight.z * offsetDp,
     )
 }
-
-internal fun resolveSubtitleAwareControlsVerticalOffsetDp(
-    baseDownOffsetDp: Float,
-    subtitlesVisible: Boolean,
-    subtitleClearanceDp: Float,
-    subtitleVerticalOffsetMeters: Float,
-    dpPerMeter: Float,
-): Float {
-    if (!subtitlesVisible) return baseDownOffsetDp
-
-    val safeDpPerMeter = dpPerMeter.takeIf { it.isFinite() && it > 0f } ?: 0f
-    val downwardSubtitleOffsetDp =
-        normalizeImmersiveSubtitleVerticalOffsetMeters(subtitleVerticalOffsetMeters)
-            .coerceAtMost(0f) * safeDpPerMeter
-    return baseDownOffsetDp - subtitleClearanceDp.coerceAtLeast(0f) + downwardSubtitleOffsetDp
-}

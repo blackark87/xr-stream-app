@@ -119,40 +119,4 @@ class ImmersiveSubtitleSettingsTest {
         )
     }
 
-    @Test
-    fun `visible subtitles push controls lower and downward subtitle moves are followed`() {
-        assertEquals(
-            -320f,
-            resolveSubtitleAwareControlsVerticalOffsetDp(
-                baseDownOffsetDp = -320f,
-                subtitlesVisible = false,
-                subtitleClearanceDp = 240f,
-                subtitleVerticalOffsetMeters = -0.20f,
-                dpPerMeter = 1152f,
-            ),
-            0.0001f,
-        )
-        assertEquals(
-            -560f,
-            resolveSubtitleAwareControlsVerticalOffsetDp(
-                baseDownOffsetDp = -320f,
-                subtitlesVisible = true,
-                subtitleClearanceDp = 240f,
-                subtitleVerticalOffsetMeters = 0.15f,
-                dpPerMeter = 1152f,
-            ),
-            0.0001f,
-        )
-        assertEquals(
-            -732.8f,
-            resolveSubtitleAwareControlsVerticalOffsetDp(
-                baseDownOffsetDp = -320f,
-                subtitlesVisible = true,
-                subtitleClearanceDp = 240f,
-                subtitleVerticalOffsetMeters = -0.20f,
-                dpPerMeter = 1152f,
-            ),
-            0.0001f,
-        )
-    }
 }

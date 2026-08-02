@@ -470,7 +470,7 @@ fun XRPlaybackControls(
                                     modifier = Modifier.fillMaxWidth(),
                                 )
                                 Text(
-                                    text = "Moves subtitles only. Controls stay below them.",
+                                    text = "Moves subtitles only. Playback controls stay fixed.",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = textMuted,
                                 )
