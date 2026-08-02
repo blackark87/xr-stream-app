@@ -20,6 +20,7 @@ class PlaybackLayerPolicyTest {
     fun `hidden controls enable surface toggle and fallback reveal`() {
         val policy = resolvePlaybackLayerPolicy(
             isSurfaceReady = true,
+            isImmersive = true,
             showControls = false,
             controlsInputLocked = false,
             seekPreviewActive = false,
@@ -35,6 +36,7 @@ class PlaybackLayerPolicyTest {
     fun `visible controls keep surface toggle behind controls`() {
         val policy = resolvePlaybackLayerPolicy(
             isSurfaceReady = true,
+            isImmersive = true,
             showControls = true,
             controlsInputLocked = false,
             seekPreviewActive = false,
@@ -50,24 +52,28 @@ class PlaybackLayerPolicyTest {
     fun `locked or unready playback does not expose reveal input`() {
         val lockedPolicy = resolvePlaybackLayerPolicy(
             isSurfaceReady = true,
+            isImmersive = true,
             showControls = false,
             controlsInputLocked = true,
             seekPreviewActive = false,
         )
         val lockedVisiblePolicy = resolvePlaybackLayerPolicy(
             isSurfaceReady = true,
+            isImmersive = true,
             showControls = true,
             controlsInputLocked = true,
             seekPreviewActive = false,
         )
         val unreadyPolicy = resolvePlaybackLayerPolicy(
             isSurfaceReady = false,
+            isImmersive = true,
             showControls = false,
             controlsInputLocked = false,
             seekPreviewActive = false,
         )
         val seekPreviewPolicy = resolvePlaybackLayerPolicy(
             isSurfaceReady = true,
+            isImmersive = true,
             showControls = true,
             controlsInputLocked = false,
             seekPreviewActive = true,
@@ -81,6 +87,45 @@ class PlaybackLayerPolicyTest {
         assertFalse(seekPreviewPolicy.showFallbackRevealLayer)
         assertFalse(seekPreviewPolicy.enableSurfaceToggleInput)
         assertTrue(seekPreviewPolicy.showControlsLayer)
+    }
+
+    @Test
+    fun `2D uses only the compose overlay for background toggles`() {
+        val hiddenPolicy = resolvePlaybackLayerPolicy(
+            isSurfaceReady = true,
+            isImmersive = false,
+            showControls = false,
+            controlsInputLocked = false,
+            seekPreviewActive = false,
+        )
+        val visiblePolicy = resolvePlaybackLayerPolicy(
+            isSurfaceReady = true,
+            isImmersive = false,
+            showControls = true,
+            controlsInputLocked = false,
+            seekPreviewActive = false,
+        )
+
+        assertFalse(hiddenPolicy.showFallbackRevealLayer)
+        assertFalse(hiddenPolicy.enableSurfaceToggleInput)
+        assertFalse(visiblePolicy.enableSurfaceToggleInput)
+        assertTrue(visiblePolicy.showControlsLayer)
+    }
+
+    @Test
+    fun `immersive subtitle panel yields input while controls are visible`() {
+        assertTrue(
+            shouldShowImmersiveSubtitlePanel(
+                subtitlesPresent = true,
+                showControls = false,
+            )
+        )
+        assertFalse(
+            shouldShowImmersiveSubtitlePanel(
+                subtitlesPresent = true,
+                showControls = true,
+            )
+        )
     }
 
     @Test

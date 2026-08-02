@@ -440,6 +440,7 @@ fun SpatialVideoPlayerContent(
     val isSurfaceReady = !playerState.isLoading && playerState.error == null
     val playbackLayerPolicy = resolvePlaybackLayerPolicy(
         isSurfaceReady = isSurfaceReady,
+        isImmersive = shouldUseImmersiveDome,
         showControls = showControls,
         controlsInputLocked = playerState.controlsInputLocked,
         seekPreviewActive = playerState.seekPreviewActive,
@@ -619,7 +620,7 @@ fun SpatialVideoPlayerContent(
         )
 
         if (isSurfaceReady) {
-            if (subtitlesPresent) {
+            if (shouldShowImmersiveSubtitlePanel(subtitlesPresent, showControls)) {
                 SpatialPanel(
                     modifier = buildImmersiveSubtitleModifier(
                         dashboardPanelPose = dashboardPanelPose,
@@ -629,7 +630,14 @@ fun SpatialVideoPlayerContent(
                         verticalOffsetMeters =
                             playerState.immersiveSubtitleVerticalOffsetMeters,
                     ),
-                    interactionPolicy = clickInteractionPolicy(isEnabled = false),
+                    interactionPolicy = clickInteractionPolicy(
+                        isHandTrackingEnabled = isHandTrackingEnabled,
+                    ) {
+                        videoPlayerViewModel.setControlsVisibility(
+                            visible = targetControlsVisible,
+                            source = "immersive-subtitle-panel",
+                        )
+                    },
                 ) {
                     SubtitleCueOverlay(
                         cues = playerState.subtitleCues,
@@ -659,6 +667,7 @@ fun SpatialVideoPlayerContent(
                     PlaybackScrollInputOverlay(
                         showControls = false,
                         inputEnabled = true,
+                        backgroundToggleEnabled = false,
                         onKeyUp = { event ->
                             videoPlayerViewModel.dispatchPlaybackKeyEvent(event)
                         },
@@ -698,6 +707,12 @@ fun SpatialVideoPlayerContent(
                             playerState = playerState,
                             onNavigateBack = { videoPlayerViewModel.requestNavigateBack() },
                             content = XRPlaybackControlsContent.ControlsOnly,
+                            onPanelBackgroundClick = {
+                                videoPlayerViewModel.setControlsVisibility(
+                                    visible = false,
+                                    source = "immersive-controls-panel-background",
+                                )
+                            },
                         )
                     }
                 }
