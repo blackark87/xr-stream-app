@@ -88,7 +88,10 @@ class LocalFileClient(
         }
     }
 
-    suspend fun listFiles(path: String = ""): Result<List<SMBFileItem>> =
+    suspend fun listFiles(
+        path: String = "",
+        includeHidden: Boolean = false,
+    ): Result<List<SMBFileItem>> =
         withContext(Dispatchers.IO) {
             try {
                 val parentDocumentId = resolveDocumentId(path)
@@ -126,7 +129,13 @@ class LocalFileClient(
                                 documentUri.lastPathSegment.orEmpty()
                             }
 
-                        if (resolvedName.startsWith('.') || resolvedName.equals("extrafanart", ignoreCase = true)) {
+                        if (
+                            !includeHidden &&
+                            (
+                                resolvedName.startsWith('.') ||
+                                    resolvedName.equals("extrafanart", ignoreCase = true)
+                            )
+                        ) {
                             continue
                         }
 

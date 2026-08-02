@@ -212,7 +212,6 @@ import blackark.app.vr.utils.extractVirtualGroupPart
 import coil3.compose.AsyncImage
 import coil3.compose.rememberAsyncImagePainter
 import coil3.request.CachePolicy
-import coil3.request.Disposable
 import coil3.request.ImageRequest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -296,8 +295,10 @@ private data class DashboardPreviewItem(
     val title: String,
     val subtitle: String,
     val previewSpec: GroupHoverPreviewSpec?,
+    val fallbackPreviewSpec: GroupHoverPreviewSpec? = null,
     val metadata: JvrMovieMetadata? = null,
     val metadataLookupRequest: VideoMetadataLookupRequest? = null,
+    val onPreviewLoadError: ((Throwable?) -> Unit)? = null,
     val onOpen: (() -> Unit)? = null,
 )
 
@@ -1288,7 +1289,15 @@ private fun DashboardPreviewPanel(
                     message = "Item details appear here",
                 )
             } else {
-                val previewSpec = previewItem.previewSpec
+                var primaryPreviewLoadFailed by remember(
+                    previewItem.key,
+                    previewItem.previewSpec,
+                ) { mutableStateOf(false) }
+                val previewSpec = if (primaryPreviewLoadFailed) {
+                    previewItem.fallbackPreviewSpec ?: previewItem.previewSpec
+                } else {
+                    previewItem.previewSpec
+                }
                 if (previewSpec != null) {
                     val requestBuilder = ImageRequest.Builder(context)
                         .data(previewSpec.model)
@@ -1312,6 +1321,17 @@ private fun DashboardPreviewPanel(
                             contentDescription = "Preview image",
                             modifier = Modifier.fillMaxSize(),
                             contentScale = ContentScale.Fit,
+                            onState = { state ->
+                                if (state is coil3.compose.AsyncImagePainter.State.Error) {
+                                    if (
+                                        previewSpec?.source == "poster" &&
+                                        previewItem.fallbackPreviewSpec != null
+                                    ) {
+                                        primaryPreviewLoadFailed = true
+                                    }
+                                    previewItem.onPreviewLoadError?.invoke(state.result.throwable)
+                                }
+                            },
                         )
                     }
                 } else {
@@ -1384,7 +1404,7 @@ private fun rememberPreviewMetadata(previewItem: DashboardPreviewItem?): JvrMovi
         initialValue = previewItem?.metadata ?: cachedMetadata,
         key1 = previewItem?.key,
         key2 = lookupRequest?.code,
-        key3 = lookupRequest?.folderPath,
+        key3 = lookupRequest?.folderPath to previewItem?.metadata,
     ) {
         value = previewItem?.metadata ?: cachedMetadata
 
@@ -3682,21 +3702,6 @@ private data class VideoMetadataLookupRequest(
 )
 
 private val videoFileCodePattern = Regex("(?i)([a-z]{2,10})[-_](\\d{2,5})(?!\\d)")
-private val makerYearFolderPattern =
-    Regex("(^|/)maker/(?:19|20)\\d{2}(/|$)", RegexOption.IGNORE_CASE)
-private val avVrFolderPattern = Regex("(^|/)av/vr(/|$)", RegexOption.IGNORE_CASE)
-
-private fun shouldEnablePosterPopupForPath(path: String): Boolean {
-    val normalized = path
-        .substringBefore('?')
-        .substringBefore('#')
-        .replace('\\', '/')
-        .lowercase()
-
-    return makerYearFolderPattern.containsMatchIn(normalized) ||
-            avVrFolderPattern.containsMatchIn(normalized)
-}
-
 private fun buildVideoMetadataLookupRequest(filePath: String): VideoMetadataLookupRequest? {
     val normalizedPath = filePath
         .substringBefore('?')
@@ -3722,20 +3727,20 @@ private fun rememberVideoFileMetadata(
     file: SMBFileItem,
     isVideoFile: Boolean,
     refreshToken: Long,
-): JvrMovieMetadata? {
-    if (!isVideoFile) return null
+): ArtworkState<JvrMovieMetadata> {
+    if (!isVideoFile) return ArtworkState.Missing
 
     val lookupRequest = remember(file.path) {
         buildVideoMetadataLookupRequest(file.path)
-    } ?: return null
+    } ?: return ArtworkState.Missing
 
-    val metadataState = produceState<JvrMovieMetadata?>(
-        initialValue = null,
+    val metadataState = produceState<ArtworkState<JvrMovieMetadata>>(
+        initialValue = ArtworkState.Loading,
         file.path,
+        file.lastModified,
         refreshToken,
     ) {
-        value = viewModel.resolveBrowserFileMetadata(file)
-        val resolvedMetadata = value
+        val resolvedMetadata = viewModel.resolveBrowserFileMetadata(file)
         if (resolvedMetadata == null) {
             logMetadataTrace(
                 FILE_THUMBNAIL_LOG_TAG,
@@ -3747,6 +3752,9 @@ private fun rememberVideoFileMetadata(
                 "Metadata loaded for file=${file.path} code=${lookupRequest.code} posterUrl=${resolvedMetadata.posterUrl ?: "<none>"}"
             )
         }
+        value = resolvedMetadata
+            ?.let { ArtworkState.Resolved(it) }
+            ?: ArtworkState.Missing
     }
 
     return metadataState.value
@@ -3757,12 +3765,12 @@ private fun rememberGroupMetadata(
     viewModel: MainDashboardViewModel,
     group: VirtualVideoGroup,
     refreshToken: Long,
-): JvrMovieMetadata? {
+): ArtworkState<JvrMovieMetadata> {
     val normalizedCode = remember(group.key) { group.key.trim().uppercase() }
     val representativePath = group.representativeFile?.path
 
-    val metadataState = produceState<JvrMovieMetadata?>(
-        initialValue = null,
+    val metadataState = produceState<ArtworkState<JvrMovieMetadata>>(
+        initialValue = ArtworkState.Loading,
         group.key,
         representativePath,
         refreshToken,
@@ -3785,8 +3793,31 @@ private fun rememberGroupMetadata(
         }
 
         value = metadata
+            ?.let { ArtworkState.Resolved(it) }
+            ?: ArtworkState.Missing
     }
     return metadataState.value
+}
+
+@Composable
+private fun rememberActorFolderArtwork(
+    viewModel: MainDashboardViewModel,
+    folder: SMBFileItem,
+    refreshToken: Long,
+): ArtworkState<String> {
+    if (!folder.isDirectory) return ArtworkState.Missing
+
+    val artworkState = produceState<ArtworkState<String>>(
+        initialValue = ArtworkState.Loading,
+        folder.path,
+        folder.lastModified,
+        refreshToken,
+    ) {
+        value = viewModel.resolveActorFolderArtwork(folder)
+            ?.let { ArtworkState.Resolved(it) }
+            ?: ArtworkState.Missing
+    }
+    return artworkState.value
 }
 
 /**
@@ -3997,9 +4028,6 @@ private fun FileBrowserPanel(
     headerActions: @Composable RowScope.() -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    val context = LocalContext.current.applicationContext
-    val thumbnailImageLoader = remember(context) { ThumbnailImageLoaderProvider.get(context) }
-    val thumbnailPrefetchCoroutineContext = remember { Dispatchers.IO.limitedParallelism(1) }
     val scope = rememberCoroutineScope()
     var isDeleteMode by remember { mutableStateOf(false) }
     var selectedPaths by remember { mutableStateOf<Set<String>>(emptySet()) }
@@ -4012,20 +4040,17 @@ private fun FileBrowserPanel(
     val activeVirtualGroup = remember(virtualGroups, activeVirtualGroupKey) {
         activeVirtualGroupKey?.let(virtualGroups::get)
     }
+    val activeVirtualGroupMetadataState = if (activeVirtualGroup != null) {
+        rememberGroupMetadata(
+            viewModel = viewModel,
+            group = activeVirtualGroup,
+            refreshToken = metadataRefreshToken,
+        )
+    } else {
+        ArtworkState.Missing
+    }
     val displayItems = remember(files, virtualGroups, activeVirtualGroupKey) {
         buildFileBrowserDisplayItems(files, virtualGroups, activeVirtualGroupKey)
-    }
-    val virtualGroupPrefetchPaths = remember(virtualGroups, activeVirtualGroupKey) {
-        if (activeVirtualGroupKey != null) {
-            emptyList()
-        } else {
-            virtualGroups.values
-                .asSequence()
-                .flatMap { group -> group.files.asSequence() }
-                .map { file -> file.path }
-                .distinct()
-                .toList()
-        }
     }
     val displayedPath = remember(currentPath, activeVirtualGroup) {
         activeVirtualGroup?.let { group ->
@@ -4075,77 +4100,6 @@ private fun FileBrowserPanel(
     LaunchedEffect(virtualGroups, activeVirtualGroupKey) {
         if (activeVirtualGroupKey != null && activeVirtualGroupKey !in virtualGroups.keys) {
             activeVirtualGroupKey = null
-        }
-    }
-    DisposableEffect(
-        isConnected,
-        isLoading,
-        errorMessage,
-        currentPath,
-        activeVirtualGroupKey,
-        virtualGroupPrefetchPaths,
-    ) {
-        if (
-            !isConnected ||
-            isLoading ||
-            errorMessage != null ||
-            activeVirtualGroupKey != null ||
-            virtualGroupPrefetchPaths.isEmpty()
-        ) {
-            onDispose {}
-        } else {
-            Log.d(
-                FILE_THUMBNAIL_LOG_TAG,
-                "Prefetching extracted thumbnails for ${virtualGroupPrefetchPaths.size} grouped files in path='$currentPath'",
-            )
-
-            val disposables = mutableListOf<Disposable>()
-
-            virtualGroupPrefetchPaths.forEach { filePath ->
-                val diskCacheKey =
-                    VideoThumbnailFetcher.diskCacheKey(
-                        path = filePath,
-                        allowMetadataPoster = false,
-                    )
-                val snapshot = thumbnailImageLoader.diskCache?.openSnapshot(diskCacheKey)
-                val isCached = snapshot != null
-                snapshot?.close()
-                if (isCached) {
-                    return@forEach
-                }
-
-                val disposable =
-                    thumbnailImageLoader.enqueue(
-                        ImageRequest.Builder(context)
-                            .data(
-                                VideoThumbnailFetcher.Model(
-                                    path = filePath,
-                                    allowMetadataPoster = false,
-                                )
-                            )
-                            .diskCacheKey(diskCacheKey)
-                            .diskCachePolicy(CachePolicy.ENABLED)
-                            .memoryCachePolicy(CachePolicy.DISABLED)
-                            .fetcherCoroutineContext(thumbnailPrefetchCoroutineContext)
-                            .decoderCoroutineContext(thumbnailPrefetchCoroutineContext)
-                            .build()
-                    )
-                disposables += disposable
-            }
-
-            onDispose {
-                disposables.forEach { disposable ->
-                    if (!disposable.isDisposed) {
-                        disposable.dispose()
-                    }
-                }
-                if (disposables.isNotEmpty()) {
-                    Log.d(
-                        FILE_THUMBNAIL_LOG_TAG,
-                        "Cancelled ${disposables.size} grouped thumbnail prefetch requests for path='$currentPath'",
-                    )
-                }
-            }
         }
     }
     LaunchedEffect(
@@ -4499,7 +4453,7 @@ private fun FileBrowserPanel(
                                                 )
                                             VirtualGroupListCard(
                                                 group = item.virtualGroup,
-                                                metadata = groupMetadata,
+                                                metadataState = groupMetadata,
                                                 currentPreviewKey = currentPreviewKey,
                                                 onClick = {},
                                                 onPopupClick = {
@@ -4521,7 +4475,11 @@ private fun FileBrowserPanel(
                                                 isVideoFile = isVideoFile,
                                                 metadataRefreshToken = metadataRefreshToken,
                                                 viewModel = viewModel,
-                                                allowJvrMetadata = !item.isVirtualGroupMember,
+                                                sharedMetadataState = if (item.isVirtualGroupMember) {
+                                                    activeVirtualGroupMetadataState
+                                                } else {
+                                                    null
+                                                },
                                                 isFavorite = isFavorite,
                                                 isSelectionMode = isDeleteMode,
                                                 isSelected = isSelected,
@@ -4585,7 +4543,7 @@ private fun FileBrowserPanel(
                                                 )
                                             VirtualGroupThumbnailCard(
                                                 group = item.virtualGroup,
-                                                metadata = groupMetadata,
+                                                metadataState = groupMetadata,
                                                 currentPreviewKey = currentPreviewKey,
                                                 onClick = {},
                                                 onPopupClick = {
@@ -4607,7 +4565,11 @@ private fun FileBrowserPanel(
                                                 isVideoFile = isVideoFile,
                                                 metadataRefreshToken = metadataRefreshToken,
                                                 viewModel = viewModel,
-                                                allowJvrMetadata = !item.isVirtualGroupMember,
+                                                sharedMetadataState = if (item.isVirtualGroupMember) {
+                                                    activeVirtualGroupMetadataState
+                                                } else {
+                                                    null
+                                                },
                                                 isFavorite = isFavorite,
                                                 isSelectionMode = isDeleteMode,
                                                 isSelected = isSelected,
@@ -4982,7 +4944,7 @@ private fun GroupHoverPreviewPopup(
 @Composable
 private fun VirtualGroupListCard(
     group: VirtualVideoGroup,
-    metadata: JvrMovieMetadata?,
+    metadataState: ArtworkState<JvrMovieMetadata>,
     currentPreviewKey: String? = null,
     onClick: () -> Unit,
     onPopupClick: () -> Unit = onClick,
@@ -4991,6 +4953,7 @@ private fun VirtualGroupListCard(
 ) {
     val context = LocalContext.current
     val imageLoader = ThumbnailImageLoaderProvider.get(context)
+    val metadata = metadataState.resolvedValueOrNull()
 
     val displayTitle = metadata?.title ?: group.key
     val secondaryText = if (metadata != null) {
@@ -5003,23 +4966,21 @@ private fun VirtualGroupListCard(
     val posterUrl = metadata?.posterUrl
     val representativePath = group.representativeFile?.path
     val posterCacheKey = posterUrl?.let { buildGroupPosterCacheKey(group.key, it) }
-    val previewMetadataLookupRequest = remember(representativePath) {
-        representativePath?.let(::buildVideoMetadataLookupRequest)
-    }
-
     var posterLoadFailed by remember(group.key, posterUrl) { mutableStateOf(false) }
-    val shouldUsePoster = !posterUrl.isNullOrBlank() && !posterLoadFailed
-    val isPosterPopupEligible = remember(representativePath) {
-        representativePath?.let(::shouldEnablePosterPopupForPath) == true
-    }
+    val artworkSelection = selectVideoArtwork(
+        metadataState = metadataState,
+        posterLoadFailed = posterLoadFailed,
+        videoPath = representativePath,
+    )
+    val shouldUsePoster = artworkSelection is VideoArtworkSelection.Poster
+    val shouldUseGeneratedFrame = artworkSelection is VideoArtworkSelection.GeneratedFrame
     val previewSpec = remember(
-        shouldUsePoster,
+        artworkSelection,
         posterUrl,
         posterCacheKey,
         representativePath,
-        isPosterPopupEligible,
     ) {
-        if (!isPosterPopupEligible) {
+        if (artworkSelection is VideoArtworkSelection.Placeholder) {
             null
         } else {
             buildGroupHoverPreviewSpec(
@@ -5027,6 +4988,7 @@ private fun VirtualGroupListCard(
                 posterUrl = posterUrl,
                 posterCacheKey = posterCacheKey,
                 representativePath = representativePath,
+                allowMetadataPosterForGeneratedThumbnail = false,
             )
         }
     }
@@ -5035,7 +4997,7 @@ private fun VirtualGroupListCard(
         secondaryText,
         previewSpec,
         metadata,
-        previewMetadataLookupRequest,
+        shouldUsePoster,
         onPopupClick,
     ) {
         DashboardPreviewItem(
@@ -5043,17 +5005,37 @@ private fun VirtualGroupListCard(
             title = displayTitle,
             subtitle = secondaryText,
             previewSpec = previewSpec,
+            fallbackPreviewSpec = if (shouldUsePoster) {
+                buildGroupHoverPreviewSpec(
+                    shouldUsePoster = false,
+                    posterUrl = null,
+                    posterCacheKey = null,
+                    representativePath = representativePath,
+                    allowMetadataPosterForGeneratedThumbnail = false,
+                )
+            } else {
+                null
+            },
             metadata = metadata,
-            metadataLookupRequest = previewMetadataLookupRequest,
+            metadataLookupRequest = null,
+            onPreviewLoadError = if (shouldUsePoster) {
+                { posterLoadFailed = true }
+            } else {
+                null
+            },
             onOpen = onPopupClick,
         )
     }
     val isPreviewFocused = currentPreviewKey == previewItem.key
+    LaunchedEffect(isPreviewFocused, previewSpec, metadata) {
+        if (isPreviewFocused) onPreviewFocused(previewItem)
+    }
 
-    LaunchedEffect(group.key, posterUrl, representativePath, posterLoadFailed) {
+    LaunchedEffect(group.key, metadataState, posterLoadFailed) {
         val source = when {
             shouldUsePoster -> "remote-poster"
-            !representativePath.isNullOrBlank() -> "generated-video-frame"
+            shouldUseGeneratedFrame -> "generated-video-frame"
+            metadataState is ArtworkState.Loading -> "metadata-loading"
             else -> "none"
         }
 
@@ -5155,11 +5137,21 @@ private fun VirtualGroupListCard(
                         )
                     }
 
-                    !representativePath.isNullOrBlank() -> {
+                    shouldUseGeneratedFrame && !representativePath.isNullOrBlank() -> {
                         AsyncImage(
                             model = ImageRequest.Builder(context)
-                                .data(VideoThumbnailFetcher.Model(representativePath))
-                                .diskCacheKey(VideoThumbnailFetcher.diskCacheKey(representativePath))
+                                .data(
+                                    VideoThumbnailFetcher.Model(
+                                        path = representativePath,
+                                        allowMetadataPoster = false,
+                                    )
+                                )
+                                .diskCacheKey(
+                                    VideoThumbnailFetcher.diskCacheKey(
+                                        path = representativePath,
+                                        allowMetadataPoster = false,
+                                    )
+                                )
                                 .diskCachePolicy(CachePolicy.ENABLED)
                                 .memoryCachePolicy(CachePolicy.ENABLED)
                                 .listener(
@@ -5308,7 +5300,7 @@ private fun NavigateUpListCard(
 @Composable
 private fun VirtualGroupThumbnailCard(
     group: VirtualVideoGroup,
-    metadata: JvrMovieMetadata?,
+    metadataState: ArtworkState<JvrMovieMetadata>,
     currentPreviewKey: String? = null,
     onClick: () -> Unit,
     onPopupClick: () -> Unit = onClick,
@@ -5317,6 +5309,7 @@ private fun VirtualGroupThumbnailCard(
 ) {
     val context = LocalContext.current
     val imageLoader = ThumbnailImageLoaderProvider.get(context)
+    val metadata = metadataState.resolvedValueOrNull()
 
     val displayTitle = metadata?.title ?: group.key
     val secondaryText = if (metadata != null) {
@@ -5329,23 +5322,21 @@ private fun VirtualGroupThumbnailCard(
     val posterUrl = metadata?.posterUrl
     val representativePath = group.representativeFile?.path
     val posterCacheKey = posterUrl?.let { buildGroupPosterCacheKey(group.key, it) }
-    val previewMetadataLookupRequest = remember(representativePath) {
-        representativePath?.let(::buildVideoMetadataLookupRequest)
-    }
-
     var posterLoadFailed by remember(group.key, posterUrl) { mutableStateOf(false) }
-    val shouldUsePoster = !posterUrl.isNullOrBlank() && !posterLoadFailed
-    val isPosterPopupEligible = remember(representativePath) {
-        representativePath?.let(::shouldEnablePosterPopupForPath) == true
-    }
+    val artworkSelection = selectVideoArtwork(
+        metadataState = metadataState,
+        posterLoadFailed = posterLoadFailed,
+        videoPath = representativePath,
+    )
+    val shouldUsePoster = artworkSelection is VideoArtworkSelection.Poster
+    val shouldUseGeneratedFrame = artworkSelection is VideoArtworkSelection.GeneratedFrame
     val previewSpec = remember(
-        shouldUsePoster,
+        artworkSelection,
         posterUrl,
         posterCacheKey,
         representativePath,
-        isPosterPopupEligible,
     ) {
-        if (!isPosterPopupEligible) {
+        if (artworkSelection is VideoArtworkSelection.Placeholder) {
             null
         } else {
             buildGroupHoverPreviewSpec(
@@ -5353,6 +5344,7 @@ private fun VirtualGroupThumbnailCard(
                 posterUrl = posterUrl,
                 posterCacheKey = posterCacheKey,
                 representativePath = representativePath,
+                allowMetadataPosterForGeneratedThumbnail = false,
             )
         }
     }
@@ -5361,7 +5353,7 @@ private fun VirtualGroupThumbnailCard(
         secondaryText,
         previewSpec,
         metadata,
-        previewMetadataLookupRequest,
+        shouldUsePoster,
         onPopupClick,
     ) {
         DashboardPreviewItem(
@@ -5369,17 +5361,37 @@ private fun VirtualGroupThumbnailCard(
             title = displayTitle,
             subtitle = secondaryText,
             previewSpec = previewSpec,
+            fallbackPreviewSpec = if (shouldUsePoster) {
+                buildGroupHoverPreviewSpec(
+                    shouldUsePoster = false,
+                    posterUrl = null,
+                    posterCacheKey = null,
+                    representativePath = representativePath,
+                    allowMetadataPosterForGeneratedThumbnail = false,
+                )
+            } else {
+                null
+            },
             metadata = metadata,
-            metadataLookupRequest = previewMetadataLookupRequest,
+            metadataLookupRequest = null,
+            onPreviewLoadError = if (shouldUsePoster) {
+                { posterLoadFailed = true }
+            } else {
+                null
+            },
             onOpen = onPopupClick,
         )
     }
     val isPreviewFocused = currentPreviewKey == previewItem.key
+    LaunchedEffect(isPreviewFocused, previewSpec, metadata) {
+        if (isPreviewFocused) onPreviewFocused(previewItem)
+    }
 
-    LaunchedEffect(group.key, posterUrl, representativePath, posterLoadFailed) {
+    LaunchedEffect(group.key, metadataState, posterLoadFailed) {
         val source = when {
             shouldUsePoster -> "remote-poster"
-            !representativePath.isNullOrBlank() -> "generated-video-frame"
+            shouldUseGeneratedFrame -> "generated-video-frame"
+            metadataState is ArtworkState.Loading -> "metadata-loading"
             else -> "none"
         }
 
@@ -5479,11 +5491,21 @@ private fun VirtualGroupThumbnailCard(
                         )
                     }
 
-                    !representativePath.isNullOrBlank() -> {
+                    shouldUseGeneratedFrame && !representativePath.isNullOrBlank() -> {
                         AsyncImage(
                             model = ImageRequest.Builder(context)
-                                .data(VideoThumbnailFetcher.Model(representativePath))
-                                .diskCacheKey(VideoThumbnailFetcher.diskCacheKey(representativePath))
+                                .data(
+                                    VideoThumbnailFetcher.Model(
+                                        path = representativePath,
+                                        allowMetadataPoster = false,
+                                    )
+                                )
+                                .diskCacheKey(
+                                    VideoThumbnailFetcher.diskCacheKey(
+                                        path = representativePath,
+                                        allowMetadataPoster = false,
+                                    )
+                                )
                                 .diskCachePolicy(CachePolicy.ENABLED)
                                 .memoryCachePolicy(CachePolicy.ENABLED)
                                 .listener(
@@ -5576,7 +5598,7 @@ private fun FileListEntryCard(
     isVideoFile: Boolean,
     metadataRefreshToken: Long,
     viewModel: MainDashboardViewModel,
-    allowJvrMetadata: Boolean,
+    sharedMetadataState: ArtworkState<JvrMovieMetadata>?,
     isFavorite: Boolean,
     isSelectionMode: Boolean,
     isSelected: Boolean,
@@ -5587,19 +5609,31 @@ private fun FileListEntryCard(
     onPreviewFocused: (DashboardPreviewItem?) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
-    val metadata = if (allowJvrMetadata) {
+    val usesSharedMetadata = sharedMetadataState != null
+    val metadataState = if (sharedMetadataState != null) {
+        sharedMetadataState
+    } else {
         rememberVideoFileMetadata(
             viewModel = viewModel,
             file = file,
             isVideoFile = isVideoFile,
             refreshToken = metadataRefreshToken,
         )
-    } else {
-        null
     }
+    val metadata = metadataState.resolvedValueOrNull()
+    val folderArtworkState = rememberActorFolderArtwork(
+        viewModel = viewModel,
+        folder = file,
+        refreshToken = metadataRefreshToken,
+    )
+    val folderArtwork = folderArtworkState.resolvedValueOrNull()
+    var folderArtworkLoadFailed by remember(file.path, folderArtwork) { mutableStateOf(false) }
+    val shouldUseFolderArtwork = file.isDirectory &&
+        folderArtwork != null &&
+        !folderArtworkLoadFailed
     val displayTitle =
-        if (allowJvrMetadata && isVideoFile) metadata?.title ?: file.name else file.name
-    val subtitleText = if (allowJvrMetadata) metadata?.code ?: file.name else file.name
+        if (!usesSharedMetadata && isVideoFile) metadata?.title ?: file.name else file.name
+    val subtitleText = if (!usesSharedMetadata) metadata?.code ?: file.name else file.name
     val detailText = if (!file.isDirectory) {
         buildFileBrowserDetailText(
             dateText = formatFileBrowserDate(resolveDisplayDate(file, metadata)),
@@ -5611,38 +5645,37 @@ private fun FileListEntryCard(
     val posterUrl = metadata?.posterUrl
     val posterCacheKey = posterUrl?.let { buildFilePosterCacheKey(file.name, it) }
     var posterLoadFailed by remember(file.name, posterUrl) { mutableStateOf(false) }
-    val shouldUsePoster =
-        allowJvrMetadata && isVideoFile && !posterUrl.isNullOrBlank() && !posterLoadFailed
-    val generatedThumbnailModel = remember(file.path, allowJvrMetadata) {
+    val artworkSelection = if (isVideoFile) {
+        selectVideoArtwork(
+            metadataState = metadataState,
+            posterLoadFailed = posterLoadFailed,
+            videoPath = file.path,
+        )
+    } else {
+        VideoArtworkSelection.Placeholder
+    }
+    val shouldUsePoster = artworkSelection is VideoArtworkSelection.Poster
+    val shouldUseGeneratedFrame = artworkSelection is VideoArtworkSelection.GeneratedFrame
+    val generatedThumbnailModel = remember(file.path) {
         VideoThumbnailFetcher.Model(
             path = file.path,
-            allowMetadataPoster = allowJvrMetadata,
+            allowMetadataPoster = false,
         )
     }
-    val generatedThumbnailDiskCacheKey = remember(file.path, allowJvrMetadata) {
+    val generatedThumbnailDiskCacheKey = remember(file.path) {
         VideoThumbnailFetcher.diskCacheKey(
             path = file.path,
-            allowMetadataPoster = allowJvrMetadata,
+            allowMetadataPoster = false,
         )
     }
-    val isPosterPopupEligible = remember(file.path) { shouldEnablePosterPopupForPath(file.path) }
-    val previewMetadataLookupRequest = remember(file.path, allowJvrMetadata, isVideoFile) {
-        if (allowJvrMetadata && isVideoFile) {
-            buildVideoMetadataLookupRequest(file.path)
-        } else {
-            null
-        }
-    }
-
     val previewSpec = remember(
         file.path,
         isVideoFile,
-        isPosterPopupEligible,
-        shouldUsePoster,
+        artworkSelection,
         posterUrl,
         posterCacheKey,
     ) {
-        if (!isVideoFile || !isPosterPopupEligible) {
+        if (!isVideoFile || artworkSelection is VideoArtworkSelection.Placeholder) {
             null
         } else {
             buildGroupHoverPreviewSpec(
@@ -5650,7 +5683,7 @@ private fun FileListEntryCard(
                 posterUrl = posterUrl,
                 posterCacheKey = posterCacheKey,
                 representativePath = file.path,
-                allowMetadataPosterForGeneratedThumbnail = allowJvrMetadata,
+                allowMetadataPosterForGeneratedThumbnail = false,
             )
         }
     }
@@ -5659,7 +5692,7 @@ private fun FileListEntryCard(
         subtitleText,
         previewSpec,
         metadata,
-        previewMetadataLookupRequest,
+        shouldUsePoster,
         onPopupClick,
     ) {
         DashboardPreviewItem(
@@ -5667,12 +5700,31 @@ private fun FileListEntryCard(
             title = displayTitle,
             subtitle = subtitleText,
             previewSpec = previewSpec,
+            fallbackPreviewSpec = if (shouldUsePoster) {
+                buildGroupHoverPreviewSpec(
+                    shouldUsePoster = false,
+                    posterUrl = null,
+                    posterCacheKey = null,
+                    representativePath = file.path,
+                    allowMetadataPosterForGeneratedThumbnail = false,
+                )
+            } else {
+                null
+            },
             metadata = metadata,
-            metadataLookupRequest = previewMetadataLookupRequest,
+            metadataLookupRequest = null,
+            onPreviewLoadError = if (shouldUsePoster) {
+                { posterLoadFailed = true }
+            } else {
+                null
+            },
             onOpen = onPopupClick,
         )
     }
     val isPreviewFocused = currentPreviewKey == previewItem.key
+    LaunchedEffect(isPreviewFocused, previewSpec, metadata) {
+        if (isPreviewFocused) onPreviewFocused(previewItem)
+    }
 
     var popupAnchorBounds by remember(file.path) { mutableStateOf<IntRect?>(null) }
 
@@ -5684,13 +5736,14 @@ private fun FileListEntryCard(
         isFavorite = isFavorite,
         videoPath = if (isVideoFile) file.path else null,
         thumbnailModel = when {
+            shouldUseFolderArtwork -> folderArtwork
             shouldUsePoster -> posterUrl
-            isVideoFile -> generatedThumbnailModel
+            shouldUseGeneratedFrame -> generatedThumbnailModel
             else -> null
         },
         thumbnailDiskCacheKey = when {
             shouldUsePoster -> posterCacheKey
-            isVideoFile -> generatedThumbnailDiskCacheKey
+            shouldUseGeneratedFrame -> generatedThumbnailDiskCacheKey
             else -> null
         },
         onThumbnailLoadSuccess = {
@@ -5702,13 +5755,15 @@ private fun FileListEntryCard(
             }
         },
         onThumbnailLoadError = { throwable ->
-            if (shouldUsePoster) {
+            if (shouldUseFolderArtwork) {
+                folderArtworkLoadFailed = true
+            } else if (shouldUsePoster) {
                 Log.w(
                     FILE_THUMBNAIL_LOG_TAG,
                     "Poster load failed for file=${file.path}, url=$posterUrl, reason=${throwable?.message}. Falling back to generated thumbnail."
                 )
                 posterLoadFailed = true
-            } else if (isVideoFile) {
+            } else if (shouldUseGeneratedFrame) {
                 Log.e(
                     FILE_THUMBNAIL_LOG_TAG,
                     "Generated thumbnail failed for file=${file.path}, reason=${throwable?.message}"
@@ -5761,7 +5816,7 @@ private fun FileThumbnailCard(
     isVideoFile: Boolean,
     metadataRefreshToken: Long,
     viewModel: MainDashboardViewModel,
-    allowJvrMetadata: Boolean,
+    sharedMetadataState: ArtworkState<JvrMovieMetadata>?,
     isFavorite: Boolean,
     isSelectionMode: Boolean,
     isSelected: Boolean,
@@ -5773,19 +5828,31 @@ private fun FileThumbnailCard(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    val metadata = if (allowJvrMetadata) {
+    val usesSharedMetadata = sharedMetadataState != null
+    val metadataState = if (sharedMetadataState != null) {
+        sharedMetadataState
+    } else {
         rememberVideoFileMetadata(
             viewModel = viewModel,
             file = file,
             isVideoFile = isVideoFile,
             refreshToken = metadataRefreshToken,
         )
-    } else {
-        null
     }
+    val metadata = metadataState.resolvedValueOrNull()
+    val folderArtworkState = rememberActorFolderArtwork(
+        viewModel = viewModel,
+        folder = file,
+        refreshToken = metadataRefreshToken,
+    )
+    val folderArtwork = folderArtworkState.resolvedValueOrNull()
+    var folderArtworkLoadFailed by remember(file.path, folderArtwork) { mutableStateOf(false) }
+    val shouldUseFolderArtwork = file.isDirectory &&
+        folderArtwork != null &&
+        !folderArtworkLoadFailed
     val displayTitle =
-        if (allowJvrMetadata && isVideoFile) metadata?.title ?: file.name else file.name
-    val subtitleText = if (allowJvrMetadata) metadata?.code ?: file.name else file.name
+        if (!usesSharedMetadata && isVideoFile) metadata?.title ?: file.name else file.name
+    val subtitleText = if (!usesSharedMetadata) metadata?.code ?: file.name else file.name
     val detailText = if (!file.isDirectory) {
         buildFileBrowserDetailText(
             dateText = formatFileBrowserDate(resolveDisplayDate(file, metadata)),
@@ -5797,38 +5864,37 @@ private fun FileThumbnailCard(
     val posterUrl = metadata?.posterUrl
     val posterCacheKey = posterUrl?.let { buildFilePosterCacheKey(file.name, it) }
     var posterLoadFailed by remember(file.name, posterUrl) { mutableStateOf(false) }
-    val shouldUsePoster =
-        allowJvrMetadata && isVideoFile && !posterUrl.isNullOrBlank() && !posterLoadFailed
-    val generatedThumbnailModel = remember(file.path, allowJvrMetadata) {
+    val artworkSelection = if (isVideoFile) {
+        selectVideoArtwork(
+            metadataState = metadataState,
+            posterLoadFailed = posterLoadFailed,
+            videoPath = file.path,
+        )
+    } else {
+        VideoArtworkSelection.Placeholder
+    }
+    val shouldUsePoster = artworkSelection is VideoArtworkSelection.Poster
+    val shouldUseGeneratedFrame = artworkSelection is VideoArtworkSelection.GeneratedFrame
+    val generatedThumbnailModel = remember(file.path) {
         VideoThumbnailFetcher.Model(
             path = file.path,
-            allowMetadataPoster = allowJvrMetadata,
+            allowMetadataPoster = false,
         )
     }
-    val generatedThumbnailDiskCacheKey = remember(file.path, allowJvrMetadata) {
+    val generatedThumbnailDiskCacheKey = remember(file.path) {
         VideoThumbnailFetcher.diskCacheKey(
             path = file.path,
-            allowMetadataPoster = allowJvrMetadata,
+            allowMetadataPoster = false,
         )
     }
-    val isPosterPopupEligible = remember(file.path) { shouldEnablePosterPopupForPath(file.path) }
-    val previewMetadataLookupRequest = remember(file.path, allowJvrMetadata, isVideoFile) {
-        if (allowJvrMetadata && isVideoFile) {
-            buildVideoMetadataLookupRequest(file.path)
-        } else {
-            null
-        }
-    }
-
     val previewSpec = remember(
         file.path,
         isVideoFile,
-        isPosterPopupEligible,
-        shouldUsePoster,
+        artworkSelection,
         posterUrl,
         posterCacheKey,
     ) {
-        if (!isVideoFile || !isPosterPopupEligible) {
+        if (!isVideoFile || artworkSelection is VideoArtworkSelection.Placeholder) {
             null
         } else {
             buildGroupHoverPreviewSpec(
@@ -5836,7 +5902,7 @@ private fun FileThumbnailCard(
                 posterUrl = posterUrl,
                 posterCacheKey = posterCacheKey,
                 representativePath = file.path,
-                allowMetadataPosterForGeneratedThumbnail = allowJvrMetadata,
+                allowMetadataPosterForGeneratedThumbnail = false,
             )
         }
     }
@@ -5845,7 +5911,7 @@ private fun FileThumbnailCard(
         subtitleText,
         previewSpec,
         metadata,
-        previewMetadataLookupRequest,
+        shouldUsePoster,
         onPopupClick,
     ) {
         DashboardPreviewItem(
@@ -5853,12 +5919,31 @@ private fun FileThumbnailCard(
             title = displayTitle,
             subtitle = subtitleText,
             previewSpec = previewSpec,
+            fallbackPreviewSpec = if (shouldUsePoster) {
+                buildGroupHoverPreviewSpec(
+                    shouldUsePoster = false,
+                    posterUrl = null,
+                    posterCacheKey = null,
+                    representativePath = file.path,
+                    allowMetadataPosterForGeneratedThumbnail = false,
+                )
+            } else {
+                null
+            },
             metadata = metadata,
-            metadataLookupRequest = previewMetadataLookupRequest,
+            metadataLookupRequest = null,
+            onPreviewLoadError = if (shouldUsePoster) {
+                { posterLoadFailed = true }
+            } else {
+                null
+            },
             onOpen = onPopupClick,
         )
     }
     val isPreviewFocused = currentPreviewKey == previewItem.key
+    LaunchedEffect(isPreviewFocused, previewSpec, metadata) {
+        if (isPreviewFocused) onPreviewFocused(previewItem)
+    }
 
     val cardInteractionSource = remember { MutableInteractionSource() }
     val isCardHovered by cardInteractionSource.collectIsHoveredAsState()
@@ -5913,7 +5998,7 @@ private fun FileThumbnailCard(
                     },
                 contentAlignment = Alignment.Center
             ) {
-                if (isVideoFile) {
+                if (isVideoFile && artworkSelection !is VideoArtworkSelection.Placeholder) {
                     val imageRequest = ImageRequest.Builder(context)
                         .data(
                             if (shouldUsePoster) {
@@ -5947,7 +6032,7 @@ private fun FileThumbnailCard(
                                         "Poster load failed for file=${file.path}, url=$posterUrl, reason=${result.throwable.message}. Falling back to generated thumbnail."
                                     )
                                     posterLoadFailed = true
-                                } else {
+                                } else if (shouldUseGeneratedFrame) {
                                     Log.e(
                                         FILE_THUMBNAIL_LOG_TAG,
                                         "Generated thumbnail failed for file=${file.path}, reason=${result.throwable.message}"
@@ -5968,9 +6053,26 @@ private fun FileThumbnailCard(
                         modifier = Modifier.fillMaxSize(),
                         contentScale = ContentScale.Crop
                     )
+                } else if (shouldUseFolderArtwork) {
+                    AsyncImage(
+                        model = folderArtwork,
+                        imageLoader = ThumbnailImageLoaderProvider.get(context),
+                        contentDescription = file.name,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop,
+                        onState = { state ->
+                            if (state is coil3.compose.AsyncImagePainter.State.Error) {
+                                folderArtworkLoadFailed = true
+                            }
+                        },
+                    )
                 } else {
                     Icon(
-                        imageVector = Icons.Filled.FolderOpen,
+                        imageVector = if (isVideoFile) {
+                            Icons.Filled.Movie
+                        } else {
+                            Icons.Filled.FolderOpen
+                        },
                         contentDescription = null,
                         tint = TextSecondary,
                         modifier = Modifier.size(40.dp)

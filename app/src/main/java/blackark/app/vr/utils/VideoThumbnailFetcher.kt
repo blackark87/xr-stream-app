@@ -20,6 +20,8 @@ import jcifs.smb.SmbFile
 import jcifs.smb.SmbRandomAccessFile
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import okio.Buffer
 import okio.FileSystem
@@ -76,6 +78,8 @@ class VideoThumbnailFetcher(
                     else -> null
                 }
             }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (e: Exception) {
             Log.e("VideoThumbnailFetcher", "Error fetching thumbnail for $data", e)
             null
@@ -88,6 +92,7 @@ class VideoThumbnailFetcher(
     }
 
     private suspend fun fetchDirectImage(smbUrl: String): FetchResult? {
+        currentCoroutineContext().ensureActive()
         Log.d("VideoThumbnailFetcher", "Fetching SMB direct image: $smbUrl")
         val inputStream = openPosterInputStream(smbUrl) ?: return null
         val buffer = Buffer()
@@ -96,6 +101,7 @@ class VideoThumbnailFetcher(
                 buffer.writeAll(input.source())
             }
         }
+        currentCoroutineContext().ensureActive()
         val extension = smbUrl.substringBefore('?').substringBefore('#').substringAfterLast('.', "").lowercase()
         val mimeType = when (extension) {
             "jpg", "jpeg" -> "image/jpeg"
@@ -110,16 +116,18 @@ class VideoThumbnailFetcher(
         )
     }
 
-    private fun extractContentThumbnail(uri: Uri): FetchResult? {
+    private suspend fun extractContentThumbnail(uri: Uri): FetchResult? {
         inferredDisplayProfile = null
         val retriever = MediaMetadataRetriever()
         return try {
+            currentCoroutineContext().ensureActive()
             retriever.setDataSource(options.context, uri)
             val durationMs =
                 retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
                     ?.toLongOrNull() ?: 0L
             val bitmap = extractBestThumbnailFrame(retriever, durationMs) ?: return null
 
+            currentCoroutineContext().ensureActive()
             val buffer = Buffer()
             bitmap.compress(Bitmap.CompressFormat.JPEG, 85, buffer.outputStream())
 
@@ -128,6 +136,8 @@ class VideoThumbnailFetcher(
                 mimeType = "image/jpeg",
                 dataSource = DataSource.DISK
             )
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (e: Exception) {
             Log.e("VideoThumbnailFetcher", "Error extracting content thumbnail", e)
             null
@@ -140,16 +150,18 @@ class VideoThumbnailFetcher(
         }
     }
 
-    private fun extractLocalThumbnail(path: String): FetchResult? {
+    private suspend fun extractLocalThumbnail(path: String): FetchResult? {
         inferredDisplayProfile = null
         val retriever = MediaMetadataRetriever()
         return try {
+            currentCoroutineContext().ensureActive()
             retriever.setDataSource(path)
             val durationMs =
                 retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
                     ?.toLongOrNull() ?: 0L
             val bitmap = extractBestThumbnailFrame(retriever, durationMs) ?: return null
 
+            currentCoroutineContext().ensureActive()
             // Convert bitmap to Coil-compatible result
             val buffer = Buffer()
             bitmap.compress(Bitmap.CompressFormat.JPEG, 85, buffer.outputStream())
@@ -159,6 +171,8 @@ class VideoThumbnailFetcher(
                 mimeType = "image/jpeg",
                 dataSource = DataSource.DISK
             )
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (e: Exception) {
             Log.e("VideoThumbnailFetcher", "Error extracting local thumbnail", e)
             null
@@ -173,6 +187,7 @@ class VideoThumbnailFetcher(
 
     private suspend fun extractSMBThumbnail(smbUrl: String): FetchResult? {
         inferredDisplayProfile = null
+        currentCoroutineContext().ensureActive()
         Log.d(
             "VideoThumbnailFetcher",
             "Extracting SMB thumbnail for: $smbUrl (allowMetadataPoster=$allowMetadataPoster)"
@@ -213,6 +228,7 @@ class VideoThumbnailFetcher(
         val retriever = MediaMetadataRetriever()
 
         return try {
+            currentCoroutineContext().ensureActive()
             // Create temp file with unique name
             val uniqueId = System.currentTimeMillis()
             tempFile = java.io.File.createTempFile(
@@ -232,7 +248,9 @@ class VideoThumbnailFetcher(
             val smbFile = smbClient.getSmbFile(smbUrl)
             // Skip exists() check as we just listed it. It causes extra network roundtrip.
 
+            currentCoroutineContext().ensureActive()
             var bitmap: Bitmap? = extractFrameDirectlyFromSmb(retriever, smbFile)
+            currentCoroutineContext().ensureActive()
             var durationMs = 0L
             val smbFileSizeBytes = runCatching { smbFile.length() }.getOrElse { -1L }
 
@@ -245,6 +263,7 @@ class VideoThumbnailFetcher(
                 val headerReadAttemptsBytes = buildSmbReadAttempts(smbFileSizeBytes)
 
                 for ((attemptIndex, maxBytes) in headerReadAttemptsBytes.withIndex()) {
+                    currentCoroutineContext().ensureActive()
                     val downloadedBytes = downloadSmbPrefixToTempFile(
                         smbFile = smbFile,
                         tempFile = tempThumbnailFile,
@@ -263,6 +282,7 @@ class VideoThumbnailFetcher(
                         continue
                     }
 
+                    currentCoroutineContext().ensureActive()
                     retriever.setDataSource(tempThumbnailFile.absolutePath)
                     durationMs =
                         retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
@@ -285,6 +305,7 @@ class VideoThumbnailFetcher(
                     smbFileSizeBytes <= maxFullThumbnailDownloadBytes &&
                     headerReadAttemptsBytes.lastOrNull() != smbFileSizeBytes
                 ) {
+                    currentCoroutineContext().ensureActive()
                     Log.d(
                         "VideoThumbnailFetcher",
                         "Retrying thumbnail extraction with full file download (${smbFileSizeBytes} bytes)"
@@ -295,6 +316,7 @@ class VideoThumbnailFetcher(
                         maxBytes = smbFileSizeBytes,
                     )
                     if (downloadedBytes > 0L) {
+                        currentCoroutineContext().ensureActive()
                         retriever.setDataSource(tempThumbnailFile.absolutePath)
                         durationMs =
                             retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
@@ -304,6 +326,7 @@ class VideoThumbnailFetcher(
                 }
             }
 
+            currentCoroutineContext().ensureActive()
             if (bitmap == null) {
                 Log.e(
                     "VideoThumbnailFetcher",
@@ -315,21 +338,29 @@ class VideoThumbnailFetcher(
             Log.d("VideoThumbnailFetcher", "Extracted bitmap: ${bitmap.width}x${bitmap.height}")
 
             // Save to permanent local file
+            currentCoroutineContext().ensureActive()
             localFile.outputStream().use { out ->
                 bitmap.compress(Bitmap.CompressFormat.JPEG, 85, out)
             }
+            currentCoroutineContext().ensureActive()
             Log.d("VideoThumbnailFetcher", "Saved thumbnail to: ${localFile.absolutePath}")
             updateVideoThumbnailPathInDb(
                 videoPath = smbUrl,
                 thumbnailPath = localFile.absolutePath,
                 inferredDisplayProfile = inferredDisplayProfile,
             )
+            currentCoroutineContext().ensureActive()
 
             SourceFetchResult(
                 source = ImageSource(file = localFile.toOkioPath(), fileSystem = FileSystem.SYSTEM),
                 mimeType = "image/jpeg",
                 dataSource = DataSource.NETWORK
             )
+        } catch (cancelled: CancellationException) {
+            if (localFile.exists() && !localFile.delete()) {
+                Log.w(tag, "Could not delete cancelled thumbnail ${localFile.absolutePath}")
+            }
+            throw cancelled
         } catch (e: Exception) {
             Log.e("VideoThumbnailFetcher", "Error extracting SMB thumbnail: ${e.message}", e)
             e.printStackTrace()
@@ -355,6 +386,7 @@ class VideoThumbnailFetcher(
         videoPath: String,
         targetThumbnailFile: java.io.File,
     ): SourceFetchResult? {
+        currentCoroutineContext().ensureActive()
         val folderPath = extractFolderPath(videoPath)
         val code = extractMovieCode(videoPath)
         val db = AppDatabase.getDatabase(options.context)
@@ -397,6 +429,7 @@ class VideoThumbnailFetcher(
         }
 
         val posterUrl = metadata.posterUrl
+        currentCoroutineContext().ensureActive()
         val posterInput = posterUrl?.let(::openPosterInputStream)
         if (posterInput == null) {
             logMetadataTrace(
@@ -408,9 +441,19 @@ class VideoThumbnailFetcher(
         try {
             posterInput.use { input ->
                 targetThumbnailFile.outputStream().use { output ->
-                    input.copyTo(output)
+                    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                    while (true) {
+                        currentCoroutineContext().ensureActive()
+                        val bytesRead = input.read(buffer)
+                        if (bytesRead < 0) break
+                        output.write(buffer, 0, bytesRead)
+                    }
                 }
             }
+            currentCoroutineContext().ensureActive()
+        } catch (cancelled: CancellationException) {
+            targetThumbnailFile.delete()
+            throw cancelled
         } catch (e: Exception) {
             Log.w(
                 tag,
@@ -427,7 +470,9 @@ class VideoThumbnailFetcher(
         logMetadataTrace(
             "Using metadata poster thumbnail for code=$code saved=${targetThumbnailFile.absolutePath}"
         )
+        currentCoroutineContext().ensureActive()
         updateVideoThumbnailPathInDb(videoPath, targetThumbnailFile.absolutePath, metadata.title)
+        currentCoroutineContext().ensureActive()
 
         return SourceFetchResult(
             source = ImageSource(
@@ -446,6 +491,7 @@ class VideoThumbnailFetcher(
         inferredDisplayProfile: InferredDisplayProfile? = null,
     ) {
         try {
+            currentCoroutineContext().ensureActive()
             val db = AppDatabase.getDatabase(options.context)
             val avLibraryRepository = AvLibraryRepository(
                 avLibraryDao = db.avLibraryDao(),
@@ -460,6 +506,7 @@ class VideoThumbnailFetcher(
 
             val videoByPath = parsedIdentity?.let { db.videoDao().getVideoByPath(it.filePath) }
             if (videoByPath != null) {
+                currentCoroutineContext().ensureActive()
                 db.videoDao().updateThumbnailAndTitle(videoByPath.id, thumbnailPath, resolvedTitle)
                 Log.d(
                     tag,
@@ -473,6 +520,7 @@ class VideoThumbnailFetcher(
                     avLibraryRepository = avLibraryRepository,
                 )
                 if (linkedPaths.isNotEmpty()) {
+                    currentCoroutineContext().ensureActive()
                     db.videoDao().updateThumbnailAndTitleByPaths(
                         filePaths = linkedPaths,
                         path = thumbnailPath,
@@ -502,12 +550,14 @@ class VideoThumbnailFetcher(
                 )
             }.distinct()
             if (favoritePaths.size == 1) {
+                currentCoroutineContext().ensureActive()
                 db.favoriteVideoDao().updateThumbnailAndTitleByPath(
                     filePath = favoritePaths.first(),
                     path = thumbnailPath,
                     title = resolvedTitle,
                 )
             } else if (favoritePaths.isNotEmpty()) {
+                currentCoroutineContext().ensureActive()
                 db.favoriteVideoDao().updateThumbnailAndTitleByPaths(
                     filePaths = favoritePaths,
                     path = thumbnailPath,
@@ -523,6 +573,7 @@ class VideoThumbnailFetcher(
                         inferredDisplayProfile
                     )
                 ) {
+                    currentCoroutineContext().ensureActive()
                     db.videoDisplaySettingsDao().upsert(
                         VideoDisplaySettings(
                             filePath = parsedIdentity.filePath,
@@ -536,8 +587,8 @@ class VideoThumbnailFetcher(
                     )
                 }
             }
-        } catch (e: CancellationException) {
-            Log.d(tag, "Skipped DB thumbnail update because job was cancelled")
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (e: Exception) {
             Log.e(tag, "Failed to update DB thumbnail path/title for path=$videoPath", e)
         }
@@ -643,12 +694,13 @@ class VideoThumbnailFetcher(
         )
     }
 
-    private fun extractFrameDirectlyFromSmb(
+    private suspend fun extractFrameDirectlyFromSmb(
         retriever: MediaMetadataRetriever,
         smbFile: SmbFile,
     ): Bitmap? {
         var dataSource: SMBMediaDataSource? = null
         return try {
+            currentCoroutineContext().ensureActive()
             dataSource = SMBMediaDataSource(smbFile)
             retriever.setDataSource(dataSource)
 
@@ -668,6 +720,8 @@ class VideoThumbnailFetcher(
                 )
             }
             bitmap
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (e: Exception) {
             Log.w(
                 "VideoThumbnailFetcher",
@@ -706,7 +760,7 @@ class VideoThumbnailFetcher(
             .sorted()
     }
 
-    private fun downloadSmbPrefixToTempFile(
+    private suspend fun downloadSmbPrefixToTempFile(
         smbFile: SmbFile,
         tempFile: java.io.File,
         maxBytes: Long,
@@ -715,12 +769,15 @@ class VideoThumbnailFetcher(
         val startTime = System.currentTimeMillis()
         var lastLogTime = startTime
 
+        currentCoroutineContext().ensureActive()
         smbFile.inputStream.use { input: java.io.InputStream ->
             tempFile.outputStream().use { output ->
                 val buffer = ByteArray(64 * 1024) // 64KB buffer
+                currentCoroutineContext().ensureActive()
                 var bytesRead = input.read(buffer)
 
                 while (bytesRead != -1 && totalBytes < maxBytes) {
+                    currentCoroutineContext().ensureActive()
                     val bytesToWrite = if (totalBytes + bytesRead > maxBytes) {
                         (maxBytes - totalBytes).toInt()
                     } else {
@@ -752,7 +809,7 @@ class VideoThumbnailFetcher(
         return totalBytes
     }
 
-    private fun extractBestThumbnailFrame(
+    private suspend fun extractBestThumbnailFrame(
         retriever: MediaMetadataRetriever,
         durationMs: Long,
     ): Bitmap? {
@@ -767,6 +824,7 @@ class VideoThumbnailFetcher(
 
         for (candidateTimeUs in candidateTimesUs) {
             for (option in extractionOptions) {
+                currentCoroutineContext().ensureActive()
                 try {
                     val bitmap = retriever.getFrameAtTime(candidateTimeUs, option)
                     if (bitmap != null) {
@@ -794,6 +852,8 @@ class VideoThumbnailFetcher(
                         }
                         return normalizedBitmap
                     }
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
                 } catch (e: Exception) {
                     Log.w(
                         "VideoThumbnailFetcher",
@@ -803,6 +863,7 @@ class VideoThumbnailFetcher(
             }
         }
 
+        currentCoroutineContext().ensureActive()
         val frameCount =
             retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_FRAME_COUNT)
                 ?.toIntOrNull() ?: 0
@@ -813,6 +874,7 @@ class VideoThumbnailFetcher(
                     .distinct()
 
             for (frameIndex in frameIndexCandidates) {
+                currentCoroutineContext().ensureActive()
                 try {
                     val bitmap = retriever.getFrameAtIndex(frameIndex)
                     if (bitmap != null) {
@@ -826,6 +888,8 @@ class VideoThumbnailFetcher(
                         }
                         return normalizedBitmap
                     }
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
                 } catch (e: Exception) {
                     Log.w(
                         "VideoThumbnailFetcher",
@@ -835,6 +899,7 @@ class VideoThumbnailFetcher(
             }
         }
 
+        currentCoroutineContext().ensureActive()
         return null
     }
 
