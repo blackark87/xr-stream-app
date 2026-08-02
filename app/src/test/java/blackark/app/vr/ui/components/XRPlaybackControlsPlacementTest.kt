@@ -22,7 +22,24 @@ class XRPlaybackControlsPlacementTest {
     }
 
     @Test
-    fun `immersive display menu may extend above controls without overlapping them`() {
+    fun `immersive display menu stays above controls inside reserved host`() {
+        val offset = calculatePlaybackMenuOffset(
+            controlsWidthPx = 1260,
+            anchorCenterXPx = 1040,
+            anchorTopYPx = 800,
+            menuWidthPx = 420,
+            menuHeightPx = 640,
+            gapPx = 10,
+            keepInsideHostTop = true,
+        )
+
+        assertEquals(830, offset.x)
+        assertEquals(150, offset.y)
+        assertEquals(790, offset.y + 640)
+    }
+
+    @Test
+    fun `immersive menu never escapes the top of its host`() {
         val offset = calculatePlaybackMenuOffset(
             controlsWidthPx = 1260,
             anchorCenterXPx = 1040,
@@ -30,11 +47,10 @@ class XRPlaybackControlsPlacementTest {
             menuWidthPx = 420,
             menuHeightPx = 640,
             gapPx = 10,
+            keepInsideHostTop = true,
         )
 
-        assertEquals(830, offset.x)
-        assertEquals(-590, offset.y)
-        assertEquals(50, offset.y + 640)
+        assertEquals(0, offset.y)
     }
 
     @Test

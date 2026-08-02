@@ -619,12 +619,13 @@ fun SpatialVideoPlayerContent(
                         contentAlignment = Alignment.Center,
                     ) {
                         Box(
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier.fillMaxSize(),
                         ) {
                             XRPlaybackControls(
                                 videoPlayerViewModel = videoPlayerViewModel,
                                 playerState = playerState,
                                 onNavigateBack = { videoPlayerViewModel.requestNavigateBack() },
+                                reserveImmersiveMenuSpace = true,
                             )
                         }
                     }
