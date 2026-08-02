@@ -5,6 +5,10 @@ import androidx.annotation.OptIn
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,6 +20,7 @@ import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -103,6 +108,7 @@ fun XRPlaybackControls(
     playerState: VideoPlayerState,
     onNavigateBack: () -> Unit,
     content: XRPlaybackControlsContent = XRPlaybackControlsContent.ControlsWithMenu,
+    menuContentMaxHeight: Dp? = null,
 ) {
     var isScrubbing by remember { mutableStateOf(false) }
     var isVolumeScrubbing by remember { mutableStateOf(false) }
@@ -142,6 +148,7 @@ fun XRPlaybackControls(
     val displayMenuSurface = colors.surface
     val chipActive = colors.primary.copy(alpha = 0.18f)
     val chipIdle = colors.surfaceVariant.copy(alpha = 0.5f)
+    val controlsInputInteractionSource = remember { MutableInteractionSource() }
 
     LaunchedEffect(playerState.currentPosition, playerState.duration) {
         if (!isScrubbing && playerState.duration > 0) {
@@ -190,6 +197,11 @@ fun XRPlaybackControls(
 
     Box(
         modifier = controlsHostModifier
+            .clickable(
+                interactionSource = controlsInputInteractionSource,
+                indication = null,
+                onClick = {},
+            )
             .padding(horizontal = 18.dp, vertical = 16.dp)
             .onGloballyPositioned { coordinates ->
                 val position = coordinates.positionInRoot()
@@ -342,6 +354,7 @@ fun XRPlaybackControls(
                             // surface opaque so cue text cannot obscure the adjustment controls.
                             containerColor = displayMenuSurface,
                             borderColor = sectionBorder,
+                            contentMaxHeight = menuContentMaxHeight,
                         ) {
                             Text(
                                 text = "Projection",
@@ -996,11 +1009,18 @@ private fun PlaybackFloatingMenuCard(
     width: Dp,
     containerColor: Color,
     borderColor: Color,
+    contentMaxHeight: Dp? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
+    val menuInputInteractionSource = remember { MutableInteractionSource() }
     Column(
         modifier = Modifier
             .width(width)
+            .clickable(
+                interactionSource = menuInputInteractionSource,
+                indication = null,
+                onClick = {},
+            )
             .shadow(
                 elevation = 18.dp,
                 shape = RoundedCornerShape(18.dp),
@@ -1023,7 +1043,20 @@ private fun PlaybackFloatingMenuCard(
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
         )
-        content()
+        val contentModifier =
+            if (contentMaxHeight != null) {
+                Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = contentMaxHeight)
+                    .verticalScroll(rememberScrollState())
+            } else {
+                Modifier.fillMaxWidth()
+            }
+        Column(
+            modifier = contentModifier,
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+            content = content,
+        )
     }
 }
 

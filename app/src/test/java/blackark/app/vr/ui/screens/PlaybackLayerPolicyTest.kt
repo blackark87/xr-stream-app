@@ -1,6 +1,9 @@
 package blackark.app.vr.ui.screens
 
+import androidx.compose.ui.unit.dp
 import androidx.xr.scenecore.InputEvent
+import blackark.app.vr.ui.viewmodel.PlaybackMenu
+import blackark.app.vr.ui.viewmodel.VideoFormat
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -14,7 +17,7 @@ class PlaybackLayerPolicyTest {
     }
 
     @Test
-    fun `hidden controls expose only reveal input layers`() {
+    fun `hidden controls enable surface toggle and fallback reveal`() {
         val policy = resolvePlaybackLayerPolicy(
             isSurfaceReady = true,
             showControls = false,
@@ -22,14 +25,14 @@ class PlaybackLayerPolicyTest {
             seekPreviewActive = false,
         )
 
-        assertTrue(policy.showRevealInputLayer)
-        assertTrue(policy.enableSurfaceRevealInput)
+        assertTrue(policy.showFallbackRevealLayer)
+        assertTrue(policy.enableSurfaceToggleInput)
         assertFalse(policy.showControlsLayer)
         assertFalse(policy.subtitleAcceptsInput)
     }
 
     @Test
-    fun `visible controls expose only the controls layer`() {
+    fun `visible controls keep surface toggle behind controls`() {
         val policy = resolvePlaybackLayerPolicy(
             isSurfaceReady = true,
             showControls = true,
@@ -37,8 +40,8 @@ class PlaybackLayerPolicyTest {
             seekPreviewActive = false,
         )
 
-        assertFalse(policy.showRevealInputLayer)
-        assertFalse(policy.enableSurfaceRevealInput)
+        assertFalse(policy.showFallbackRevealLayer)
+        assertTrue(policy.enableSurfaceToggleInput)
         assertTrue(policy.showControlsLayer)
         assertFalse(policy.subtitleAcceptsInput)
     }
@@ -63,11 +66,30 @@ class PlaybackLayerPolicyTest {
             controlsInputLocked = false,
             seekPreviewActive = false,
         )
+        val seekPreviewPolicy = resolvePlaybackLayerPolicy(
+            isSurfaceReady = true,
+            showControls = true,
+            controlsInputLocked = false,
+            seekPreviewActive = true,
+        )
 
-        assertFalse(lockedPolicy.showRevealInputLayer)
-        assertFalse(lockedPolicy.enableSurfaceRevealInput)
-        assertFalse(lockedVisiblePolicy.enableSurfaceRevealInput)
-        assertFalse(unreadyPolicy.showRevealInputLayer)
-        assertFalse(unreadyPolicy.enableSurfaceRevealInput)
+        assertFalse(lockedPolicy.showFallbackRevealLayer)
+        assertFalse(lockedPolicy.enableSurfaceToggleInput)
+        assertFalse(lockedVisiblePolicy.enableSurfaceToggleInput)
+        assertFalse(unreadyPolicy.showFallbackRevealLayer)
+        assertFalse(unreadyPolicy.enableSurfaceToggleInput)
+        assertFalse(seekPreviewPolicy.showFallbackRevealLayer)
+        assertFalse(seekPreviewPolicy.enableSurfaceToggleInput)
+        assertTrue(seekPreviewPolicy.showControlsLayer)
+    }
+
+    @Test
+    fun `immersive display panel uses fixed scroll viewport height`() {
+        assertTrue(
+            resolveImmersivePlaybackMenuPanelHeight(
+                activeMenu = PlaybackMenu.Display,
+                videoFormat = VideoFormat.Format180,
+            ) == 620.dp
+        )
     }
 }

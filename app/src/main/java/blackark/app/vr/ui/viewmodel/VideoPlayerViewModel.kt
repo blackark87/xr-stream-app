@@ -39,7 +39,9 @@ import blackark.app.vr.player.buildKoreanExternalSubtitleCandidates
 import blackark.app.vr.player.configureKoreanExternalSubtitle
 import blackark.app.vr.player.resolveCurrentPlaylistIndex
 import blackark.app.vr.player.resolveKoreanExternalSubtitle
+import blackark.app.vr.player.resolveNextPlaybackTarget
 import blackark.app.vr.player.resolvePlaybackPlaylist
+import blackark.app.vr.player.shouldHandlePlaybackEnded
 import blackark.app.vr.utils.AppSettingsStore
 import blackark.app.vr.utils.DEFAULT_IMMERSIVE_SUBTITLE_DISTANCE_METERS
 import blackark.app.vr.utils.DEFAULT_IMMERSIVE_SUBTITLE_VERTICAL_OFFSET_METERS
@@ -71,6 +73,27 @@ import kotlin.math.roundToInt
 private const val PLAYER_LOG_TAG = "VideoPlayerViewModel"
 private const val SUBTITLE_LOG_PREFIX = "[SubtitleDebug]"
 private const val PLAYBACK_CONTROL_LOG_PREFIX = "[PlaybackControlDebug]"
+
+internal enum class ControlsVisibilityBlockReason(val logValue: String) {
+    InputLock("input-lock"),
+    SeekPreview("seek-preview"),
+    RecentInput("recent-input"),
+}
+
+internal fun resolveControlsVisibilityBlockReason(
+    targetVisible: Boolean,
+    controlsInputLocked: Boolean,
+    seekPreviewActive: Boolean,
+    recentInputSuppressed: Boolean,
+): ControlsVisibilityBlockReason? {
+    if (targetVisible) return null
+    return when {
+        controlsInputLocked -> ControlsVisibilityBlockReason.InputLock
+        seekPreviewActive -> ControlsVisibilityBlockReason.SeekPreview
+        recentInputSuppressed -> ControlsVisibilityBlockReason.RecentInput
+        else -> null
+    }
+}
 
 private fun describeCueColors(cues: List<Cue>): String {
     val colors = cues
@@ -230,6 +253,10 @@ class VideoPlayerViewModel(
     private var immersiveUiHorizontalOffsetApplyJob: Job? = null
     private var suppressControlsToggleUntilMs = 0L
     private var pendingInitializationPath: String? = null
+    private var playerGeneration = 0L
+    private var autoAdvanceInProgress = false
+    private var autoAdvanceTargetPath: String? = null
+    private var handledEndedGeneration: Long? = null
     private var pendingVideoFormatToPersist: VideoFormat? = null
     private var pendingStereoModeToPersist: StereoMode? = null
     private var lastHandledKeyEventTimeMs = Long.MIN_VALUE
@@ -401,6 +428,12 @@ class VideoPlayerViewModel(
     fun togglePlaybackMenu(menu: PlaybackMenu) {
         val currentState = _state.value
         val nextMenu = if (currentState.activePlaybackMenu == menu) PlaybackMenu.None else menu
+        Log.i(
+            PLAYER_LOG_TAG,
+            "$PLAYBACK_CONTROL_LOG_PREFIX menu request=$menu " +
+                "from=${currentState.activePlaybackMenu} to=$nextMenu " +
+                "controls=${currentState.showControls}->true",
+        )
         _state.value = currentState.copy(
             showControls = true,
             activePlaybackMenu = nextMenu,
@@ -416,12 +449,20 @@ class VideoPlayerViewModel(
         if (_state.value.activePlaybackMenu == PlaybackMenu.None) {
             return
         }
+        Log.i(
+            PLAYER_LOG_TAG,
+            "$PLAYBACK_CONTROL_LOG_PREFIX menu dismiss=${_state.value.activePlaybackMenu}",
+        )
         _state.value = _state.value.copy(activePlaybackMenu = PlaybackMenu.None)
         scheduleControlsAutoHideIfNeeded()
     }
 
     fun beginControlsInputLock() {
         controlsInputLockCount += 1
+        Log.d(
+            PLAYER_LOG_TAG,
+            "$PLAYBACK_CONTROL_LOG_PREFIX input-lock begin count=$controlsInputLockCount",
+        )
         cancelControlsAutoHide()
 
         val currentState = _state.value
@@ -438,6 +479,10 @@ class VideoPlayerViewModel(
     fun endControlsInputLock() {
         controlsInputLockCount = (controlsInputLockCount - 1).coerceAtLeast(0)
         val stillLocked = controlsInputLockCount > 0
+        Log.d(
+            PLAYER_LOG_TAG,
+            "$PLAYBACK_CONTROL_LOG_PREFIX input-lock end count=$controlsInputLockCount",
+        )
         if (_state.value.controlsInputLocked == stillLocked) {
             if (!stillLocked) {
                 suppressControlsToggleUntilMs =
@@ -489,29 +534,56 @@ class VideoPlayerViewModel(
     fun toggleControls() {
         val currentState = _state.value
         if (currentState.controlsInputLocked || currentState.seekPreviewActive) {
+            Log.i(
+                PLAYER_LOG_TAG,
+                "$PLAYBACK_CONTROL_LOG_PREFIX toggle blocked source=key-or-controller " +
+                    "reason=input-lock-or-seek",
+            )
             return
         }
         if (
             currentState.showControls &&
             SystemClock.elapsedRealtime() < suppressControlsToggleUntilMs
         ) {
+            Log.i(
+                PLAYER_LOG_TAG,
+                "$PLAYBACK_CONTROL_LOG_PREFIX toggle blocked source=key-or-controller " +
+                    "reason=recent-input",
+            )
             return
         }
-        val nextVisible = !currentState.showControls
-        _state.value = currentState.copy(
-            showControls = nextVisible,
-            activePlaybackMenu = if (nextVisible) currentState.activePlaybackMenu else PlaybackMenu.None,
+        setControlsVisibility(
+            visible = !currentState.showControls,
+            source = "key-or-controller",
         )
-        if (nextVisible) {
-            scheduleControlsAutoHideIfNeeded()
-        } else {
-            cancelControlsAutoHide()
-        }
     }
 
-    fun setControlsVisibility(visible: Boolean) {
+    fun setControlsVisibility(
+        visible: Boolean,
+        source: String = "direct",
+    ) {
         val currentState = _state.value
-        if (!visible && (currentState.controlsInputLocked || currentState.seekPreviewActive)) {
+        val recentInputSuppressed =
+            currentState.showControls &&
+                SystemClock.elapsedRealtime() < suppressControlsToggleUntilMs
+        val blockReason = resolveControlsVisibilityBlockReason(
+            targetVisible = visible,
+            controlsInputLocked = currentState.controlsInputLocked,
+            seekPreviewActive = currentState.seekPreviewActive,
+            recentInputSuppressed = recentInputSuppressed,
+        )
+        Log.i(
+            PLAYER_LOG_TAG,
+            "$PLAYBACK_CONTROL_LOG_PREFIX toggle source=$source target=$visible " +
+                "current=${currentState.showControls} menu=${currentState.activePlaybackMenu} " +
+                "lock=${currentState.controlsInputLocked} seek=${currentState.seekPreviewActive}",
+        )
+        if (blockReason != null) {
+            Log.i(
+                PLAYER_LOG_TAG,
+                "$PLAYBACK_CONTROL_LOG_PREFIX toggle blocked source=$source " +
+                    "reason=${blockReason.logValue} target=$visible",
+            )
             return
         }
         _state.value = currentState.copy(
@@ -523,6 +595,11 @@ class VideoPlayerViewModel(
         } else {
             cancelControlsAutoHide()
         }
+        Log.i(
+            PLAYER_LOG_TAG,
+            "$PLAYBACK_CONTROL_LOG_PREFIX toggle applied source=$source visible=$visible " +
+                "menu=${_state.value.activePlaybackMenu}",
+        )
     }
 
     private fun resetControlsInputLock() {
@@ -1094,11 +1171,19 @@ class VideoPlayerViewModel(
             return
         }
 
+        Log.d(
+            PLAYER_LOG_TAG,
+            "$PLAYBACK_CONTROL_LOG_PREFIX auto-hide scheduled delayMs=$controlsAutoHideDelayMs",
+        )
         controlsAutoHideJob = viewModelScope.launch {
             delay(controlsAutoHideDelayMs)
             val latestState = _state.value
             if (latestState.showControls && latestState.activePlaybackMenu == PlaybackMenu.None) {
                 _state.value = latestState.copy(showControls = false)
+                Log.i(
+                    PLAYER_LOG_TAG,
+                    "$PLAYBACK_CONTROL_LOG_PREFIX auto-hide applied visible=false",
+                )
             }
         }.also { job ->
             job.invokeOnCompletion {
@@ -1209,17 +1294,27 @@ class VideoPlayerViewModel(
         context: Context,
         playbackSource: PlaybackSource,
         videoFile: SMBFileItem
-    ) {
+    ): Boolean {
         val requestedPath = videoFile.path
         val currentState = _state.value
         val isSameVideoAlreadyActive =
             currentState.videoFile?.path == requestedPath &&
                     (currentState.isLoading || exoPlayer != null || _playerFlow.value != null)
         if (pendingInitializationPath == requestedPath || isSameVideoAlreadyActive) {
-            return
+            Log.d(
+                PLAYER_LOG_TAG,
+                "$PLAYBACK_CONTROL_LOG_PREFIX initialization ignored file=${videoFile.name}",
+            )
+            return false
         }
 
         pendingInitializationPath = requestedPath
+        val initializationGeneration = ++playerGeneration
+        Log.i(
+            PLAYER_LOG_TAG,
+            "$PLAYBACK_CONTROL_LOG_PREFIX initialization generation=$initializationGeneration " +
+                "file=${videoFile.name}",
+        )
         this.appContext = context.applicationContext
         this.currentPlaybackSource = playbackSource
         audioManager =
@@ -1231,6 +1326,15 @@ class VideoPlayerViewModel(
             try {
                 // Release previous player first so its final position is saved to the correct video ID.
                 releaseCurrentPlayer(resetUiState = false)
+                if (initializationGeneration != playerGeneration) {
+                    Log.i(
+                        PLAYER_LOG_TAG,
+                        "$PLAYBACK_CONTROL_LOG_PREFIX initialization stale " +
+                            "generation=$initializationGeneration active=$playerGeneration",
+                    )
+                    return@launch
+                }
+                pendingInitializationPath = requestedPath
                 currentVideoId = null
                 pendingVideoFormatToPersist = null
                 pendingStereoModeToPersist = null
@@ -1408,6 +1512,7 @@ class VideoPlayerViewModel(
                         // Set up player listener
                         addListener(object : Player.Listener {
                             override fun onPlaybackStateChanged(playbackState: Int) {
+                                if (initializationGeneration != playerGeneration) return
                                 when (playbackState) {
                                     Player.STATE_READY -> {
                                         _state.value = _state.value.copy(
@@ -1422,6 +1527,10 @@ class VideoPlayerViewModel(
 
                                     Player.STATE_ENDED -> {
                                         _state.value = _state.value.copy(isPlaying = false)
+                                        handlePlaybackEnded(
+                                            listenerGeneration = initializationGeneration,
+                                            endedFile = videoFile,
+                                        )
                                     }
 
                                     Player.STATE_IDLE -> {
@@ -1431,15 +1540,20 @@ class VideoPlayerViewModel(
                             }
 
                             override fun onIsPlayingChanged(isPlaying: Boolean) {
+                                if (initializationGeneration != playerGeneration) return
                                 _state.value = _state.value.copy(isPlaying = isPlaying)
                                 if (isPlaying) {
                                     scheduleControlsAutoHideIfNeeded()
-                                } else {
+                                } else if (
+                                    !autoAdvanceInProgress &&
+                                        this@apply.playbackState != Player.STATE_ENDED
+                                ) {
                                     keepControlsVisibleWhileNotPlaying()
                                 }
                             }
 
                             override fun onCues(cueGroup: CueGroup) {
+                                if (initializationGeneration != playerGeneration) return
                                 val subtitlesEnabled = _state.value.subtitlesEnabled
                                 Log.d(
                                     PLAYER_LOG_TAG,
@@ -1455,6 +1569,7 @@ class VideoPlayerViewModel(
                             }
 
                             override fun onTracksChanged(tracks: Tracks) {
+                                if (initializationGeneration != playerGeneration) return
                                 logSubtitleTrackState(tracks)
                                 if (!autoDisplayInferencePending) {
                                     return
@@ -1542,6 +1657,7 @@ class VideoPlayerViewModel(
                             }
 
                             override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                                if (initializationGeneration != playerGeneration) return
                                 Log.e(
                                     PLAYER_LOG_TAG,
                                     "$SUBTITLE_LOG_PREFIX player error code=${error.errorCodeName}",
@@ -1549,7 +1665,9 @@ class VideoPlayerViewModel(
                                 )
                                 _state.value = _state.value.copy(
                                     isLoading = false,
-                                    error = error.message ?: "Playback error occurred"
+                                    error = error.message ?: "Playback error occurred",
+                                    showControls = true,
+                                    activePlaybackMenu = PlaybackMenu.None,
                                 )
                             }
                         })
@@ -1608,16 +1726,30 @@ class VideoPlayerViewModel(
                     "$SUBTITLE_LOG_PREFIX player initialization failed",
                     e,
                 )
-                _state.value = _state.value.copy(
-                    isLoading = false,
-                    error = e.message ?: "Failed to initialize player"
-                )
+                if (initializationGeneration == playerGeneration) {
+                    _state.value = _state.value.copy(
+                        isLoading = false,
+                        error = e.message ?: "Failed to initialize player",
+                        showControls = true,
+                        activePlaybackMenu = PlaybackMenu.None,
+                    )
+                }
             } finally {
                 if (pendingInitializationPath == requestedPath) {
                     pendingInitializationPath = null
                 }
+                if (autoAdvanceTargetPath == requestedPath) {
+                    autoAdvanceTargetPath = null
+                    autoAdvanceInProgress = false
+                    Log.i(
+                        PLAYER_LOG_TAG,
+                        "$PLAYBACK_CONTROL_LOG_PREFIX auto-advance guard released " +
+                            "target=${videoFile.name}",
+                    )
+                }
             }
         }
+        return true
     }
 
     private fun buildMediaItem(
@@ -1988,6 +2120,118 @@ class VideoPlayerViewModel(
         return refreshPlaylist(currentFile, playbackSource)
     }
 
+    private fun handlePlaybackEnded(
+        listenerGeneration: Long,
+        endedFile: SMBFileItem,
+    ) {
+        if (
+            !shouldHandlePlaybackEnded(
+                listenerGeneration = listenerGeneration,
+                currentGeneration = playerGeneration,
+                autoAdvanceInProgress = autoAdvanceInProgress,
+                endedGenerationAlreadyHandled = handledEndedGeneration == listenerGeneration,
+            )
+        ) {
+            Log.i(
+                PLAYER_LOG_TAG,
+                "$PLAYBACK_CONTROL_LOG_PREFIX auto-advance ignored " +
+                    "listenerGeneration=$listenerGeneration activeGeneration=$playerGeneration " +
+                    "inProgress=$autoAdvanceInProgress source=${endedFile.name}",
+            )
+            return
+        }
+
+        handledEndedGeneration = listenerGeneration
+        autoAdvanceInProgress = true
+        viewModelScope.launch {
+            val playlistResult = ensurePlaylistReady()
+            if (
+                listenerGeneration != playerGeneration ||
+                    _state.value.videoFile?.path != endedFile.path
+            ) {
+                finishAutoAdvanceWithoutTransition(
+                    reason = "stale-ended-callback",
+                    showControls = false,
+                )
+                return@launch
+            }
+
+            if (playlistResult == null) {
+                finishAutoAdvanceWithoutTransition(reason = "playlist-unavailable")
+                return@launch
+            }
+
+            val (playlist, currentIndex) = playlistResult
+            val nextFile = resolveNextPlaybackTarget(playlist, currentIndex)
+            if (nextFile == null) {
+                Log.i(
+                    PLAYER_LOG_TAG,
+                    "$PLAYBACK_CONTROL_LOG_PREFIX auto-advance boundary " +
+                        "source=${endedFile.name} index=$currentIndex size=${playlist.size}",
+                )
+                finishAutoAdvanceWithoutTransition(reason = "last-item")
+                return@launch
+            }
+
+            val started = transitionToPlaylistTarget(
+                playlist = playlist,
+                currentIndex = currentIndex,
+                targetIndex = currentIndex + 1,
+                reason = "auto-ended",
+                isAutoAdvance = true,
+            )
+            if (!started) {
+                finishAutoAdvanceWithoutTransition(reason = "initialization-rejected")
+            }
+        }
+    }
+
+    private fun finishAutoAdvanceWithoutTransition(
+        reason: String,
+        showControls: Boolean = true,
+    ) {
+        autoAdvanceTargetPath = null
+        autoAdvanceInProgress = false
+        Log.i(
+            PLAYER_LOG_TAG,
+            "$PLAYBACK_CONTROL_LOG_PREFIX auto-advance finished reason=$reason",
+        )
+        if (showControls) {
+            keepControlsVisibleWhileNotPlaying()
+        }
+    }
+
+    private fun transitionToPlaylistTarget(
+        playlist: List<SMBFileItem>,
+        currentIndex: Int,
+        targetIndex: Int,
+        reason: String,
+        isAutoAdvance: Boolean = false,
+    ): Boolean {
+        val targetFile = playlist.getOrNull(targetIndex) ?: return false
+        val context = appContext ?: return false
+        val playbackSource = currentPlaybackSource ?: return false
+        val sourceFile = playlist.getOrNull(currentIndex) ?: _state.value.videoFile
+
+        Log.i(
+            PLAYER_LOG_TAG,
+            "$PLAYBACK_CONTROL_LOG_PREFIX transition reason=$reason " +
+                "source=${sourceFile?.name ?: "unknown"} target=${targetFile.name} " +
+                "from=$currentIndex to=$targetIndex",
+        )
+        _state.value = _state.value.copy(currentPlaylistIndex = targetIndex)
+        if (isAutoAdvance) {
+            autoAdvanceTargetPath = targetFile.path
+        }
+
+        val started = initializePlayer(context, playbackSource, targetFile)
+        if (!started && isAutoAdvance) {
+            autoAdvanceTargetPath = null
+            autoAdvanceInProgress = false
+        }
+        return started
+    }
+
     fun playNextVideo() {
         viewModelScope.launch {
             val playlistResult = ensurePlaylistReady()
@@ -2004,20 +2248,13 @@ class VideoPlayerViewModel(
                 return@launch
             }
 
-            val ctx = appContext ?: return@launch
-            val playbackSource = currentPlaybackSource ?: return@launch
-
             val nextIndex = currentIndex + 1
-            val nextFile = playlist[nextIndex]
-            Log.i(
-                PLAYER_LOG_TAG,
-                "$PLAYBACK_CONTROL_LOG_PREFIX next from=$currentIndex to=$nextIndex " +
-                        "file=${nextFile.name}",
+            transitionToPlaylistTarget(
+                playlist = playlist,
+                currentIndex = currentIndex,
+                targetIndex = nextIndex,
+                reason = "manual-next",
             )
-
-            _state.value = _state.value.copy(currentPlaylistIndex = nextIndex)
-            initializePlayer(ctx, playbackSource, nextFile)
-            scheduleControlsAutoHideIfNeeded()
         }
     }
 
@@ -2038,20 +2275,13 @@ class VideoPlayerViewModel(
                 return@launch
             }
 
-            val ctx = appContext ?: return@launch
-            val playbackSource = currentPlaybackSource ?: return@launch
-
             val prevIndex = currentIndex - 1
-            val prevFile = playlist[prevIndex]
-            Log.i(
-                PLAYER_LOG_TAG,
-                "$PLAYBACK_CONTROL_LOG_PREFIX previous from=$currentIndex to=$prevIndex " +
-                        "file=${prevFile.name}",
+            transitionToPlaylistTarget(
+                playlist = playlist,
+                currentIndex = currentIndex,
+                targetIndex = prevIndex,
+                reason = "manual-previous",
             )
-
-            _state.value = _state.value.copy(currentPlaylistIndex = prevIndex)
-            initializePlayer(ctx, playbackSource, prevFile)
-            scheduleControlsAutoHideIfNeeded()
         }
     }
 
@@ -2304,10 +2534,12 @@ class VideoPlayerViewModel(
     }
 
     suspend fun releasePlayerBeforeNavigateBack() {
+        invalidatePlaybackGeneration(reason = "navigate-back")
         releaseCurrentPlayer(resetUiState = true)
     }
 
     fun releasePlayerAsync() {
+        invalidatePlaybackGeneration(reason = "release-async")
         viewModelScope.launch {
             releaseCurrentPlayer(resetUiState = true)
         }
@@ -2319,6 +2551,7 @@ class VideoPlayerViewModel(
     }
 
     private fun releasePlayerOnCleared() {
+        invalidatePlaybackGeneration(reason = "view-model-cleared")
         pendingInitializationPath = null
         positionTrackingJob?.cancel()
         positionTrackingJob = null
@@ -2368,6 +2601,18 @@ class VideoPlayerViewModel(
             }
             runCatching { VideoFramePreviewExtractor.clearPreparedVideo(previewVideoPath) }
         }
+    }
+
+    private fun invalidatePlaybackGeneration(reason: String) {
+        playerGeneration += 1L
+        autoAdvanceInProgress = false
+        autoAdvanceTargetPath = null
+        handledEndedGeneration = null
+        Log.d(
+            PLAYER_LOG_TAG,
+            "$PLAYBACK_CONTROL_LOG_PREFIX generation invalidated " +
+                "reason=$reason active=$playerGeneration",
+        )
     }
 
     private fun resolveAudioManager(): AudioManager? {

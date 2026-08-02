@@ -25,7 +25,7 @@ class XRPlaybackControlsPlacementTest {
     }
 
     @Test
-    fun `immersive display menu receives its own full size panel bounds`() {
+    fun `immersive display menu keeps the full content height estimate`() {
         assertEquals(
             420.dp,
             PlaybackMenu.Display.playbackMenuWidth(VideoFormat.Format180),

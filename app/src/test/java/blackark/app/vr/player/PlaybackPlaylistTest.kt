@@ -53,6 +53,80 @@ class PlaybackPlaylistTest {
         assertFalse(snapshot.canPlayNext)
     }
 
+    @Test
+    fun `multipart files use natural part order`() {
+        val files = listOf(
+            file("CODE-123-pt-10.mp4"),
+            file("CODE-123-pt-2.mp4"),
+            file("CODE-123-pt-1.mp4"),
+        )
+
+        val snapshot = resolvePlaybackPlaylist(files.first(), files)
+
+        assertEquals(
+            listOf("CODE-123-pt-1.mp4", "CODE-123-pt-2.mp4", "CODE-123-pt-10.mp4"),
+            snapshot.files.map { it.name },
+        )
+    }
+
+    @Test
+    fun `ordinary numbered series use natural order`() {
+        val files = listOf(file("episode10.mp4"), file("episode1.mp4"), file("episode2.mp4"))
+
+        val snapshot = resolvePlaybackPlaylist(files.first(), files)
+
+        assertEquals(
+            listOf("episode1.mp4", "episode2.mp4", "episode10.mp4"),
+            snapshot.files.map { it.name },
+        )
+    }
+
+    @Test
+    fun `next target resolves only when a following item exists`() {
+        val playlist = listOf(file("episode1.mp4"), file("episode2.mp4"))
+
+        assertEquals(playlist[1], resolveNextPlaybackTarget(playlist, 0))
+        assertEquals(null, resolveNextPlaybackTarget(playlist, 1))
+        assertEquals(null, resolveNextPlaybackTarget(playlist, -1))
+        assertEquals(null, resolveNextPlaybackTarget(playlist, 20))
+    }
+
+    @Test
+    fun `ended event guard rejects stale generation and duplicate transition`() {
+        assertTrue(
+            shouldHandlePlaybackEnded(
+                listenerGeneration = 7L,
+                currentGeneration = 7L,
+                autoAdvanceInProgress = false,
+                endedGenerationAlreadyHandled = false,
+            )
+        )
+        assertFalse(
+            shouldHandlePlaybackEnded(
+                listenerGeneration = 6L,
+                currentGeneration = 7L,
+                autoAdvanceInProgress = false,
+                endedGenerationAlreadyHandled = false,
+            )
+        )
+        assertFalse(
+            shouldHandlePlaybackEnded(
+                listenerGeneration = 7L,
+                currentGeneration = 7L,
+                autoAdvanceInProgress = true,
+                endedGenerationAlreadyHandled = false,
+            )
+        )
+        assertFalse(
+            shouldHandlePlaybackEnded(
+                listenerGeneration = 7L,
+                currentGeneration = 7L,
+                autoAdvanceInProgress = false,
+                endedGenerationAlreadyHandled = true,
+            )
+        )
+    }
+
     private fun file(
         name: String,
         path: String = "smb://server/share/$name",
