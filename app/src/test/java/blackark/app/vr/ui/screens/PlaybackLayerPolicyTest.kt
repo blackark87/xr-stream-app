@@ -17,13 +17,12 @@ class PlaybackLayerPolicyTest {
 
         assertTrue(policy.showRevealInputLayer)
         assertTrue(policy.enableSurfaceRevealInput)
-        assertFalse(policy.enableSurfaceHideInput)
         assertFalse(policy.showControlsLayer)
         assertFalse(policy.subtitleAcceptsInput)
     }
 
     @Test
-    fun `visible controls remove full screen reveal layers`() {
+    fun `visible controls expose only the controls layer`() {
         val policy = resolvePlaybackLayerPolicy(
             isSurfaceReady = true,
             showControls = true,
@@ -33,7 +32,6 @@ class PlaybackLayerPolicyTest {
 
         assertFalse(policy.showRevealInputLayer)
         assertFalse(policy.enableSurfaceRevealInput)
-        assertTrue(policy.enableSurfaceHideInput)
         assertTrue(policy.showControlsLayer)
         assertFalse(policy.subtitleAcceptsInput)
     }
@@ -60,9 +58,9 @@ class PlaybackLayerPolicyTest {
         )
 
         assertFalse(lockedPolicy.showRevealInputLayer)
-        assertFalse(lockedPolicy.enableSurfaceHideInput)
-        assertFalse(lockedVisiblePolicy.enableSurfaceHideInput)
+        assertFalse(lockedPolicy.enableSurfaceRevealInput)
+        assertFalse(lockedVisiblePolicy.enableSurfaceRevealInput)
         assertFalse(unreadyPolicy.showRevealInputLayer)
-        assertFalse(unreadyPolicy.enableSurfaceHideInput)
+        assertFalse(unreadyPolicy.enableSurfaceRevealInput)
     }
 }
