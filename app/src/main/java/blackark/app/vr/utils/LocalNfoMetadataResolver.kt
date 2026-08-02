@@ -8,6 +8,7 @@ import blackark.app.vr.network.SMBFileItem
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.InputStream
+import java.net.URI
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.time.format.DateTimeParseException
@@ -16,6 +17,8 @@ import java.util.Locale
 private const val LOCAL_NFO_SOURCE = "local_nfo"
 private const val TAG = "LocalNfoMetadata"
 private val localNfoImageExtensions = listOf("jpg", "jpeg", "png", "webp")
+private val absoluteArtworkScheme =
+    Regex("^(?:smb|content|file|https?)://", RegexOption.IGNORE_CASE)
 
 data class LocalNfoMetadataResult(
     val metadata: JvrMovieMetadata?,
@@ -23,10 +26,29 @@ data class LocalNfoMetadataResult(
     val nfoPath: String?,
 )
 
-internal fun buildNfoCandidateNames(videoName: String): List<String> {
+internal data class NfoArtworkReferences(
+    val poster: List<String>,
+    val thumb: List<String>,
+    val fanart: List<String>,
+)
+
+private data class NfoTagMatch(
+    val attributes: String,
+    val content: String,
+    val range: IntRange,
+)
+
+internal fun buildNfoCandidateNames(
+    videoName: String,
+    preferredBaseName: String? = null,
+): List<String> {
     val stem = videoName.substringBeforeLast('.', videoName)
     val multipartBaseStem = extractVirtualGroupKey(videoName)
     return buildList {
+        preferredBaseName
+            ?.substringBeforeLast('.', preferredBaseName)
+            ?.takeIf { it.isNotBlank() }
+            ?.let { add("$it.nfo") }
         add("$stem.nfo")
         if (!multipartBaseStem.isNullOrBlank() && !multipartBaseStem.equals(stem, ignoreCase = true)) {
             add("$multipartBaseStem.nfo")
@@ -36,37 +58,108 @@ internal fun buildNfoCandidateNames(videoName: String): List<String> {
     }.distinctBy { it.lowercase(Locale.US) }
 }
 
-internal fun buildPosterCandidateNames(videoName: String): List<String> {
+internal fun buildPosterCandidateNames(
+    videoName: String,
+    preferredBaseName: String? = null,
+): List<String> {
     val stem = videoName.substringBeforeLast('.', videoName)
     val multipartBaseStem = extractVirtualGroupKey(videoName)
+    val contentStems = buildList {
+        preferredBaseName
+            ?.substringBeforeLast('.', preferredBaseName)
+            ?.takeIf { it.isNotBlank() }
+            ?.let(::add)
+        add(stem)
+        if (!multipartBaseStem.isNullOrBlank()) add(multipartBaseStem)
+    }.distinctBy { it.lowercase(Locale.US) }
     return buildList {
-        for (extension in localNfoImageExtensions) {
-            add("$stem.$extension")
-            add("$stem-poster.$extension")
-        }
-        if (!multipartBaseStem.isNullOrBlank() && !multipartBaseStem.equals(stem, ignoreCase = true)) {
+        for (contentStem in contentStems) {
             for (extension in localNfoImageExtensions) {
-                add("$multipartBaseStem.$extension")
-                add("$multipartBaseStem-poster.$extension")
+                add("$contentStem-poster.$extension")
             }
         }
-        addAll(
-            listOf(
-                "poster.jpg",
-                "poster.png",
-                "poster.webp",
-                "fanart.jpg",
-                "fanart.png",
-                "fanart.webp",
-                "cover.jpg",
-                "cover.png",
-                "cover.webp",
-                "folder.jpg",
-                "folder.png",
-                "folder.webp",
-            )
-        )
+        for (contentStem in contentStems) {
+            for (extension in localNfoImageExtensions) {
+                add("$contentStem.$extension")
+            }
+        }
+        for (extension in localNfoImageExtensions) add("poster.$extension")
+        for (extension in localNfoImageExtensions) add("fanart.$extension")
+        for (extension in localNfoImageExtensions) add("cover.$extension")
+        for (extension in localNfoImageExtensions) add("folder.$extension")
     }.distinctBy { it.lowercase(Locale.US) }
+}
+
+internal fun extractNfoArtworkReferences(text: String): NfoArtworkReferences {
+    val posterTags = findNfoTags(text, "poster")
+    val thumbTags = findNfoTags(text, "thumb")
+    val fanartRanges = findNfoTags(text, "fanart")
+    val actorRanges = (findNfoTags(text, "actor") + findNfoTags(text, "performer"))
+        .map(NfoTagMatch::range)
+    val posterThumbs = thumbTags.filter { tag ->
+        Regex("(?i)\\baspect\\s*=\\s*[\\\"']?poster(?:[\\\"'\\s]|$)")
+            .containsMatchIn(tag.attributes)
+    }
+    val fanartThumbs = thumbTags.filter { tag ->
+        fanartRanges.any { fanart -> tag.range.first >= fanart.range.first && tag.range.last <= fanart.range.last }
+    }
+    val genericThumbs = thumbTags.filterNot { tag ->
+        tag in posterThumbs ||
+            tag in fanartThumbs ||
+            actorRanges.any { range -> tag.range.first >= range.first && tag.range.last <= range.last }
+    }
+    val directFanart = fanartRanges.mapNotNull { cleanNfoArtworkReference(it.content) }
+
+    return NfoArtworkReferences(
+        poster = (posterTags + posterThumbs)
+            .mapNotNull { cleanNfoArtworkReference(it.content) }
+            .distinct(),
+        thumb = genericThumbs
+            .mapNotNull { cleanNfoArtworkReference(it.content) }
+            .distinct(),
+        fanart = (fanartThumbs.mapNotNull { cleanNfoArtworkReference(it.content) } + directFanart)
+            .distinct(),
+    )
+}
+
+private fun findNfoTags(text: String, tag: String): List<NfoTagMatch> {
+    val regex = Regex(
+        "<\\s*$tag\\b([^>]*)>(.*?)<\\s*/\\s*$tag\\s*>",
+        setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL),
+    )
+    return regex.findAll(text).map { match ->
+        NfoTagMatch(
+            attributes = match.groupValues[1],
+            content = match.groupValues[2],
+            range = match.range,
+        )
+    }.toList()
+}
+
+private fun cleanNfoArtworkReference(value: String): String? {
+    val cleaned = value
+        .replace(Regex("(?is)<!\\[CDATA\\[(.*?)]]>")) { it.groupValues[1] }
+        .replace(Regex("<[^>]+>"), " ")
+        .replace("&amp;", "&", ignoreCase = true)
+        .replace("&quot;", "\"", ignoreCase = true)
+        .replace("&apos;", "'", ignoreCase = true)
+        .replace("&lt;", "<", ignoreCase = true)
+        .replace("&gt;", ">", ignoreCase = true)
+        .trim()
+    return cleaned.takeIf { it.isNotBlank() }
+}
+
+internal fun resolveSmbNfoArtworkReference(
+    videoPath: String,
+    reference: String,
+): String? {
+    val cleaned = reference.trim().replace('\\', '/')
+    if (cleaned.isBlank()) return null
+    if (absoluteArtworkScheme.containsMatchIn(cleaned)) return cleaned
+    if (!videoPath.startsWith("smb://", ignoreCase = true)) return null
+    val parent = videoPath.substringBeforeLast('/', "").trimEnd('/') + "/"
+    return runCatching { URI(parent).resolve(cleaned).normalize().toString() }
+        .getOrElse { parent + cleaned.trimStart('/') }
 }
 
 class LocalNfoMetadataResolver(
@@ -74,23 +167,56 @@ class LocalNfoMetadataResolver(
     private val localClient: LocalFileClient?,
     private val localRootTreeUri: String?,
 ) {
-    suspend fun resolve(video: SMBFileItem, fallbackCode: String): LocalNfoMetadataResult =
+    suspend fun resolve(
+        video: SMBFileItem,
+        fallbackCode: String,
+        preferredBaseName: String? = null,
+    ): LocalNfoMetadataResult =
         withContext(Dispatchers.IO) {
             val siblingFiles = listSiblingFiles(video).getOrElse { error ->
                 Log.d(TAG, "Failed to list siblings for ${video.path}: ${error.message}")
                 emptyList()
             }
-            val nfoItem = findNfoCandidate(video.name, siblingFiles)
-            val posterItem = findPosterCandidate(video.name, siblingFiles)
-            val posterUrl = posterItem?.path
-            val metadata = nfoItem?.let { item ->
-                readText(item.path)
-                    .getOrElse { error ->
-                        Log.w(TAG, "Failed to read NFO ${item.path}: ${error.message}")
-                        null
-                    }
-                    ?.let { text -> parseNfo(text, fallbackCode, posterUrl) }
+            val nfoItem = findNfoCandidate(video.name, siblingFiles, preferredBaseName)
+            val nfoText = nfoItem?.let { item ->
+                readText(item.path).getOrElse { error ->
+                    Log.w(TAG, "Failed to read NFO ${item.path}: ${error.message}")
+                    null
+                }
             }
+            val nfoArtwork = nfoText?.let(::extractNfoArtworkReferences)
+                ?: NfoArtworkReferences(emptyList(), emptyList(), emptyList())
+            val sidecarCandidates = buildPosterCandidateNames(video.name, preferredBaseName)
+            val fanartIndex = sidecarCandidates.indexOfFirst {
+                it.startsWith("fanart.", ignoreCase = true)
+            }.let { if (it < 0) sidecarCandidates.size else it }
+            val coverIndex = sidecarCandidates.indexOfFirst {
+                it.startsWith("cover.", ignoreCase = true) ||
+                    it.startsWith("folder.", ignoreCase = true)
+            }.let { if (it < 0) sidecarCandidates.size else it }
+            val primarySidecars = sidecarCandidates.subList(0, fanartIndex)
+            val fanartSidecars = sidecarCandidates.subList(fanartIndex, coverIndex)
+            val coverSidecars = sidecarCandidates.subList(coverIndex, sidecarCandidates.size)
+            val posterUrl = firstResolvableArtworkReference(
+                references = nfoArtwork.poster + nfoArtwork.thumb,
+                video = video,
+                siblings = siblingFiles,
+            ) ?: findPosterCandidate(primarySidecars, siblingFiles)?.path
+                ?: firstResolvableArtworkReference(
+                    references = nfoArtwork.fanart,
+                    video = video,
+                    siblings = siblingFiles,
+                )
+                ?: findPosterCandidate(fanartSidecars, siblingFiles)?.path
+                ?: findPosterCandidate(coverSidecars, siblingFiles)?.path
+            val metadata = nfoText?.let { text -> parseNfo(text, fallbackCode, posterUrl) }
+                ?: posterUrl?.let { artworkUrl ->
+                    JvrMovieMetadata(
+                        code = fallbackCode.uppercase(Locale.US),
+                        title = fallbackCode,
+                        posterUrl = artworkUrl,
+                    )
+                }
 
             LocalNfoMetadataResult(
                 metadata = metadata,
@@ -165,16 +291,23 @@ class LocalNfoMetadataResolver(
         }
     }
 
-    private fun findNfoCandidate(videoName: String, siblings: List<SMBFileItem>): SMBFileItem? {
+    private fun findNfoCandidate(
+        videoName: String,
+        siblings: List<SMBFileItem>,
+        preferredBaseName: String?,
+    ): SMBFileItem? {
         return findFirstNamedCandidate(
-            candidates = buildNfoCandidateNames(videoName),
+            candidates = buildNfoCandidateNames(videoName, preferredBaseName),
             siblings = siblings,
         ) { it.endsWith(".nfo", ignoreCase = true) }
     }
 
-    private fun findPosterCandidate(videoName: String, siblings: List<SMBFileItem>): SMBFileItem? {
+    private fun findPosterCandidate(
+        candidates: List<String>,
+        siblings: List<SMBFileItem>,
+    ): SMBFileItem? {
         return findFirstNamedCandidate(
-            candidates = buildPosterCandidateNames(videoName),
+            candidates = candidates,
             siblings = siblings,
         ) { name ->
             localNfoImageExtensions.any { name.endsWith(".$it", ignoreCase = true) }
@@ -194,6 +327,65 @@ class LocalNfoMetadataResolver(
             .map { it.lowercase(Locale.US) }
             .mapNotNull(filesByLowerName::get)
             .firstOrNull()
+    }
+
+    private suspend fun firstResolvableArtworkReference(
+        references: List<String>,
+        video: SMBFileItem,
+        siblings: List<SMBFileItem>,
+    ): String? {
+        for (reference in references) {
+            resolveArtworkReference(reference, video, siblings)?.let { return it }
+        }
+        return null
+    }
+
+    private suspend fun resolveArtworkReference(
+        reference: String,
+        video: SMBFileItem,
+        siblings: List<SMBFileItem>,
+    ): String? {
+        val cleaned = reference.trim().replace('\\', '/')
+        if (cleaned.isBlank()) return null
+        if (absoluteArtworkScheme.containsMatchIn(cleaned)) return cleaned
+
+        val segments = cleaned.split('/').filter { it.isNotBlank() && it != "." }
+        if (segments.isEmpty()) return null
+        if (segments.none { it == ".." }) {
+            siblings.firstOrNull { sibling ->
+                !sibling.isDirectory && sibling.name.equals(segments.last(), ignoreCase = true)
+            }?.let { return it.path }
+        }
+
+        if (video.path.startsWith("smb://", ignoreCase = true)) {
+            return resolveSmbNfoArtworkReference(video.path, cleaned)
+        }
+
+        val local = localClient ?: return null
+        val rootTreeUri = localRootTreeUri.orEmpty()
+        var currentUri = LocalFileClient.resolveParentDirectoryUri(rootTreeUri, video.path)
+            ?: return null
+        var currentChildren = siblings
+        for ((index, segment) in segments.withIndex()) {
+            if (segment == "..") {
+                currentUri = LocalFileClient.resolveParentDirectoryUri(rootTreeUri, currentUri)
+                    ?: return null
+                currentChildren = local.listFiles(currentUri, includeHidden = true)
+                    .getOrNull()
+                    .orEmpty()
+                continue
+            }
+
+            val child = currentChildren.firstOrNull { it.name.equals(segment, ignoreCase = true) }
+                ?: return null
+            if (index == segments.lastIndex) return child.path.takeIf { !child.isDirectory }
+            if (!child.isDirectory) return null
+            currentUri = child.path
+            currentChildren = local.listFiles(currentUri, includeHidden = true)
+                .getOrNull()
+                .orEmpty()
+        }
+        return null
     }
 
     private fun parseNfo(text: String, fallbackCode: String, posterUrl: String?): JvrMovieMetadata? {

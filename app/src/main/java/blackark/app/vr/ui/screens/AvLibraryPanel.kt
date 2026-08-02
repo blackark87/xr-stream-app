@@ -1849,21 +1849,32 @@ private fun PosterThumbnail(
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
-    val thumbnailModel = remember(posterUrl, fallbackThumbnailPath, context) {
+    var posterLoadFailed by remember(posterUrl) { mutableStateOf(false) }
+    val thumbnailModel = remember(
+        posterUrl,
+        fallbackThumbnailPath,
+        posterLoadFailed,
+        context,
+    ) {
         when {
-            !posterUrl.isNullOrBlank() -> posterUrl
+            !posterUrl.isNullOrBlank() && !posterLoadFailed -> {
+                ImageRequest.Builder(context)
+                    .data(posterUrl)
+                    .diskCachePolicy(CachePolicy.ENABLED)
+                    .memoryCachePolicy(CachePolicy.ENABLED)
+                    .listener(onError = { _, _ -> posterLoadFailed = true })
+                    .build()
+            }
             !fallbackThumbnailPath.isNullOrBlank() -> {
                 ImageRequest.Builder(context)
                     .data(
                         VideoThumbnailFetcher.Model(
                             fallbackThumbnailPath,
-                            allowMetadataPoster = false,
                         )
                     )
                     .diskCacheKey(
                         VideoThumbnailFetcher.diskCacheKey(
                             fallbackThumbnailPath,
-                            allowMetadataPoster = false,
                         )
                     )
                     .diskCachePolicy(CachePolicy.ENABLED)

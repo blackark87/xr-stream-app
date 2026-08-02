@@ -10,6 +10,17 @@ import java.util.Locale
 
 private val actorArtworkExtensions = listOf("jpg", "jpeg", "png", "webp")
 
+data class BrowserFolderArtworkResolution(
+    val metadata: JvrMovieMetadata? = null,
+    val representativeVideo: SMBFileItem? = null,
+    val actorArtworkUrl: String? = null,
+)
+
+enum class BrowserFolderArtworkKind {
+    ACTOR,
+    CONTENT,
+}
+
 internal fun normalizeActorArtworkName(value: String): String {
     return Normalizer.normalize(value, Normalizer.Form.NFKC)
         .lowercase(Locale.ROOT)
@@ -56,6 +67,31 @@ internal fun selectActorFolderArtwork(
     return (exactMatches.ifEmpty { supportedImages })
         .minWithOrNull(comparator)
         ?.first
+}
+
+internal fun selectFolderRepresentativeVideo(
+    folderName: String,
+    files: List<SMBFileItem>,
+): SMBFileItem? {
+    val folderCode = extractNormalizedCodeFromFileName(folderName)
+    return files
+        .asSequence()
+        .filter { file ->
+            !file.isDirectory &&
+                SMBClient.isVideoFile(file.name) &&
+                !isTrailerFile(file.name)
+        }
+        .sortedWith(
+            compareBy<SMBFileItem>(
+                { file ->
+                    val fileCode = extractNormalizedCodeFromFileName(file.name)
+                    folderCode != null && fileCode != folderCode
+                },
+                { file -> extractVirtualGroupPart(file.name) ?: Int.MAX_VALUE },
+                { file -> file.name.lowercase(Locale.ROOT) },
+            )
+        )
+        .firstOrNull()
 }
 
 class ActorFolderArtworkResolver(

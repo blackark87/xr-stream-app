@@ -15,11 +15,68 @@ class LocalNfoMetadataResolverTest {
     }
 
     @Test
-    fun `multipart poster candidates include exact part then base then generic names`() {
+    fun `multipart poster candidates prioritize content poster then content image and generic poster`() {
         val candidates = buildPosterCandidateNames("CODE-123_part02.mp4")
-        assertEquals("CODE-123_part02.jpg", candidates[0])
-        assertEquals("CODE-123.jpg", candidates[4])
-        assertEquals("poster.jpg", candidates[8])
+        assertEquals("CODE-123_part02-poster.jpg", candidates[0])
+        assertEquals("CODE-123-poster.jpg", candidates[4])
+        assertEquals("CODE-123_part02.jpg", candidates[8])
+        assertEquals("CODE-123.jpg", candidates[12])
+        assertEquals("poster.jpg", candidates[16])
+        assertEquals("fanart.jpg", candidates[20])
+        assertEquals("cover.jpg", candidates[24])
+        assertEquals("folder.jpg", candidates[28])
+    }
+
+    @Test
+    fun `preferred group base puts the shared NFO and poster first`() {
+        assertEquals(
+            "CODE-123.nfo",
+            buildNfoCandidateNames("CODE-123-pt-1.mp4", "CODE-123").first(),
+        )
+        assertEquals(
+            "CODE-123-poster.jpg",
+            buildPosterCandidateNames("CODE-123-pt-1.mp4", "CODE-123").first(),
+        )
+    }
+
+    @Test
+    fun `NFO artwork references separate poster generic thumb and fanart`() {
+        val references = extractNfoArtworkReferences(
+            """
+                <movie>
+                  <poster>images/CODE-123-poster.jpg</poster>
+                  <thumb aspect="poster">https://example.com/poster.jpg</thumb>
+                  <thumb>CODE-123-thumb.png</thumb>
+                  <fanart><thumb>fanart.webp</thumb></fanart>
+                  <actor><name>Actor</name><thumb>actor.jpg</thumb></actor>
+                </movie>
+            """.trimIndent(),
+        )
+
+        assertEquals(
+            listOf("images/CODE-123-poster.jpg", "https://example.com/poster.jpg"),
+            references.poster,
+        )
+        assertEquals(listOf("CODE-123-thumb.png"), references.thumb)
+        assertEquals(listOf("fanart.webp"), references.fanart)
+    }
+
+    @Test
+    fun `SMB NFO artwork references support folder relative and absolute URLs`() {
+        val videoPath = "smb://server/share/MIKR-109/MIKR-109.mp4"
+
+        assertEquals(
+            "smb://server/share/MIKR-109/images/poster.jpg",
+            resolveSmbNfoArtworkReference(videoPath, "images/poster.jpg"),
+        )
+        assertEquals(
+            "https://example.com/poster.jpg",
+            resolveSmbNfoArtworkReference(videoPath, "https://example.com/poster.jpg"),
+        )
+        assertEquals(
+            "content://provider/poster",
+            resolveSmbNfoArtworkReference(videoPath, "content://provider/poster"),
+        )
     }
 
     @Test
