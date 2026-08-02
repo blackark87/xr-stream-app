@@ -34,7 +34,10 @@ import blackark.app.vr.utils.extractFolderPath
 import blackark.app.vr.utils.extractNormalizedCodeFromFileName
 import blackark.app.vr.utils.extractVirtualGroupKey
 import blackark.app.vr.utils.extractVirtualGroupPart
+import blackark.app.vr.utils.flattenActorContentDirectories
+import blackark.app.vr.utils.isJapanActorFolderPath
 import blackark.app.vr.utils.isTrailerFile
+import blackark.app.vr.utils.resolveParentFolderBaseName
 import blackark.app.vr.utils.selectFolderRepresentativeVideo
 import jcifs.smb.SmbRandomAccessFile
 import kotlinx.coroutines.CancellationException
@@ -50,6 +53,10 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
@@ -170,6 +177,7 @@ class MainDashboardViewModel(
     private val actorFolderArtworkCache =
         mutableMapOf<String, Deferred<BrowserFolderArtworkResolution>>()
     private val actorFolderArtworkSemaphore = Semaphore(2)
+    private val actorContentFolderListingSemaphore = Semaphore(4)
     private val systemZoneId: ZoneId = ZoneId.systemDefault()
 
     private data class IndexedMetadataResolution(
@@ -538,7 +546,10 @@ class MainDashboardViewModel(
 
             try {
                 if (result.isSuccess) {
-                    val fileList = result.getOrNull() ?: emptyList()
+                    val fileList = flattenActorFolderListingIfNeeded(
+                        path = path,
+                        fileList = result.getOrNull() ?: emptyList(),
+                    )
                     val sortedFiles = filterAndSortBrowsableFiles(fileList)
 
                     _files.value = sortedFiles
@@ -554,6 +565,8 @@ class MainDashboardViewModel(
                         errorMessage = result.exceptionOrNull()?.message ?: "Failed to load files"
                     )
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(
                     isLoadingFiles = false,
@@ -561,6 +574,65 @@ class MainDashboardViewModel(
                 )
             }
         }
+    }
+
+    private suspend fun flattenActorFolderListingIfNeeded(
+        path: String,
+        fileList: List<SMBFileItem>,
+    ): List<SMBFileItem> {
+        if (!isJapanActorFolderPath(path)) return fileList
+
+        val contentFolders = fileList.filter { file -> file.isDirectory }
+        if (contentFolders.isEmpty()) return fileList
+
+        val activeLocalClient = localClient
+        val activeSmbClient = smbClient
+        val contentFolderChildrenByPath = coroutineScope {
+            contentFolders.map { contentFolder ->
+                async(Dispatchers.IO) {
+                    actorContentFolderListingSemaphore.withPermit {
+                        currentCoroutineContext().ensureActive()
+                        val childrenResult = when {
+                            activeLocalClient != null -> {
+                                activeLocalClient.listFiles(contentFolder.path)
+                            }
+
+                            activeSmbClient != null -> {
+                                activeSmbClient.listFiles(contentFolder.path)
+                            }
+
+                            else -> Result.failure<List<SMBFileItem>>(
+                                IllegalStateException("No active connection")
+                            )
+                        }
+                        currentCoroutineContext().ensureActive()
+
+                        childrenResult.getOrNull()?.let { children ->
+                            contentFolder.path to children
+                        } ?: run {
+                            Log.w(
+                                "ActorContentFlatten",
+                                "Keeping folder=${contentFolder.path} because its children could not be listed: " +
+                                    (childrenResult.exceptionOrNull()?.message ?: "unknown error"),
+                            )
+                            null
+                        }
+                    }
+                }
+            }.awaitAll()
+                .filterNotNull()
+                .toMap()
+        }
+
+        val flattened = flattenActorContentDirectories(
+            actorFolderChildren = fileList,
+            contentFolderChildrenByPath = contentFolderChildrenByPath,
+        )
+        Log.d(
+            "ActorContentFlatten",
+            "Flattened actor path=$path entries=${fileList.size}->${flattened.size}",
+        )
+        return flattened
     }
 
     fun navigateToFile(file: SMBFileItem) {
@@ -1704,7 +1776,10 @@ class MainDashboardViewModel(
     ) {
         val existingLocation = avLibraryRepository.getLocationByPath(file.path)
         var asset = existingLocation?.let { avLibraryRepository.getAssetByKey(it.assetKey) }
-        var normalizedCode = asset?.normalizedCode ?: extractNormalizedCodeFromFileName(file.name)
+        val parentFolderBaseName = resolveParentFolderBaseName(file.path)
+        var normalizedCode = asset?.normalizedCode
+            ?: extractNormalizedCodeFromFileName(file.name)
+            ?: parentFolderBaseName?.let(::extractNormalizedCodeFromFileName)
         var contentFingerprint = existingLocation?.contentFingerprint
 
         if (asset == null && normalizedCode != null) {
@@ -1756,6 +1831,7 @@ class MainDashboardViewModel(
             resolvedAsset = asset,
             forceMetadataRefresh = forceMetadataRefresh,
             persistLocalComposite = true,
+            preferredBaseName = parentFolderBaseName,
         )
 
         metadataSource = metadataResolution.metadataSource

@@ -213,6 +213,7 @@ import blackark.app.vr.utils.extractVirtualGroupKey
 import blackark.app.vr.utils.groupMultipartVideoFiles
 import blackark.app.vr.utils.BrowserFolderArtworkKind
 import blackark.app.vr.utils.extractVirtualGroupPart
+import blackark.app.vr.utils.resolveParentFolderBaseName
 import coil3.compose.AsyncImage
 import coil3.compose.rememberAsyncImagePainter
 import coil3.request.CachePolicy
@@ -4539,7 +4540,12 @@ private fun FileBrowserPanel(
                                                 file = file,
                                                 isVideoFile = isVideoFile,
                                                 folderArtworkKind = folderArtworkKind,
-                                                preferredMetadataBaseName = currentFolderBaseName,
+                                                preferredMetadataBaseName = if (isVideoFile) {
+                                                    resolveParentFolderBaseName(file.path)
+                                                        ?: currentFolderBaseName
+                                                } else {
+                                                    currentFolderBaseName
+                                                },
                                                 metadataRefreshToken = metadataRefreshToken,
                                                 viewModel = viewModel,
                                                 sharedMetadataState = if (item.isVirtualGroupMember) {
@@ -4636,7 +4642,12 @@ private fun FileBrowserPanel(
                                                 file = file,
                                                 isVideoFile = isVideoFile,
                                                 folderArtworkKind = folderArtworkKind,
-                                                preferredMetadataBaseName = currentFolderBaseName,
+                                                preferredMetadataBaseName = if (isVideoFile) {
+                                                    resolveParentFolderBaseName(file.path)
+                                                        ?: currentFolderBaseName
+                                                } else {
+                                                    currentFolderBaseName
+                                                },
                                                 metadataRefreshToken = metadataRefreshToken,
                                                 viewModel = viewModel,
                                                 sharedMetadataState = if (item.isVirtualGroupMember) {
