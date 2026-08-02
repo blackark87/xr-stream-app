@@ -116,7 +116,9 @@ import kotlinx.coroutines.delay
 private const val TAG = "VideoPlayerScreen"
 private val HIDDEN_MAIN_PANEL_OFFSET = 4000.dp
 private val HIDDEN_MAIN_PANEL_ANCHOR_SIZE = 2.dp
-private val IMMERSIVE_CONTROLS_PANEL_HEIGHT = 1200.dp
+// The immersive Display menu opens above the centered controls. Reserve enough
+// host space for the 640.dp menu so SpatialPanel does not clip its top edge.
+private val IMMERSIVE_CONTROLS_PANEL_HEIGHT = 1800.dp
 private val IMMERSIVE_CONTROLS_PANEL_WIDTH_MONO = 1260.dp
 private val IMMERSIVE_CONTROLS_PANEL_WIDTH_STEREO = 1460.dp
 private const val IMMERSIVE_CONTROLS_FRONT_FACTOR = 0.84f
