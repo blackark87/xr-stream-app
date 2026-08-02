@@ -476,7 +476,6 @@ fun SpatialVideoPlayerContent(
 
         var smoothedRotation: Quaternion? = null
         var smoothedForward: Vector3? = null
-        var smoothedRotation: Quaternion? = null
         arDevice.state.collect { deviceState ->
             val forward = deviceState.devicePose.forward
             val horizontalForward = Vector3(forward.x, 0f, forward.z)
@@ -520,6 +519,7 @@ fun SpatialVideoPlayerContent(
         }
 
         var smoothedForward: Vector3? = null
+        var smoothedRotation: Quaternion? = null
         arDevice.state.collect { deviceState ->
             val forward = deviceState.devicePose.forward
             if (forward.lengthSquared < 1e-6f) return@collect
