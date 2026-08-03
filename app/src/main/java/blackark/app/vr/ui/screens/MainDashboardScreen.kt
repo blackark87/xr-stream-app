@@ -3436,7 +3436,7 @@ private fun SubtitleFontPreviewText(
             view.typeface = typeface
             view.setTextColor(colorArgb)
             view.setTextSize(TypedValue.COMPLEX_UNIT_SP, textSizeSp)
-            view.setSingleLine(singleLine)
+            view.isSingleLine = singleLine
             view.maxLines = if (singleLine) 1 else 2
         },
         modifier = modifier,

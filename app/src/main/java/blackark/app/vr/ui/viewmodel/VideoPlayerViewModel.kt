@@ -1664,22 +1664,22 @@ class VideoPlayerViewModel(
                                 var detectedTrackStereoMode: StereoMode? = null
                                 var inferredDisplayProfile: InferredDisplayProfile? = null
                                 for (trackGroup in tracks.groups) {
-                                    if (trackGroup.type == androidx.media3.common.C.TRACK_TYPE_VIDEO) {
+                                    if (trackGroup.type == C.TRACK_TYPE_VIDEO) {
                                         for (i in 0 until trackGroup.length) {
                                             val format = trackGroup.getTrackFormat(i)
                                             val stereoMode = format.stereoMode
 
                                             when (stereoMode) {
-                                                androidx.media3.common.C.STEREO_MODE_LEFT_RIGHT,
-                                                androidx.media3.common.C.STEREO_MODE_STEREO_MESH -> {
+                                                C.STEREO_MODE_LEFT_RIGHT,
+                                                C.STEREO_MODE_STEREO_MESH -> {
                                                     detectedTrackStereoMode = StereoMode.SideBySide
                                                 }
 
-                                                androidx.media3.common.C.STEREO_MODE_TOP_BOTTOM -> {
+                                                C.STEREO_MODE_TOP_BOTTOM -> {
                                                     detectedTrackStereoMode = StereoMode.TopBottom
                                                 }
 
-                                                androidx.media3.common.C.STEREO_MODE_MONO -> {
+                                                C.STEREO_MODE_MONO -> {
                                                     detectedTrackStereoMode = StereoMode.Mono
                                                 }
                                             }

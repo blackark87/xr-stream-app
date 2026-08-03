@@ -1,5 +1,5 @@
-@file:androidx.annotation.OptIn(
-    markerClass = [androidx.media3.common.util.UnstableApi::class],
+@file:OptIn(
+    markerClass = [UnstableApi::class],
 )
 
 package blackark.app.vr.ui.screens
@@ -133,6 +133,7 @@ import kotlinx.coroutines.withContext
 import kotlin.math.PI
 import kotlin.math.asin
 import kotlin.math.atan2
+import kotlin.time.Duration.Companion.milliseconds
 
 private const val TAG = "VideoPlayerScreen"
 private val HIDDEN_MAIN_PANEL_OFFSET = 4000.dp
@@ -231,13 +232,13 @@ private fun PlaybackScrollInputOverlay(
 
     LaunchedEffect(inputEnabled) {
         if (!inputEnabled) return@LaunchedEffect
-        delay(80)
+        delay(80.milliseconds)
         runCatching { focusRequester.requestFocus() }
     }
 
     LaunchedEffect(hasFocus, inputEnabled) {
         if (inputEnabled && !hasFocus) {
-            delay(120)
+            delay(120.milliseconds)
             focusRequester.requestFocus()
         }
     }
@@ -337,7 +338,6 @@ fun VideoPlayerScreen(
 
     val playerState by videoPlayerViewModel.state.collectAsState()
     val dashboardPanelPose by blackark.app.vr.AppState.dashboardPanelPose.collectAsState()
-    val dashboardPanelSize by blackark.app.vr.AppState.dashboardPanelSize.collectAsState()
     val requestNavigateBackState =
         rememberUpdatedState { videoPlayerViewModel.requestNavigateBack() }
 
@@ -405,8 +405,6 @@ fun VideoPlayerScreen(
             isHandTrackingEnabled = isHandTrackingEnabled,
             hasHandTrackingPermission = hasHandTrackingPermission,
             dashboardPanelPose = dashboardPanelPose,
-            dashboardPanelWidth = dashboardPanelSize.widthDp.dp,
-            dashboardPanelHeight = dashboardPanelSize.heightDp.dp,
             onNavigateBack = { videoPlayerViewModel.requestNavigateBack() },
         )
     }
@@ -420,8 +418,6 @@ fun SpatialVideoPlayerContent(
     isHandTrackingEnabled: Boolean,
     hasHandTrackingPermission: Boolean,
     dashboardPanelPose: Pose?,
-    dashboardPanelWidth: Dp,
-    dashboardPanelHeight: Dp,
     onNavigateBack: () -> Unit,
 ) {
     val exoPlayer by videoPlayerViewModel.playerFlow.collectAsState()
@@ -799,8 +795,6 @@ fun SpatialVideoPlayerContent(
             isSurfaceReady = isSurfaceReady,
             videoPlayerViewModel = videoPlayerViewModel,
             playerState = playerState,
-            isHandTrackingEnabled = isHandTrackingEnabled,
-            onNavigateBack = { videoPlayerViewModel.requestNavigateBack() },
             dashboardPanelPose = dashboardPanelPose,
             headFollowPose = if (enableHeadFollowIn2D && dashboardPanelPose == null) headFollowPose else null,
             panelWidth = flatPanelWidth,
@@ -984,8 +978,6 @@ private fun Standard2DPlayer(
     isSurfaceReady: Boolean,
     videoPlayerViewModel: VideoPlayerViewModel,
     playerState: VideoPlayerState,
-    isHandTrackingEnabled: Boolean,
-    onNavigateBack: () -> Unit,
     dashboardPanelPose: Pose?,
     headFollowPose: HeadFollowPose? = null,
     panelWidth: Dp,
@@ -1092,11 +1084,11 @@ private fun SubtitleCueOverlay(
     val typeface = remember(fontOption.id) { SubtitleFontCatalog.resolveTypeface(fontOption) }
     val fallbackStyle = remember(typeface) {
         CaptionStyleCompat(
-            android.graphics.Color.WHITE,
-            android.graphics.Color.TRANSPARENT,
-            android.graphics.Color.TRANSPARENT,
+            AndroidColor.WHITE,
+            AndroidColor.TRANSPARENT,
+            AndroidColor.TRANSPARENT,
             CaptionStyleCompat.EDGE_TYPE_OUTLINE,
-            android.graphics.Color.BLACK,
+            AndroidColor.BLACK,
             typeface,
         )
     }
@@ -1108,7 +1100,7 @@ private fun SubtitleCueOverlay(
     AndroidView(
         factory = { context ->
             SubtitleView(context).apply {
-                setBackgroundColor(android.graphics.Color.TRANSPARENT)
+                setBackgroundColor(AndroidColor.TRANSPARENT)
                 setApplyEmbeddedStyles(true)
                 setApplyEmbeddedFontSizes(false)
                 setStyle(fallbackStyle)
