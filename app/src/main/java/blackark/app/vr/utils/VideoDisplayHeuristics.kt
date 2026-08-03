@@ -56,9 +56,15 @@ fun parseVideoIdentity(path: String): ParsedVideoIdentity? {
     }
 
     if (sanitizedPath.startsWith("smb://", ignoreCase = true)) {
-        val uri = runCatching { URI(sanitizedPath) }.getOrNull() ?: return null
-        val serverAddress = uri.host ?: return null
-        val pathSegments = uri.path.orEmpty()
+        val smbRemainder = sanitizedPath.substringAfter("://", "")
+        val authority = smbRemainder.substringBefore('/').substringAfterLast('@')
+        val serverAddress = when {
+            authority.startsWith('[') -> authority.substringAfter('[').substringBefore(']')
+            else -> authority.substringBefore(':')
+        }.trim()
+        if (serverAddress.isBlank()) return null
+
+        val pathSegments = smbRemainder.substringAfter('/', "")
             .trim('/')
             .split('/')
             .filter { it.isNotBlank() }

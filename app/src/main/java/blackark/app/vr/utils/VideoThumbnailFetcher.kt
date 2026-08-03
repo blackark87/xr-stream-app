@@ -31,14 +31,31 @@ import java.net.URI
 import java.security.MessageDigest
 
 private const val THUMBNAIL_CACHE_VERSION = "thumb-v3"
+private const val RESUME_FRAME_BUCKET_MS = 1_000L
+
+internal fun normalizeResumeFrameTimeMs(positionMs: Long, durationMs: Long = 0L): Long {
+    val maximumPosition = if (durationMs > 1_000L) durationMs - 1_000L else durationMs
+    val clampedPosition = if (maximumPosition > 0L) {
+        positionMs.coerceIn(0L, maximumPosition)
+    } else {
+        positionMs.coerceAtLeast(0L)
+    }
+    return clampedPosition / RESUME_FRAME_BUCKET_MS * RESUME_FRAME_BUCKET_MS
+}
+
+private fun normalizedFrameSourcePath(path: String): String = path
+    .substringBefore('?')
+    .substringBefore('#')
+    .replace('\\', '/')
+    .trim()
+    .lowercase()
+
+private fun md5Hex(value: String): String = MessageDigest.getInstance("MD5")
+    .digest(value.toByteArray())
+    .joinToString("") { "%02x".format(it) }
 
 internal fun buildGeneratedFrameIdentity(path: String, generation: Int): String {
-    val normalizedPath = path
-        .substringBefore('?')
-        .substringBefore('#')
-        .replace('\\', '/')
-        .trim()
-        .lowercase()
+    val normalizedPath = normalizedFrameSourcePath(path)
     val fileName = normalizedPath
         .substringAfterLast('/')
         .trim()
@@ -58,10 +75,33 @@ internal fun buildGeneratedFrameIdentity(path: String, generation: Int): String 
     return "$THUMBNAIL_CACHE_VERSION:$generation:frame:$normalizedIdentity"
 }
 
+internal fun buildResumeFrameIdentity(
+    path: String,
+    generation: Int,
+    positionMs: Long,
+    durationMs: Long = 0L,
+): String {
+    val normalizedPositionMs = normalizeResumeFrameTimeMs(positionMs, durationMs)
+    return "$THUMBNAIL_CACHE_VERSION:$generation:resume:${normalizedFrameSourcePath(path)}@$normalizedPositionMs"
+}
+
 internal fun generatedFrameFileName(path: String, generation: Int): String {
-    return MessageDigest.getInstance("MD5")
-        .digest(buildGeneratedFrameIdentity(path, generation).toByteArray())
-        .joinToString("") { "%02x".format(it) } + ".jpg"
+    return md5Hex(buildGeneratedFrameIdentity(path, generation)) + ".jpg"
+}
+
+private fun generatedResumeFrameFilePrefix(path: String, generation: Int): String {
+    val sourceIdentity = "$THUMBNAIL_CACHE_VERSION:$generation:resume:${normalizedFrameSourcePath(path)}"
+    return "resume_${md5Hex(sourceIdentity)}_"
+}
+
+internal fun generatedResumeFrameFileName(
+    path: String,
+    generation: Int,
+    positionMs: Long,
+    durationMs: Long = 0L,
+): String {
+    val normalizedPositionMs = normalizeResumeFrameTimeMs(positionMs, durationMs)
+    return generatedResumeFrameFilePrefix(path, generation) + "$normalizedPositionMs.jpg"
 }
 
 /**
@@ -69,10 +109,16 @@ internal fun generatedFrameFileName(path: String, generation: Int): String {
  */
 class VideoThumbnailFetcher(
     private val data: String,
-    private val options: Options
+    private val options: Options,
+    private val requestedFrameTimeMs: Long? = null,
+    private val requestedDurationMs: Long = 0L,
 ) : Fetcher {
 
-    data class Model(val path: String)
+    data class Model(
+        val path: String,
+        val frameTimeMs: Long? = null,
+        val durationMs: Long = 0L,
+    )
 
     private val tag = "VideoThumbnailFetcher"
     private val mb = 1024L * 1024L
@@ -155,7 +201,11 @@ class VideoThumbnailFetcher(
             val durationMs =
                 retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
                     ?.toLongOrNull() ?: 0L
-            val bitmap = extractBestThumbnailFrame(retriever, durationMs) ?: return null
+            val bitmap = extractBestThumbnailFrame(
+                retriever = retriever,
+                durationMs = durationMs,
+                requestedTimeMs = requestedFrameTimeMs,
+            ) ?: return null
 
             currentCoroutineContext().ensureActive()
             saveGeneratedFrameResult(data, bitmap, localFile)
@@ -187,7 +237,11 @@ class VideoThumbnailFetcher(
             val durationMs =
                 retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
                     ?.toLongOrNull() ?: 0L
-            val bitmap = extractBestThumbnailFrame(retriever, durationMs) ?: return null
+            val bitmap = extractBestThumbnailFrame(
+                retriever = retriever,
+                durationMs = durationMs,
+                requestedTimeMs = requestedFrameTimeMs,
+            ) ?: return null
 
             currentCoroutineContext().ensureActive()
             saveGeneratedFrameResult(path, bitmap, localFile)
@@ -216,18 +270,8 @@ class VideoThumbnailFetcher(
         )
 
         // 1. Check for existing local thumbnail based on filename identity.
-        val context = options.context
-        val cacheDir = java.io.File(context.filesDir, "thumbnails")
-        if (!cacheDir.exists()) cacheDir.mkdirs()
-
         val thumbnailIdentityKey = buildThumbnailIdentityKey(smbUrl)
-        val localFile = java.io.File(
-            cacheDir,
-            generatedFrameFileName(
-                path = smbUrl,
-                generation = ImageCacheVersionStore.thumbnailGeneration(options.context),
-            ),
-        )
+        val localFile = generatedFrameFile(smbUrl)
         val hadCachedFrame = localFile.isFile && localFile.length() > 0L
 
         Log.d(tag, "Thumbnail identity key for $smbUrl -> $thumbnailIdentityKey")
@@ -309,7 +353,11 @@ class VideoThumbnailFetcher(
                     durationMs =
                         retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
                             ?.toLongOrNull() ?: 0L
-                    bitmap = extractBestThumbnailFrame(retriever, durationMs)
+                    bitmap = extractBestThumbnailFrame(
+                        retriever = retriever,
+                        durationMs = durationMs,
+                        requestedTimeMs = requestedFrameTimeMs,
+                    )
 
                     if (bitmap != null) {
                         break
@@ -343,7 +391,11 @@ class VideoThumbnailFetcher(
                         durationMs =
                             retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
                                 ?.toLongOrNull() ?: 0L
-                        bitmap = extractBestThumbnailFrame(retriever, durationMs)
+                        bitmap = extractBestThumbnailFrame(
+                            retriever = retriever,
+                            durationMs = durationMs,
+                            requestedTimeMs = requestedFrameTimeMs,
+                        )
                     }
                 }
             }
@@ -375,6 +427,7 @@ class VideoThumbnailFetcher(
                 inferredDisplayProfile = inferredDisplayProfile,
             )
             currentCoroutineContext().ensureActive()
+            deleteSupersededResumeFrames(smbUrl, localFile)
 
             SourceFetchResult(
                 source = ImageSource(file = localFile.toOkioPath(), fileSystem = FileSystem.SYSTEM),
@@ -411,13 +464,42 @@ class VideoThumbnailFetcher(
     private fun generatedFrameFile(videoPath: String): java.io.File {
         val cacheDir = java.io.File(options.context.filesDir, "thumbnails")
         if (!cacheDir.exists()) cacheDir.mkdirs()
+        val generation = ImageCacheVersionStore.thumbnailGeneration(options.context)
+        val fileName = requestedFrameTimeMs?.let { frameTimeMs ->
+            generatedResumeFrameFileName(
+                path = videoPath,
+                generation = generation,
+                positionMs = frameTimeMs,
+                durationMs = requestedDurationMs,
+            )
+        } ?: generatedFrameFileName(
+            path = videoPath,
+            generation = generation,
+        )
         return java.io.File(
             cacheDir,
-            generatedFrameFileName(
-                path = videoPath,
-                generation = ImageCacheVersionStore.thumbnailGeneration(options.context),
-            ),
+            fileName,
         )
+    }
+
+    private fun deleteSupersededResumeFrames(
+        videoPath: String,
+        currentFile: java.io.File,
+    ) {
+        if (requestedFrameTimeMs == null) return
+        val generation = ImageCacheVersionStore.thumbnailGeneration(options.context)
+        val filePrefix = generatedResumeFrameFilePrefix(videoPath, generation)
+        currentFile.parentFile
+            ?.listFiles { candidate ->
+                candidate.isFile &&
+                        candidate.name.startsWith(filePrefix) &&
+                        candidate.absolutePath != currentFile.absolutePath
+            }
+            ?.forEach { previousFile ->
+                if (!previousFile.delete()) {
+                    Log.w(tag, "Could not delete superseded resume frame ${previousFile.absolutePath}")
+                }
+            }
     }
 
     private suspend fun cachedGeneratedFrameResult(
@@ -454,6 +536,7 @@ class VideoThumbnailFetcher(
             inferredDisplayProfile = inferredDisplayProfile,
         )
         currentCoroutineContext().ensureActive()
+        deleteSupersededResumeFrames(videoPath, localFile)
         return SourceFetchResult(
             source = ImageSource(file = localFile.toOkioPath(), fileSystem = FileSystem.SYSTEM),
             mimeType = "image/jpeg",
@@ -611,7 +694,14 @@ class VideoThumbnailFetcher(
 
     private fun buildThumbnailIdentityKey(path: String): String {
         val generation = ImageCacheVersionStore.thumbnailGeneration(options.context)
-        return buildGeneratedFrameIdentity(path, generation)
+        return requestedFrameTimeMs?.let { frameTimeMs ->
+            buildResumeFrameIdentity(
+                path = path,
+                generation = generation,
+                positionMs = frameTimeMs,
+                durationMs = requestedDurationMs,
+            )
+        } ?: buildGeneratedFrameIdentity(path, generation)
     }
 
     private suspend fun extractFrameDirectlyFromSmb(
@@ -627,7 +717,11 @@ class VideoThumbnailFetcher(
             val durationMs =
                 retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
                     ?.toLongOrNull() ?: 0L
-            val bitmap = extractBestThumbnailFrame(retriever, durationMs)
+            val bitmap = extractBestThumbnailFrame(
+                retriever = retriever,
+                durationMs = durationMs,
+                requestedTimeMs = requestedFrameTimeMs,
+            )
             if (bitmap != null) {
                 Log.d(
                     "VideoThumbnailFetcher",
@@ -732,15 +826,27 @@ class VideoThumbnailFetcher(
     private suspend fun extractBestThumbnailFrame(
         retriever: MediaMetadataRetriever,
         durationMs: Long,
+        requestedTimeMs: Long? = null,
     ): Bitmap? {
-        val candidateTimesUs = buildThumbnailCandidateTimesUs(durationMs)
-        val extractionOptions =
+        val candidateTimesUs = buildThumbnailCandidateTimesUs(
+            durationMs = durationMs,
+            requestedTimeMs = requestedTimeMs,
+        )
+        val extractionOptions = if (requestedTimeMs != null) {
+            listOf(
+                MediaMetadataRetriever.OPTION_CLOSEST,
+                MediaMetadataRetriever.OPTION_CLOSEST_SYNC,
+                MediaMetadataRetriever.OPTION_PREVIOUS_SYNC,
+                MediaMetadataRetriever.OPTION_NEXT_SYNC,
+            )
+        } else {
             listOf(
                 MediaMetadataRetriever.OPTION_CLOSEST_SYNC,
                 MediaMetadataRetriever.OPTION_PREVIOUS_SYNC,
                 MediaMetadataRetriever.OPTION_NEXT_SYNC,
                 MediaMetadataRetriever.OPTION_CLOSEST,
             )
+        }
 
         for (candidateTimeUs in candidateTimesUs) {
             for (option in extractionOptions) {
@@ -824,9 +930,21 @@ class VideoThumbnailFetcher(
     }
 
 
-    private fun buildThumbnailCandidateTimesUs(durationMs: Long): List<Long> {
+    private fun buildThumbnailCandidateTimesUs(
+        durationMs: Long,
+        requestedTimeMs: Long? = null,
+    ): List<Long> {
         val preferredTimeUs = computePreferredThumbnailTimeUs(durationMs)
         val durationUs = if (durationMs > 0L) durationMs * 1_000L else Long.MAX_VALUE
+
+        val requestedCandidates = requestedTimeMs?.let { positionMs ->
+            val normalizedPositionMs = normalizeResumeFrameTimeMs(positionMs, durationMs)
+            listOf(
+                normalizedPositionMs * 1_000L,
+                (normalizedPositionMs - 500L).coerceAtLeast(0L) * 1_000L,
+                (normalizedPositionMs + 500L) * 1_000L,
+            )
+        }.orEmpty()
 
         val explicitCandidates = listOf(
             preferredTimeUs,
@@ -852,7 +970,7 @@ class VideoThumbnailFetcher(
                 emptyList()
             }
 
-        return (explicitCandidates + percentageCandidates + listOf(0L))
+        return (requestedCandidates + explicitCandidates + percentageCandidates + listOf(0L))
             .map { candidate ->
                 if (durationUs == Long.MAX_VALUE) candidate else candidate.coerceIn(0L, durationUs)
             }
@@ -966,6 +1084,8 @@ class VideoThumbnailFetcher(
                 path = data.path,
                 options = options,
                 imageLoader = imageLoader,
+                requestedFrameTimeMs = data.frameTimeMs,
+                requestedDurationMs = data.durationMs,
             )
         }
     }
@@ -1005,9 +1125,54 @@ class VideoThumbnailFetcher(
     }
 
     companion object {
-        fun diskCacheKey(path: String): String {
+        fun diskCacheKey(
+            path: String,
+            frameTimeMs: Long? = null,
+            durationMs: Long = 0L,
+        ): String {
             val generation = ImageCacheVersionStore.thumbnailGeneration()
-            return buildGeneratedFrameIdentity(path, generation)
+            return frameTimeMs?.let { positionMs ->
+                buildResumeFrameIdentity(
+                    path = path,
+                    generation = generation,
+                    positionMs = positionMs,
+                    durationMs = durationMs,
+                )
+            } ?: buildGeneratedFrameIdentity(path, generation)
+        }
+
+        fun currentGeneratedFramePath(
+            context: android.content.Context,
+            videoPath: String,
+            thumbnailPath: String?,
+            frameTimeMs: Long? = null,
+            durationMs: Long = 0L,
+        ): String? {
+            val generation = ImageCacheVersionStore.thumbnailGeneration(context)
+            val expectedFileName = frameTimeMs?.let { positionMs ->
+                generatedResumeFrameFileName(
+                    path = videoPath,
+                    generation = generation,
+                    positionMs = positionMs,
+                    durationMs = durationMs,
+                )
+            } ?: generatedFrameFileName(
+                path = videoPath,
+                generation = generation,
+            )
+            val expected = java.io.File(
+                java.io.File(context.filesDir, "thumbnails"),
+                expectedFileName,
+            )
+            val actual = thumbnailPath?.let { java.io.File(it) }
+            return when {
+                actual != null &&
+                        actual.absolutePath == expected.absolutePath &&
+                        actual.isFile && actual.length() > 0L -> actual.absolutePath
+
+                expected.isFile && expected.length() > 0L -> expected.absolutePath
+                else -> null
+            }
         }
 
         fun isCurrentGeneratedFramePath(
@@ -1016,29 +1181,32 @@ class VideoThumbnailFetcher(
             thumbnailPath: String?,
         ): Boolean {
             if (thumbnailPath.isNullOrBlank()) return false
-            val expected = java.io.File(
-                java.io.File(context.filesDir, "thumbnails"),
-                generatedFrameFileName(
-                    path = videoPath,
-                    generation = ImageCacheVersionStore.thumbnailGeneration(context),
-                ),
-            )
-            val actual = java.io.File(thumbnailPath)
-            return actual.absolutePath == expected.absolutePath && actual.isFile && actual.length() > 0L
+            return currentGeneratedFramePath(
+                context = context,
+                videoPath = videoPath,
+                thumbnailPath = thumbnailPath,
+            ) == java.io.File(thumbnailPath).absolutePath
         }
 
         private fun createFetcherForPath(
             path: String,
             options: Options,
-            imageLoader: ImageLoader
+            imageLoader: ImageLoader,
+            requestedFrameTimeMs: Long? = null,
+            requestedDurationMs: Long = 0L,
         ): Fetcher? {
             Log.d("VideoThumbnailFetcher", "Factory checking path: $path")
 
             val isVideo = isVideoFile(path)
 
             // Check if item exists in disk cache.
-            val snapshot =
-                imageLoader.diskCache?.openSnapshot(diskCacheKey(path))
+            val snapshot = imageLoader.diskCache?.openSnapshot(
+                diskCacheKey(
+                    path = path,
+                    frameTimeMs = requestedFrameTimeMs,
+                    durationMs = requestedDurationMs,
+                )
+            )
             val isCached = snapshot != null
             snapshot?.close()
 
@@ -1057,7 +1225,12 @@ class VideoThumbnailFetcher(
                 "Creating fetcher with options: Disk=${options.diskCachePolicy}, Mem=${options.memoryCachePolicy}, Net=${options.networkCachePolicy}"
             )
 
-            return VideoThumbnailFetcher(path, options)
+            return VideoThumbnailFetcher(
+                data = path,
+                options = options,
+                requestedFrameTimeMs = requestedFrameTimeMs,
+                requestedDurationMs = requestedDurationMs,
+            )
         }
 
         private fun isVideoFile(path: String): Boolean {

@@ -1623,15 +1623,15 @@ private fun HomeVideoCard(
         videoPath = video.filePath,
     )
     val posterUrl = (artworkSelection as? VideoArtworkSelection.Poster)?.url
-    val validGeneratedFramePath = if (
-        artworkSelection is VideoArtworkSelection.GeneratedFrame &&
-        VideoThumbnailFetcher.isCurrentGeneratedFramePath(
+    val resumeFrameTimeMs = video.lastPosition.takeIf { showProgress && it > 0L }
+    val validGeneratedFramePath = if (artworkSelection is VideoArtworkSelection.GeneratedFrame) {
+        VideoThumbnailFetcher.currentGeneratedFramePath(
             context = context,
             videoPath = video.filePath,
             thumbnailPath = video.thumbnailPath,
+            frameTimeMs = resumeFrameTimeMs,
+            durationMs = video.duration,
         )
-    ) {
-        video.thumbnailPath
     } else {
         null
     }
@@ -1639,7 +1639,11 @@ private fun HomeVideoCard(
         is VideoArtworkSelection.Poster -> artworkSelection.url
         is VideoArtworkSelection.GeneratedFrame -> {
             validGeneratedFramePath ?: if (sourceMatches) {
-                VideoThumbnailFetcher.Model(artworkSelection.videoPath)
+                VideoThumbnailFetcher.Model(
+                    path = artworkSelection.videoPath,
+                    frameTimeMs = resumeFrameTimeMs,
+                    durationMs = video.duration,
+                )
             } else {
                 null
             }
@@ -1650,7 +1654,11 @@ private fun HomeVideoCard(
     val thumbnailDiskCacheKey = when (artworkSelection) {
         is VideoArtworkSelection.Poster -> buildFilePosterCacheKey(video.fileName, artworkSelection.url)
         is VideoArtworkSelection.GeneratedFrame -> {
-            validGeneratedFramePath ?: VideoThumbnailFetcher.diskCacheKey(artworkSelection.videoPath)
+            validGeneratedFramePath ?: VideoThumbnailFetcher.diskCacheKey(
+                path = artworkSelection.videoPath,
+                frameTimeMs = resumeFrameTimeMs,
+                durationMs = video.duration,
+            )
         }
 
         VideoArtworkSelection.Placeholder -> null
