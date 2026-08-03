@@ -153,7 +153,9 @@ private val IMMERSIVE_REVEAL_FOLLOW_DISTANCE = 480.dp
 private const val IMMERSIVE_REVEAL_FRONT_FACTOR = 0.86f
 private val IMMERSIVE_SUBTITLE_PANEL_WIDTH = 1280.dp
 private val IMMERSIVE_SUBTITLE_PANEL_HEIGHT = 720.dp
-private val IMMERSIVE_SUBTITLE_BASE_UP_OFFSET = 260.dp
+// Keep the subtitle baseline low enough that the minimum user offset can sit near
+// the bottom of the immersive field of view without changing saved preferences.
+private val IMMERSIVE_SUBTITLE_BASE_UP_OFFSET = 180.dp
 private val IMMERSIVE_SEEK_PREVIEW_WIDTH = 520.dp
 private val IMMERSIVE_SEEK_PREVIEW_HEIGHT = 292.dp
 private val IMMERSIVE_SEEK_PREVIEW_UP_OFFSET = 330.dp
@@ -756,6 +758,7 @@ fun SpatialVideoPlayerContent(
                             density = density,
                             activeMenu = playerState.activePlaybackMenu,
                             videoFormat = playerState.videoFormat,
+                            stereoMode = playerState.stereoMode,
                             horizontalOffsetMeters = playerState.immersiveUiHorizontalOffsetMeters,
                         ),
                     ) {
@@ -1328,6 +1331,7 @@ private fun buildImmersivePlaybackMenuModifier(
     density: Density,
     activeMenu: PlaybackMenu,
     videoFormat: VideoFormat,
+    stereoMode: blackark.app.vr.ui.viewmodel.StereoMode,
     horizontalOffsetMeters: Float,
 ): SubspaceModifier {
     val panelWidth =
@@ -1336,6 +1340,18 @@ private fun buildImmersivePlaybackMenuModifier(
     val menuUpOffset =
         (IMMERSIVE_CONTROLS_PANEL_HEIGHT + panelHeight) / 2f +
             IMMERSIVE_MENU_CONTROLS_GAP
+    val controlsPanelWidth =
+        if (stereoMode == blackark.app.vr.ui.viewmodel.StereoMode.Mono) {
+            IMMERSIVE_CONTROLS_PANEL_WIDTH_MONO
+        } else {
+            IMMERSIVE_CONTROLS_PANEL_WIDTH_STEREO
+        }
+    val menuRightOffset =
+        resolveImmersivePlaybackMenuRightOffset(
+            activeMenu = activeMenu,
+            controlsPanelWidth = controlsPanelWidth,
+            menuPanelWidth = panelWidth,
+        )
     val baseModifier =
         SubspaceModifier
             .width(panelWidth)
@@ -1348,7 +1364,11 @@ private fun buildImmersivePlaybackMenuModifier(
             dpPerMeter = 1.meters.toDp().value,
         )
     val worldUp = rotation * Vector3.Up
+    val worldRight = rotation * Vector3.Right
     val worldForward = rotation * Vector3.Forward
+    val menuRightX = (worldRight.x * menuRightOffset.value).dp
+    val menuRightY = (worldRight.y * menuRightOffset.value).dp
+    val menuRightZ = (worldRight.z * menuRightOffset.value).dp
     val menuUpX = (worldUp.x * menuUpOffset.value).dp
     val menuUpY = (worldUp.y * menuUpOffset.value).dp
     val menuUpZ = (worldUp.z * menuUpOffset.value).dp
@@ -1358,9 +1378,10 @@ private fun buildImmersivePlaybackMenuModifier(
 
     if (dashboardPanelPose == null) {
         return baseModifier.offset(
-            x = horizontalOffsetDp.x.dp + menuUpX + menuFrontX,
-            y = IMMERSIVE_CONTROLS_DOWN_OFFSET + horizontalOffsetDp.y.dp + menuUpY + menuFrontY,
-            z = horizontalOffsetDp.z.dp + menuUpZ + menuFrontZ,
+            x = horizontalOffsetDp.x.dp + menuRightX + menuUpX + menuFrontX,
+            y = IMMERSIVE_CONTROLS_DOWN_OFFSET + horizontalOffsetDp.y.dp +
+                menuRightY + menuUpY + menuFrontY,
+            z = horizontalOffsetDp.z.dp + menuRightZ + menuUpZ + menuFrontZ,
         )
     }
 
@@ -1376,12 +1397,23 @@ private fun buildImmersivePlaybackMenuModifier(
 
     return baseModifier
         .offset(
-            x = anchoredX + horizontalOffsetDp.x.dp + menuUpX + menuFrontX,
-            y = anchoredY + horizontalOffsetDp.y.dp + menuUpY + menuFrontY,
-            z = anchoredZ + horizontalOffsetDp.z.dp + menuUpZ + menuFrontZ,
+            x = anchoredX + horizontalOffsetDp.x.dp + menuRightX + menuUpX + menuFrontX,
+            y = anchoredY + horizontalOffsetDp.y.dp + menuRightY + menuUpY + menuFrontY,
+            z = anchoredZ + horizontalOffsetDp.z.dp + menuRightZ + menuUpZ + menuFrontZ,
         )
         .rotate(rotation)
 }
+
+internal fun resolveImmersivePlaybackMenuRightOffset(
+    activeMenu: PlaybackMenu,
+    controlsPanelWidth: Dp,
+    menuPanelWidth: Dp,
+): Dp =
+    if (activeMenu == PlaybackMenu.Display) {
+        (controlsPanelWidth + menuPanelWidth) / 2f + IMMERSIVE_MENU_CONTROLS_GAP
+    } else {
+        0.dp
+    }
 
 internal fun resolveImmersivePlaybackMenuPanelHeight(
     activeMenu: PlaybackMenu,

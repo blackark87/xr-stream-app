@@ -53,9 +53,9 @@ import blackark.app.vr.utils.ThumbnailImageLoaderProvider
 import blackark.app.vr.utils.VideoFramePreviewExtractor
 import blackark.app.vr.utils.VideoThumbnailFetcher
 import blackark.app.vr.utils.inferDisplayProfileFromFrame
-import blackark.app.vr.utils.normalizeImmersiveSubtitleDistanceMeters
 import blackark.app.vr.utils.normalizeImmersiveSubtitleVerticalOffsetMeters
 import blackark.app.vr.utils.normalizeImmersiveUiHorizontalOffsetMeters
+import blackark.app.vr.utils.snapImmersiveSubtitleDistanceMeters
 import coil3.request.ImageRequest
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -421,7 +421,7 @@ class VideoPlayerViewModel(
     }
 
     fun setImmersiveSubtitleDistanceMeters(distanceMeters: Float) {
-        val normalizedDistance = normalizeImmersiveSubtitleDistanceMeters(distanceMeters)
+        val normalizedDistance = snapImmersiveSubtitleDistanceMeters(distanceMeters)
         if (_state.value.immersiveSubtitleDistanceMeters == normalizedDistance) return
 
         _state.value = _state.value.copy(
@@ -2486,9 +2486,12 @@ class VideoPlayerViewModel(
         scheduleControlsAutoHideIfNeeded()
     }
 
+    fun setZoomLevel(zoomLevel: Float) {
+        _state.value = _state.value.copy(zoomLevel = zoomLevel.coerceIn(0.5f, 3.0f))
+    }
+
     fun adjustZoom(delta: Float) {
-        val newZoom = (_state.value.zoomLevel + delta).coerceIn(0.5f, 3.0f)
-        _state.value = _state.value.copy(zoomLevel = newZoom)
+        setZoomLevel(_state.value.zoomLevel + delta)
     }
 
     fun togglePlayPause() {

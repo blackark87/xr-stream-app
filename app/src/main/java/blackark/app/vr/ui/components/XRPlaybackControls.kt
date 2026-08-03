@@ -113,6 +113,7 @@ fun XRPlaybackControls(
 ) {
     var isScrubbing by remember { mutableStateOf(false) }
     var isVolumeScrubbing by remember { mutableStateOf(false) }
+    var isFovScrubbing by remember { mutableStateOf(false) }
     var isSubtitleDepthScrubbing by remember { mutableStateOf(false) }
     var isSubtitleVerticalScrubbing by remember { mutableStateOf(false) }
     var isImmersiveUiHorizontalScrubbing by remember { mutableStateOf(false) }
@@ -171,6 +172,9 @@ fun XRPlaybackControls(
                 videoPlayerViewModel.endControlsInputLock()
             }
             if (isVolumeScrubbing) {
+                videoPlayerViewModel.endControlsInputLock()
+            }
+            if (isFovScrubbing) {
                 videoPlayerViewModel.endControlsInputLock()
             }
             if (isSubtitleDepthScrubbing) {
@@ -460,22 +464,44 @@ fun XRPlaybackControls(
                             if (playerState.videoFormat != VideoFormat.Format2D) {
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
-                                    Button(
-                                        onClick = { videoPlayerViewModel.adjustZoom(-0.1f) },
-                                        modifier = Modifier.weight(1f),
-                                    ) { Text("FOV -") }
+                                    Text(
+                                        text = "FOV",
+                                        style = MaterialTheme.typography.labelLarge,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = textMuted,
+                                    )
                                     Text(
                                         text = "${(playerState.zoomLevel * 100).roundToInt()}%",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.SemiBold,
                                         color = textStrong,
                                     )
-                                    Button(
-                                        onClick = { videoPlayerViewModel.adjustZoom(0.1f) },
-                                        modifier = Modifier.weight(1f),
-                                    ) { Text("FOV +") }
                                 }
+                                Slider(
+                                    value = playerState.zoomLevel,
+                                    onValueChange = { zoomLevel ->
+                                        if (!isFovScrubbing) {
+                                            videoPlayerViewModel.beginControlsInputLock()
+                                        }
+                                        isFovScrubbing = true
+                                        videoPlayerViewModel.setZoomLevel(zoomLevel)
+                                    },
+                                    onValueChangeFinished = {
+                                        isFovScrubbing = false
+                                        videoPlayerViewModel.endControlsInputLock()
+                                    },
+                                    valueRange = 0.5f..3.0f,
+                                    steps = 24,
+                                    colors = SliderDefaults.colors(
+                                        thumbColor = accentStrong,
+                                        activeTrackColor = accentStrong,
+                                        inactiveTrackColor = accentSoft,
+                                    ),
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
                                 Text(
                                     text = "Stereo",
                                     style = MaterialTheme.typography.labelLarge,
@@ -552,7 +578,7 @@ fun XRPlaybackControls(
                                     modifier = Modifier.fillMaxWidth(),
                                 )
                                 Text(
-                                    text = "Fine-tune in 1 cm steps until both eyes see one subtitle.",
+                                    text = "Adjust in 0.1 m steps until both eyes see one subtitle.",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = textMuted,
                                 )
@@ -1345,8 +1371,8 @@ private fun prettyStereoMode(mode: StereoMode): String = when (mode) {
 }
 
 private fun prettySubtitleDistance(distanceMeters: Float): String {
-    val hundredths = (distanceMeters * 100f).roundToInt()
-    return "${hundredths / 100}.${(hundredths % 100).toString().padStart(2, '0')} m"
+    val tenths = (distanceMeters * 10f).roundToInt()
+    return "${tenths / 10}.${tenths % 10} m"
 }
 
 private fun prettyImmersiveUiHorizontalOffset(offsetMeters: Float): String {

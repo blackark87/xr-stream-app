@@ -8,9 +8,9 @@ class ImmersiveSubtitleSettingsTest {
 
     @Test
     fun `invalid and out of range distances are normalized`() {
-        assertEquals(124, IMMERSIVE_SUBTITLE_DISTANCE_SLIDER_STEPS)
+        assertEquals(12, IMMERSIVE_SUBTITLE_DISTANCE_SLIDER_STEPS)
         assertEquals(
-            0.01f,
+            IMMERSIVE_SUBTITLE_DISTANCE_STEP_METERS,
             (MAX_IMMERSIVE_SUBTITLE_DISTANCE_METERS -
                     MIN_IMMERSIVE_SUBTITLE_DISTANCE_METERS) /
                     (IMMERSIVE_SUBTITLE_DISTANCE_SLIDER_STEPS + 1),
@@ -29,6 +29,16 @@ class ImmersiveSubtitleSettingsTest {
         assertEquals(
             MAX_IMMERSIVE_SUBTITLE_DISTANCE_METERS,
             normalizeImmersiveSubtitleDistanceMeters(8.0f),
+            0.0001f,
+        )
+        assertEquals(
+            1.0f,
+            snapImmersiveSubtitleDistanceMeters(1.01f),
+            0.0001f,
+        )
+        assertEquals(
+            1.1f,
+            snapImmersiveSubtitleDistanceMeters(1.06f),
             0.0001f,
         )
     }

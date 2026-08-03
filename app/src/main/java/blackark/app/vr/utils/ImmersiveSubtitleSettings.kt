@@ -1,12 +1,14 @@
 package blackark.app.vr.utils
 
 import androidx.xr.runtime.math.Vector3
+import kotlin.math.roundToInt
 
-const val MIN_IMMERSIVE_SUBTITLE_DISTANCE_METERS = 0.75f
+const val MIN_IMMERSIVE_SUBTITLE_DISTANCE_METERS = 0.7f
 const val MAX_IMMERSIVE_SUBTITLE_DISTANCE_METERS = 2.0f
 const val DEFAULT_IMMERSIVE_SUBTITLE_DISTANCE_METERS = 1.5f
 const val IMMERSIVE_SUBTITLE_REFERENCE_DISTANCE_METERS = 1.75f
-const val IMMERSIVE_SUBTITLE_DISTANCE_SLIDER_STEPS = 124
+const val IMMERSIVE_SUBTITLE_DISTANCE_STEP_METERS = 0.1f
+const val IMMERSIVE_SUBTITLE_DISTANCE_SLIDER_STEPS = 12
 const val MIN_IMMERSIVE_UI_HORIZONTAL_OFFSET_METERS = -0.30f
 const val MAX_IMMERSIVE_UI_HORIZONTAL_OFFSET_METERS = 0.30f
 const val DEFAULT_IMMERSIVE_UI_HORIZONTAL_OFFSET_METERS = -0.10f
@@ -36,6 +38,13 @@ internal fun normalizeImmersiveSubtitleDistanceMeters(distanceMeters: Float): Fl
         MIN_IMMERSIVE_SUBTITLE_DISTANCE_METERS,
         MAX_IMMERSIVE_SUBTITLE_DISTANCE_METERS,
     )
+}
+
+internal fun snapImmersiveSubtitleDistanceMeters(distanceMeters: Float): Float {
+    val normalizedDistance = normalizeImmersiveSubtitleDistanceMeters(distanceMeters)
+    return (
+        normalizedDistance / IMMERSIVE_SUBTITLE_DISTANCE_STEP_METERS
+    ).roundToInt() * IMMERSIVE_SUBTITLE_DISTANCE_STEP_METERS
 }
 
 internal fun normalizeImmersiveUiHorizontalOffsetMeters(offsetMeters: Float): Float {

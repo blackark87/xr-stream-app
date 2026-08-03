@@ -137,4 +137,22 @@ class PlaybackLayerPolicyTest {
             ) == 620.dp
         )
     }
+
+    @Test
+    fun `immersive display panel is placed to the right of playback controls`() {
+        assertTrue(
+            resolveImmersivePlaybackMenuRightOffset(
+                activeMenu = PlaybackMenu.Display,
+                controlsPanelWidth = 1460.dp,
+                menuPanelWidth = 516.dp,
+            ) == 1008.dp
+        )
+        assertTrue(
+            resolveImmersivePlaybackMenuRightOffset(
+                activeMenu = PlaybackMenu.Speed,
+                controlsPanelWidth = 1460.dp,
+                menuPanelWidth = 372.dp,
+            ) == 0.dp
+        )
+    }
 }
