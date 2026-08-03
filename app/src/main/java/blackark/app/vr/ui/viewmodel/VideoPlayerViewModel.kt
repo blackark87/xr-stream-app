@@ -150,8 +150,6 @@ data class VideoPlayerState(
         DEFAULT_IMMERSIVE_UI_HORIZONTAL_OFFSET_METERS,
     val subtitleCues: List<Cue> = emptyList(),
     val externalSubtitleFileName: String? = null,
-    val repeatPointA: Long? = null,
-    val repeatPointB: Long? = null,
     val audioTracks: List<PlayerTrackOption> = emptyList(),
     val textTracks: List<PlayerTrackOption> = emptyList(),
 )
@@ -344,33 +342,6 @@ class VideoPlayerViewModel(
                     "external=${currentState.externalSubtitleFileName ?: "none"}",
         )
         player?.currentTracks?.let(::logSubtitleTrackState)
-        scheduleControlsAutoHideIfNeeded()
-    }
-
-    fun setRepeatPointA() {
-        val position = exoPlayer?.currentPosition?.coerceAtLeast(0L) ?: return
-        val current = _state.value
-        _state.value = current.copy(
-            repeatPointA = position,
-            repeatPointB = current.repeatPointB?.takeIf { it > position },
-        )
-        keepControlsVisibleWhileNotPlaying()
-    }
-
-    fun setRepeatPointB() {
-        val position = exoPlayer?.currentPosition?.coerceAtLeast(0L) ?: return
-        val current = _state.value
-        val pointA = current.repeatPointA
-        _state.value = if (pointA == null || position <= pointA) {
-            current.copy(repeatPointA = position, repeatPointB = null)
-        } else {
-            current.copy(repeatPointB = position)
-        }
-        keepControlsVisibleWhileNotPlaying()
-    }
-
-    fun clearRepeatRange() {
-        _state.value = _state.value.copy(repeatPointA = null, repeatPointB = null)
         scheduleControlsAutoHideIfNeeded()
     }
 
@@ -1511,8 +1482,6 @@ class VideoPlayerViewModel(
                     immersiveUiHorizontalOffsetMeters = initialImmersiveUiHorizontalOffsetMeters,
                     subtitleCues = emptyList(),
                     externalSubtitleFileName = null,
-                    repeatPointA = null,
-                    repeatPointB = null,
                     audioTracks = emptyList(),
                     textTracks = emptyList(),
                 )
@@ -2436,14 +2405,6 @@ class VideoPlayerViewModel(
         positionTrackingJob = viewModelScope.launch {
             while (isActive) {
                 exoPlayer?.let { player ->
-                    val repeatA = _state.value.repeatPointA
-                    val repeatB = _state.value.repeatPointB
-                    if (
-                        repeatA != null && repeatB != null &&
-                        repeatB > repeatA && player.currentPosition >= repeatB
-                    ) {
-                        player.seekTo(repeatA)
-                    }
                     _state.value = _state.value.copy(
                         currentPosition = player.currentPosition,
                         duration = player.duration,
