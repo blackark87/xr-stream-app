@@ -49,11 +49,14 @@ import blackark.app.vr.utils.DEFAULT_IMMERSIVE_SUBTITLE_VERTICAL_OFFSET_METERS
 import blackark.app.vr.utils.DEFAULT_IMMERSIVE_UI_HORIZONTAL_OFFSET_METERS
 import blackark.app.vr.utils.InferredDisplayProfile
 import blackark.app.vr.utils.SubtitleFontCatalog
+import blackark.app.vr.utils.ThumbnailImageLoaderProvider
 import blackark.app.vr.utils.VideoFramePreviewExtractor
+import blackark.app.vr.utils.VideoThumbnailFetcher
 import blackark.app.vr.utils.inferDisplayProfileFromFrame
 import blackark.app.vr.utils.normalizeImmersiveSubtitleDistanceMeters
 import blackark.app.vr.utils.normalizeImmersiveSubtitleVerticalOffsetMeters
 import blackark.app.vr.utils.normalizeImmersiveUiHorizontalOffsetMeters
+import coil3.request.ImageRequest
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -2560,12 +2563,18 @@ class VideoPlayerViewModel(
 
         val player = exoPlayer
         val videoId = currentVideoId
+        val resumeVideoPath = _state.value.videoFile?.path
+        var resumePositionMs = 0L
+        var resumeDurationMs = 0L
         if (player != null && videoId != null) {
+            val currentPosition = player.currentPosition
+            val duration = if (player.duration > 0) player.duration else 0L
+            resumePositionMs = currentPosition
+            resumeDurationMs = duration
             try {
-                val duration = if (player.duration > 0) player.duration else 0L
                 videoRepository.updatePlaybackState(
                     videoId = videoId,
-                    position = player.currentPosition,
+                    position = currentPosition,
                     duration = duration,
                     timestamp = System.currentTimeMillis()
                 )
@@ -2574,6 +2583,11 @@ class VideoPlayerViewModel(
         }
 
         player?.release()
+        scheduleResumeFrameThumbnail(
+            videoPath = resumeVideoPath,
+            positionMs = resumePositionMs,
+            durationMs = resumeDurationMs,
+        )
         exoPlayer = null
         _playerFlow.value = null
         _state.value = _state.value.copy(
@@ -2673,8 +2687,59 @@ class VideoPlayerViewModel(
                         timestamp = System.currentTimeMillis(),
                     )
                 }
+                scheduleResumeFrameThumbnail(
+                    videoPath = previewVideoPath,
+                    positionMs = currentPosition,
+                    durationMs = duration,
+                )
             }
             runCatching { VideoFramePreviewExtractor.clearPreparedVideo(previewVideoPath) }
+        }
+    }
+
+    private fun scheduleResumeFrameThumbnail(
+        videoPath: String?,
+        positionMs: Long,
+        durationMs: Long,
+    ) {
+        val context = appContext ?: return
+        val path = videoPath?.takeIf { it.isNotBlank() } ?: return
+        if (positionMs <= 0L) return
+        if (durationMs > 0L && positionMs >= durationMs * 95L / 100L) return
+
+        val request = ImageRequest.Builder(context)
+            .data(
+                VideoThumbnailFetcher.Model(
+                    path = path,
+                    frameTimeMs = positionMs,
+                    durationMs = durationMs,
+                )
+            )
+            .diskCacheKey(
+                VideoThumbnailFetcher.diskCacheKey(
+                    path = path,
+                    frameTimeMs = positionMs,
+                    durationMs = durationMs,
+                )
+            )
+            .build()
+
+        teardownScope.launch {
+            runCatching {
+                ThumbnailImageLoaderProvider.get(context).execute(request)
+            }.onSuccess { result ->
+                Log.d(
+                    PLAYER_LOG_TAG,
+                    "Resume thumbnail request completed path=$path positionMs=$positionMs " +
+                            "result=${result::class.java.simpleName}",
+                )
+            }.onFailure { error ->
+                Log.w(
+                    PLAYER_LOG_TAG,
+                    "Resume thumbnail request failed path=$path positionMs=$positionMs",
+                    error,
+                )
+            }
         }
     }
 

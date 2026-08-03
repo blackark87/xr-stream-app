@@ -32,4 +32,38 @@ class VideoThumbnailFrameIdentityTest {
             ),
         )
     }
+
+    @Test
+    fun `resume frame identity includes exact part and stopped position`() {
+        assertNotEquals(
+            generatedResumeFrameFileName(
+                path = "smb://server/share/CODE-123-pt-1.mp4",
+                generation = 7,
+                positionMs = 61_200L,
+            ),
+            generatedResumeFrameFileName(
+                path = "smb://server/share/CODE-123-pt-2.mp4",
+                generation = 7,
+                positionMs = 61_200L,
+            ),
+        )
+        assertNotEquals(
+            generatedResumeFrameFileName(
+                path = "smb://server/share/CODE-123-pt-1.mp4",
+                generation = 7,
+                positionMs = 61_200L,
+            ),
+            generatedResumeFrameFileName(
+                path = "smb://server/share/CODE-123-pt-1.mp4",
+                generation = 7,
+                positionMs = 62_200L,
+            ),
+        )
+    }
+
+    @Test
+    fun `resume frame time is bucketed and clamped before video end`() {
+        assertEquals(61_000L, normalizeResumeFrameTimeMs(61_987L, durationMs = 120_000L))
+        assertEquals(119_000L, normalizeResumeFrameTimeMs(120_000L, durationMs = 120_000L))
+    }
 }
