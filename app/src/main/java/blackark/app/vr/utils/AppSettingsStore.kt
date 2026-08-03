@@ -123,7 +123,7 @@ object AppSettingsStore {
     }
 
     fun getImmersiveSubtitleDistanceMeters(context: Context): Float {
-        return normalizeImmersiveSubtitleDistanceMeters(
+        return snapImmersiveSubtitleDistanceMeters(
             prefs(context).getFloat(
                 KEY_IMMERSIVE_SUBTITLE_DISTANCE_METERS,
                 DEFAULT_IMMERSIVE_SUBTITLE_DISTANCE_METERS,
@@ -136,7 +136,7 @@ object AppSettingsStore {
             .edit()
             .putFloat(
                 KEY_IMMERSIVE_SUBTITLE_DISTANCE_METERS,
-                normalizeImmersiveSubtitleDistanceMeters(distanceMeters),
+                snapImmersiveSubtitleDistanceMeters(distanceMeters),
             )
             .apply()
     }
