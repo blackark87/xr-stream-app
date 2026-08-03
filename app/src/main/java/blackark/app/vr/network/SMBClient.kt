@@ -24,7 +24,8 @@ data class SMBFileItem(
     val path: String,
     val isDirectory: Boolean,
     val size: Long,
-    val lastModified: Long
+    val lastModified: Long,
+    val trailerPath: String? = null,
 )
 
 class SMBClient(private val config: SMBConfig) {

@@ -139,13 +139,13 @@ class PlaybackLayerPolicyTest {
     }
 
     @Test
-    fun `immersive display panel is placed to the right of playback controls`() {
+    fun `immersive display panel right edge aligns with playback controls`() {
         assertTrue(
             resolveImmersivePlaybackMenuRightOffset(
                 activeMenu = PlaybackMenu.Display,
                 controlsPanelWidth = 1460.dp,
-                menuPanelWidth = 516.dp,
-            ) == 1008.dp
+                menuPanelWidth = 420.dp,
+            ) == 520.dp
         )
         assertTrue(
             resolveImmersivePlaybackMenuRightOffset(
@@ -153,6 +153,31 @@ class PlaybackLayerPolicyTest {
                 controlsPanelWidth = 1460.dp,
                 menuPanelWidth = 372.dp,
             ) == 0.dp
+        )
+    }
+
+    @Test
+    fun `visible immersive controls enable head follow`() {
+        assertTrue(
+            shouldEnablePlaybackUiHeadFollow(
+                isTwoDimensional = false,
+                isImmersive = true,
+                showControlsLayer = true,
+            )
+        )
+        assertFalse(
+            shouldEnablePlaybackUiHeadFollow(
+                isTwoDimensional = false,
+                isImmersive = true,
+                showControlsLayer = false,
+            )
+        )
+        assertTrue(
+            shouldEnablePlaybackUiHeadFollow(
+                isTwoDimensional = true,
+                isImmersive = false,
+                showControlsLayer = true,
+            )
         )
     }
 }

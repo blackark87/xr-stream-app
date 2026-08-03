@@ -350,7 +350,17 @@ class VideoPlayerViewModel(
 
     fun recenterView() {
         blackark.app.vr.AppState.resetDashboardPanelPlacement()
-        _state.value = _state.value.copy(zoomLevel = 1.0f)
+        _state.value = _state.value.copy(
+            zoomLevel = 1.0f,
+            immersiveUiHorizontalOffsetMeters = 0.0f,
+        )
+        appContext?.let { context ->
+            AppSettingsStore.setImmersiveUiHorizontalOffsetMeters(context, 0.0f)
+        }
+        Log.i(
+            PLAYER_LOG_TAG,
+            "$PLAYBACK_CONTROL_LOG_PREFIX recenter headFollow=true horizontalOffset=0.0m",
+        )
         scheduleControlsAutoHideIfNeeded()
     }
 
