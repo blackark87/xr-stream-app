@@ -2376,6 +2376,8 @@ class VideoPlayerViewModel(
             // Update existing history row while preserving resume state.
             val updatedVideo = existingVideo.copy(
                 fileName = videoFile.name,
+                serverAddress = serverAddress,
+                shareName = shareName,
                 lastPlayed = System.currentTimeMillis(),
             )
             videoRepository.updateVideo(updatedVideo)
