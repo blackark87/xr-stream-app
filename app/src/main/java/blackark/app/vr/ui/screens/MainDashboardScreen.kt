@@ -19,6 +19,10 @@ import android.widget.TextView
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
@@ -118,7 +122,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -272,6 +275,7 @@ private enum class PrimaryDestination {
     Home,
     LocalFiles,
     SmbFiles,
+    Library,
     YouTube,
     Settings,
 }
@@ -295,9 +299,16 @@ private enum class DashboardWidthClass {
 
 private enum class FileWorkspaceMode {
     Browser,
-    Library,
     Av,
 }
+
+private data class DashboardContentState(
+    val destination: PrimaryDestination,
+    val workspaceMode: FileWorkspaceMode,
+    val isLocalConnected: Boolean,
+    val isSmbConnected: Boolean,
+    val selectedSource: SavedServer?,
+)
 
 private enum class SettingsAction {
     ClearArtwork,
@@ -345,6 +356,7 @@ private fun PrimaryDestination.icon(): ImageVector = when (this) {
     PrimaryDestination.Home -> Icons.Filled.Home
     PrimaryDestination.LocalFiles -> Icons.Filled.FolderOpen
     PrimaryDestination.SmbFiles -> Icons.Filled.Cloud
+    PrimaryDestination.Library -> Icons.Filled.Favorite
     PrimaryDestination.YouTube -> Icons.Filled.Movie
     PrimaryDestination.Settings -> Icons.Filled.Settings
 }
@@ -354,6 +366,7 @@ private fun PrimaryDestination.localizedLabel(): String = when (this) {
     PrimaryDestination.Home -> stringResource(R.string.home)
     PrimaryDestination.LocalFiles -> stringResource(R.string.local_files)
     PrimaryDestination.SmbFiles -> stringResource(R.string.smb_files)
+    PrimaryDestination.Library -> stringResource(R.string.library)
     PrimaryDestination.YouTube -> stringResource(R.string.youtube)
     PrimaryDestination.Settings -> stringResource(R.string.settings)
 }
@@ -421,6 +434,7 @@ private fun resolveSourceTitle(
     PrimaryDestination.SmbFiles -> selectedServer?.serverName?.takeIf { it.isNotBlank() }
         ?: "SMB Files"
 
+    PrimaryDestination.Library -> "Library"
     PrimaryDestination.YouTube -> "YouTube"
     PrimaryDestination.Settings -> "Settings"
 }
@@ -444,6 +458,7 @@ private fun resolveSourceBreadcrumb(
         else -> null
     }
 
+    PrimaryDestination.Library,
     PrimaryDestination.YouTube,
     PrimaryDestination.Settings -> null
 }
@@ -718,16 +733,17 @@ private fun DashboardSourceRail(
 ) {
     Surface(
         modifier = modifier
-            .width(112.dp)
-            .height(420.dp)
-            .clip(RoundedCornerShape(28.dp)),
-        color = CardBackground.copy(alpha = 0.96f),
-        shape = RoundedCornerShape(28.dp),
-        tonalElevation = 6.dp,
-        shadowElevation = 12.dp,
+            .width(124.dp)
+            .fillMaxHeight(),
+        color = MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.58f),
+        shape = RoundedCornerShape(18.dp),
+        tonalElevation = 0.dp,
+        shadowElevation = 0.dp,
     ) {
         NavigationRail(
-            modifier = Modifier.padding(vertical = 8.dp),
+            modifier = Modifier
+                .fillMaxHeight()
+                .padding(vertical = 14.dp),
             containerColor = Color.Transparent,
         ) {
             PrimaryDestination.entries.forEach { mode ->
@@ -800,116 +816,6 @@ private fun DashboardSourceBar(
                     alwaysShowLabel = selectedMode == mode,
                 )
             }
-        }
-    }
-}
-
-@Composable
-private fun LibraryOrbiterRail(
-    isSelected: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Surface(
-        modifier = modifier
-            .width(156.dp)
-            .clip(RoundedCornerShape(22.dp)),
-        color = CardBackground.copy(alpha = 0.92f),
-        shape = RoundedCornerShape(22.dp),
-        tonalElevation = 6.dp,
-        shadowElevation = 12.dp,
-    ) {
-        Box(modifier = Modifier.padding(10.dp)) {
-            OrbiterRailButton(
-                label = stringResource(R.string.library),
-                icon = Icons.Filled.Favorite,
-                selected = isSelected,
-                onClick = onClick,
-            )
-        }
-    }
-}
-
-@Composable
-private fun LibraryOrbiterBar(
-    isSelected: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Surface(
-        modifier = modifier.clip(RoundedCornerShape(24.dp)),
-        color = CardBackground.copy(alpha = 0.94f),
-        shape = RoundedCornerShape(24.dp),
-        tonalElevation = 6.dp,
-        shadowElevation = 12.dp,
-    ) {
-        DashboardHeaderChip(
-            text = stringResource(R.string.library),
-            icon = Icons.Filled.Favorite,
-            selected = isSelected,
-            onClick = onClick,
-            modifier = Modifier.padding(6.dp),
-        )
-    }
-}
-
-@Composable
-private fun OrbiterRailButton(
-    label: String,
-    icon: ImageVector,
-    selected: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val interactionSource = remember { MutableInteractionSource() }
-    val isHovered by interactionSource.collectIsHoveredAsState()
-    val isFocused by interactionSource.collectIsFocusedAsState()
-    val isActive = selected || isHovered || isFocused
-
-    Surface(
-        modifier = modifier
-            .fillMaxWidth()
-            .height(50.dp)
-            .clip(RoundedCornerShape(18.dp))
-            .clickable(
-                interactionSource = interactionSource,
-                indication = null,
-                onClick = onClick,
-            ),
-        color = if (isActive) {
-            MaterialTheme.colorScheme.primary.copy(alpha = if (selected) 0.18f else 0.1f)
-        } else {
-            CardBackgroundHover.copy(alpha = 0.92f)
-        },
-        shape = RoundedCornerShape(18.dp),
-        tonalElevation = if (isActive) 4.dp else 2.dp,
-        border = BorderStroke(
-            1.dp,
-            if (isActive) {
-                MaterialTheme.colorScheme.primary.copy(alpha = if (selected) 0.62f else 0.38f)
-            } else {
-                DividerGray.copy(alpha = 0.76f)
-            },
-        ),
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 12.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = label,
-                tint = if (selected) MaterialTheme.colorScheme.primary else TextSecondary,
-                modifier = Modifier.size(22.dp),
-            )
-            Text(
-                text = label,
-                style = MaterialTheme.typography.labelLarge,
-                color = if (isActive) TextPrimary else TextSecondary,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
         }
     }
 }
@@ -1225,11 +1131,8 @@ private fun HomePanel(
     metadataRefreshToken: Long,
     onContinueClick: (RecentVideo) -> Unit,
     onContinueRemove: (RecentVideo) -> Unit,
-    onFavoriteClick: (FavoriteVideo) -> Unit,
     onQuickAccessClick: (QuickAccessFolder) -> Unit,
     onQuickAccessDelete: (QuickAccessFolder) -> Unit,
-    onLocalSourceClick: () -> Unit,
-    onSmbSourceClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val sortedRecentVideos = remember(recentVideos, servers) {
@@ -1247,56 +1150,30 @@ private fun HomePanel(
     val availableFavorites = remember(favorites, servers) {
         favorites.filter { it.hasAvailableHomeSource(servers) }.distinctBy { it.filePath }
     }
-    val favoriteShelf = remember(availableFavorites) { availableFavorites.take(12) }
-    val favoritePaths = remember(favoriteShelf) {
-        favoriteShelf.mapTo(hashSetOf()) { it.filePath }
-    }
-    val libraryItemCount = remember(continueWatching, availableFavorites) {
-        buildSet {
-            continueWatching.forEach { add(it.filePath) }
-            availableFavorites.forEach { add(it.filePath) }
-        }.size
+    val favoritePaths = remember(availableFavorites) {
+        availableFavorites.mapTo(hashSetOf()) { it.filePath }
     }
     val serverNamesById = remember(servers) { servers.associate { it.id to it.serverName } }
-    val hasLibraryContent = continueWatching.isNotEmpty() || favoriteShelf.isNotEmpty()
 
     LazyColumn(
         modifier = modifier,
-        contentPadding = PaddingValues(start = 24.dp, top = 20.dp, end = 24.dp, bottom = 36.dp),
+        contentPadding = PaddingValues(start = 24.dp, top = 28.dp, end = 24.dp, bottom = 48.dp),
         verticalArrangement = Arrangement.spacedBy(26.dp),
     ) {
         item {
-            HomeHeader(
-                libraryItemCount = libraryItemCount,
+            HomeVideoShelf(
+                title = stringResource(R.string.continue_watching),
+                videos = continueWatching,
+                viewModel = viewModel,
+                metadataRefreshToken = metadataRefreshToken,
+                selectedSource = selectedSource,
+                favoritePaths = favoritePaths,
+                showProgress = true,
+                artworkPolicy = VideoArtworkPolicy.GeneratedFrameOnly,
+                showScrollControls = true,
+                onRemove = onContinueRemove,
+                onVideoClick = onContinueClick,
             )
-        }
-
-        if (!hasLibraryContent) {
-            item {
-                HomeEmptyLibraryPanel(
-                    serverCount = servers.size,
-                    onLocalSourceClick = onLocalSourceClick,
-                    onSmbSourceClick = onSmbSourceClick,
-                )
-            }
-        }
-
-        if (continueWatching.isNotEmpty()) {
-            item {
-                HomeVideoShelf(
-                    title = stringResource(R.string.continue_watching),
-                    videos = continueWatching,
-                    viewModel = viewModel,
-                    metadataRefreshToken = metadataRefreshToken,
-                    selectedSource = selectedSource,
-                    favoritePaths = favoritePaths,
-                    showProgress = true,
-                    artworkPolicy = VideoArtworkPolicy.GeneratedFrameOnly,
-                    showScrollControls = true,
-                    onRemove = onContinueRemove,
-                    onVideoClick = onContinueClick,
-                )
-            }
         }
 
         if (quickAccessFolders.isNotEmpty()) {
@@ -1310,30 +1187,6 @@ private fun HomePanel(
             }
         }
 
-        if (favoriteShelf.isNotEmpty()) {
-            item {
-                HomeVideoShelf(
-                    title = stringResource(R.string.favorites),
-                    videos = favoriteShelf,
-                    viewModel = viewModel,
-                    metadataRefreshToken = metadataRefreshToken,
-                    selectedSource = selectedSource,
-                    favoritePaths = favoritePaths,
-                    showProgress = false,
-                    onVideoClick = onFavoriteClick,
-                )
-            }
-        }
-
-        if (hasLibraryContent) {
-            item {
-                HomeSourcesSection(
-                    serverCount = servers.size,
-                    onLocalSourceClick = onLocalSourceClick,
-                    onSmbSourceClick = onSmbSourceClick,
-                )
-            }
-        }
     }
 }
 
@@ -1357,104 +1210,6 @@ private fun LibraryVideoItem.matchesHomeVideoSource(source: SavedServer): Boolea
     val effectiveShareName = shareName.takeIf(String::isNotBlank)
         ?: parsedIdentity?.shareName.orEmpty()
     return source.shareName.equals(effectiveShareName, ignoreCase = true)
-}
-
-@Composable
-private fun HomeHeader(
-    libraryItemCount: Int,
-) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.34f),
-        shape = RoundedCornerShape(24.dp),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)),
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 24.dp, vertical = 20.dp),
-            horizontalArrangement = Arrangement.spacedBy(18.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(52.dp)
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.MovieCreation,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(28.dp),
-                )
-            }
-
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = stringResource(R.string.home),
-                    style = MaterialTheme.typography.headlineMedium,
-                    color = TextPrimary,
-                )
-                Spacer(modifier = Modifier.height(3.dp))
-                Text(
-                    text = stringResource(R.string.home_tagline),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = TextSecondary,
-                    maxLines = 2,
-                )
-            }
-
-            if (libraryItemCount > 0) {
-                Surface(
-                    color = CardBackground.copy(alpha = 0.74f),
-                    shape = RoundedCornerShape(999.dp),
-                ) {
-                    Text(
-                        text = stringResource(R.string.home_item_count, libraryItemCount),
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                        style = MaterialTheme.typography.labelLarge,
-                        color = TextSecondary,
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun HomeEmptyLibraryPanel(
-    serverCount: Int,
-    onLocalSourceClick: () -> Unit,
-    onSmbSourceClick: () -> Unit,
-) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        color = CardBackground.copy(alpha = 0.9f),
-        shape = RoundedCornerShape(24.dp),
-        border = BorderStroke(1.dp, DividerGray.copy(alpha = 0.7f)),
-    ) {
-        Column(
-            modifier = Modifier.padding(24.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Text(
-                text = stringResource(R.string.home_empty_title),
-                style = MaterialTheme.typography.titleLarge,
-                color = TextPrimary,
-            )
-            Text(
-                text = stringResource(R.string.home_empty_message),
-                style = MaterialTheme.typography.bodyMedium,
-                color = TextSecondary,
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-            HomeSourceActions(
-                serverCount = serverCount,
-                onLocalSourceClick = onLocalSourceClick,
-                onSmbSourceClick = onSmbSourceClick,
-            )
-        }
-    }
 }
 
 @Composable
@@ -1483,7 +1238,6 @@ private fun <T : LibraryVideoItem> HomeVideoShelf(
             ) {
                 HomeSectionHeader(
                     title = title,
-                    itemCount = videos.size,
                     modifier = Modifier.weight(1f),
                 )
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1520,7 +1274,7 @@ private fun <T : LibraryVideoItem> HomeVideoShelf(
                 }
             }
         } else {
-            HomeSectionHeader(title = title, itemCount = videos.size)
+            HomeSectionHeader(title = title)
         }
         LazyRow(
             state = listState,
@@ -1552,7 +1306,6 @@ private fun <T : LibraryVideoItem> HomeVideoShelf(
 @Composable
 private fun HomeSectionHeader(
     title: String,
-    itemCount: Int,
     modifier: Modifier = Modifier.fillMaxWidth(),
 ) {
     Row(
@@ -1564,11 +1317,6 @@ private fun HomeSectionHeader(
             text = title,
             style = MaterialTheme.typography.titleLarge,
             color = TextPrimary,
-        )
-        Text(
-            text = itemCount.toString(),
-            style = MaterialTheme.typography.labelLarge,
-            color = TextTertiary,
         )
     }
 }
@@ -1841,7 +1589,6 @@ private fun HomeQuickAccessShelf(
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         HomeSectionHeader(
             title = stringResource(R.string.quick_access),
-            itemCount = folders.size,
         )
         LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             items(folders, key = { it.id }) { folder ->
@@ -1933,117 +1680,6 @@ private fun HomeQuickAccessCard(
                     tint = TextTertiary,
                 )
             }
-        }
-    }
-}
-
-@Composable
-private fun HomeSourcesSection(
-    serverCount: Int,
-    onLocalSourceClick: () -> Unit,
-    onSmbSourceClick: () -> Unit,
-) {
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        HomeSectionHeader(title = stringResource(R.string.sources), itemCount = serverCount + 1)
-        HomeSourceActions(
-            serverCount = serverCount,
-            onLocalSourceClick = onLocalSourceClick,
-            onSmbSourceClick = onSmbSourceClick,
-        )
-    }
-}
-
-@Composable
-private fun HomeSourceActions(
-    serverCount: Int,
-    onLocalSourceClick: () -> Unit,
-    onSmbSourceClick: () -> Unit,
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        HomeSourceCard(
-            title = stringResource(R.string.local_storage),
-            supportingText = stringResource(R.string.home_local_source_description),
-            icon = Icons.Filled.FolderOpen,
-            onClick = onLocalSourceClick,
-            modifier = Modifier.weight(1f),
-        )
-        HomeSourceCard(
-            title = stringResource(R.string.smb_files),
-            supportingText = stringResource(R.string.home_smb_source_count, serverCount),
-            icon = Icons.Filled.Cloud,
-            onClick = onSmbSourceClick,
-            modifier = Modifier.weight(1f),
-        )
-    }
-}
-
-@Composable
-private fun HomeSourceCard(
-    title: String,
-    supportingText: String,
-    icon: ImageVector,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val interactionSource = remember { MutableInteractionSource() }
-    val isHovered by interactionSource.collectIsHoveredAsState()
-    val isFocused by interactionSource.collectIsFocusedAsState()
-    val isActive = isHovered || isFocused
-
-    Surface(
-        modifier = modifier
-            .heightIn(min = 82.dp)
-            .clip(RoundedCornerShape(18.dp))
-            .clickable(
-                interactionSource = interactionSource,
-                indication = null,
-                onClick = onClick,
-            ),
-        color = if (isActive) CardBackgroundHover else CardBackground,
-        shape = RoundedCornerShape(18.dp),
-        border = BorderStroke(
-            1.dp,
-            if (isActive) {
-                MaterialTheme.colorScheme.primary.copy(alpha = 0.74f)
-            } else {
-                DividerGray.copy(alpha = 0.68f)
-            },
-        ),
-        tonalElevation = if (isActive) 6.dp else 2.dp,
-    ) {
-        Row(
-            modifier = Modifier.padding(16.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(28.dp),
-            )
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleSmall,
-                    color = TextPrimary,
-                )
-                Text(
-                    text = supportingText,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = TextTertiary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            Icon(
-                imageVector = Icons.Filled.ChevronRight,
-                contentDescription = null,
-                tint = TextTertiary,
-            )
         }
     }
 }
@@ -3822,36 +3458,6 @@ fun MainDashboardScreen(
         uiState.isConnected && uiState.selectedServer?.isLocalStorage == true
     val isSmbModeConnected =
         uiState.isConnected && uiState.selectedServer?.isLocalStorage == false
-    val isFileSourceDestination =
-        primaryDestination == PrimaryDestination.LocalFiles ||
-                primaryDestination == PrimaryDestination.SmbFiles
-    val isSelectedSourceModeConnected = when (primaryDestination) {
-        PrimaryDestination.Home -> false
-        PrimaryDestination.LocalFiles -> isLocalModeConnected
-        PrimaryDestination.SmbFiles -> isSmbModeConnected
-        PrimaryDestination.YouTube,
-        PrimaryDestination.Settings -> false
-    }
-    val sourceTitle = remember(primaryDestination, uiState.selectedServer?.id) {
-        resolveSourceTitle(primaryDestination, uiState.selectedServer)
-    }
-    val sourceBreadcrumb = remember(
-        primaryDestination,
-        uiState.selectedServer?.id,
-        uiState.currentPath,
-        localFolderName,
-    ) {
-        resolveSourceBreadcrumb(
-            destination = primaryDestination,
-            selectedServer = uiState.selectedServer,
-            currentPath = uiState.currentPath,
-            localRootLabel = localFolderName,
-        )
-    }
-    val showLibraryOrbiter =
-        isFileSourceDestination &&
-                isSelectedSourceModeConnected &&
-                fileWorkspaceMode != FileWorkspaceMode.Av
     val density = LocalDensity.current
     val initialDashboardPanelSize = remember { AppState.dashboardPanelSize.value }
     var dashboardPanelWidth by remember {
@@ -3860,7 +3466,7 @@ fun MainDashboardScreen(
     var dashboardPanelHeight by remember {
         mutableStateOf(initialDashboardPanelSize.heightDp.dp)
     }
-    val useSideOrbiters =
+    val useIntegratedSourceRail =
         resolveDashboardWidthClass(dashboardPanelWidth) == DashboardWidthClass.Expanded
     val initialDashboardPose = remember { AppState.dashboardPanelPose.value?.let { Pose(it) } }
 
@@ -3904,6 +3510,8 @@ fun MainDashboardScreen(
                 navController.navigate(Screen.VideoPlayer.createRoute(video.filePath, video.fileName))
             } else {
                 pendingHomeVideo = video
+                clearAllPreviewItems()
+                fileWorkspaceMode = FileWorkspaceMode.Browser
                 primaryDestination = PrimaryDestination.SmbFiles
                 viewModel.connectToServer(server)
             }
@@ -3911,6 +3519,8 @@ fun MainDashboardScreen(
             navController.navigate(Screen.VideoPlayer.createRoute(video.filePath, video.fileName))
         } else {
             pendingHomeVideo = video
+            clearAllPreviewItems()
+            fileWorkspaceMode = FileWorkspaceMode.Browser
             primaryDestination = PrimaryDestination.LocalFiles
             requestLocalStorageConnection()
         }
@@ -3962,6 +3572,7 @@ fun MainDashboardScreen(
                 viewModel.switchToSmbSource()
             }
 
+            PrimaryDestination.Library,
             PrimaryDestination.YouTube,
             PrimaryDestination.Settings -> Unit
         }
@@ -4085,12 +3696,56 @@ fun MainDashboardScreen(
                     .padding(innerPadding)
                     .padding(horizontal = 16.dp, vertical = 12.dp)
             ) {
-                val dashboardContentWidth = maxWidth
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize(),
+                val dashboardContentWidth = if (useIntegratedSourceRail) {
+                    (maxWidth - 140.dp).coerceAtLeast(0.dp)
+                } else {
+                    maxWidth
+                }
+                Row(
+                    modifier = Modifier.fillMaxSize(),
                 ) {
-                    when (primaryDestination) {
+                    if (useIntegratedSourceRail) {
+                        DashboardSourceRail(
+                            selectedMode = primaryDestination,
+                            onModeSelected = ::selectPrimaryDestination,
+                        )
+                        Spacer(modifier = Modifier.width(16.dp))
+                    }
+
+                    AnimatedContent(
+                        targetState = DashboardContentState(
+                            destination = primaryDestination,
+                            workspaceMode = fileWorkspaceMode,
+                            isLocalConnected = isLocalModeConnected,
+                            isSmbConnected = isSmbModeConnected,
+                            selectedSource = uiState.selectedServer,
+                        ),
+                        transitionSpec = {
+                            fadeIn(
+                                animationSpec = tween(
+                                    durationMillis = 220,
+                                    delayMillis = 60,
+                                )
+                            ) togetherWith fadeOut(
+                                animationSpec = tween(durationMillis = 140)
+                            )
+                        },
+                        label = "dashboard-content",
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight(),
+                    ) { contentState ->
+                    val contentSourceTitle = resolveSourceTitle(
+                        destination = contentState.destination,
+                        selectedServer = contentState.selectedSource,
+                    )
+                    val contentSourceBreadcrumb = resolveSourceBreadcrumb(
+                        destination = contentState.destination,
+                        selectedServer = contentState.selectedSource,
+                        currentPath = uiState.currentPath,
+                        localRootLabel = localFolderName,
+                    )
+                    when (contentState.destination) {
                         PrimaryDestination.YouTube -> {
                             YouTubePanel(
                                 modifier = Modifier.fillMaxSize(),
@@ -4114,19 +3769,39 @@ fun MainDashboardScreen(
                                         viewModel.removeFromRecent(video)
                                     }
                                 },
-                                onFavoriteClick = { video ->
-                                    openHomeVideo(video)
-                                },
                                 onQuickAccessClick = { folder ->
+                                    clearAllPreviewItems()
+                                    fileWorkspaceMode = FileWorkspaceMode.Browser
                                     primaryDestination = PrimaryDestination.SmbFiles
                                     viewModel.openQuickAccess(folder)
                                 },
                                 onQuickAccessDelete = viewModel::removeQuickAccess,
-                                onLocalSourceClick = {
-                                    primaryDestination = PrimaryDestination.LocalFiles
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                        }
+
+                        PrimaryDestination.Library -> {
+                            LibraryDestinationPanel(
+                                favorites = allFavorites,
+                                viewModel = viewModel,
+                                metadataRefreshToken = uiState.fileMetadataRefreshToken,
+                                dashboardContentWidth = dashboardContentWidth,
+                                previewItem = libraryPreviewItem,
+                                onFavoriteClick = { video ->
+                                    libraryPreviewItem = null
+                                    openHomeVideo(video)
                                 },
-                                onSmbSourceClick = {
-                                    primaryDestination = PrimaryDestination.SmbFiles
+                                onFavoriteToggle = { filePath, fileName, serverAddress, shareName, isFavorite ->
+                                    viewModel.toggleFavoriteEntry(
+                                        filePath = filePath,
+                                        fileName = fileName,
+                                        serverAddress = serverAddress,
+                                        shareName = shareName,
+                                        currentIsFavorite = isFavorite,
+                                    )
+                                },
+                                onPreviewFocused = { preview ->
+                                    libraryPreviewItem = preview
                                 },
                                 modifier = Modifier.fillMaxSize(),
                             )
@@ -4165,7 +3840,7 @@ fun MainDashboardScreen(
                         }
 
                         PrimaryDestination.LocalFiles -> {
-                            if (!isLocalModeConnected) {
+                            if (!contentState.isLocalConnected) {
                                 LocalSourceLandingPanel(
                                     folderName = localFolderName,
                                     isConnecting = uiState.isConnecting,
@@ -4177,10 +3852,10 @@ fun MainDashboardScreen(
                                     },
                                     modifier = Modifier.fillMaxSize(),
                                 )
-                            } else if (fileWorkspaceMode == FileWorkspaceMode.Av) {
+                            } else if (contentState.workspaceMode == FileWorkspaceMode.Av) {
                                 AvWorkspacePanel(
-                                    sourceTitle = sourceTitle,
-                                    breadcrumb = sourceBreadcrumb,
+                                    sourceTitle = contentSourceTitle,
+                                    breadcrumb = contentSourceBreadcrumb,
                                     sourceActionContent = {
                                         DashboardHeaderChip(
                                             text = stringResource(R.string.change_folder),
@@ -4262,56 +3937,15 @@ fun MainDashboardScreen(
                                         maxPreviewWidth.value,
                                     ).dp
 
-                                val activePreviewItem = if (
-                                    fileWorkspaceMode == FileWorkspaceMode.Library
-                                ) {
-                                    libraryPreviewItem
-                                } else {
-                                    browserPreviewItem
-                                }
+                                val activePreviewItem = browserPreviewItem
 
                                 Row(modifier = Modifier.fillMaxSize()) {
-                                    if (fileWorkspaceMode == FileWorkspaceMode.Library) {
-                                        FavoritesPanel(
-                                            favorites = favorites,
-                                            viewModel = viewModel,
-                                            metadataRefreshToken = uiState.fileMetadataRefreshToken,
-                                            isConnected = true,
-                                            currentPreviewKey = libraryPreviewItem?.key,
-                                            onFavoriteClick = { video ->
-                                                libraryPreviewItem = null
-                                                navController.navigate(
-                                                    Screen.VideoPlayer.createRoute(
-                                                        video.filePath,
-                                                        video.fileName
-                                                    )
-                                                ) {
-                                                    launchSingleTop = true
-                                                }
-                                            },
-                                            onFavoriteToggle = { filePath, fileName, serverAddress, shareName, isFavorite ->
-                                                viewModel.toggleFavoriteEntry(
-                                                    filePath = filePath,
-                                                    fileName = fileName,
-                                                    serverAddress = serverAddress,
-                                                    shareName = shareName,
-                                                    currentIsFavorite = isFavorite,
-                                                )
-                                            },
-                                            onPreviewFocused = { preview ->
-                                                libraryPreviewItem = preview
-                                            },
-                                            modifier = Modifier
-                                                .weight(1f)
-                                                .fillMaxHeight(),
-                                        )
-                                    } else {
-                                        FileBrowserPanel(
+                                    FileBrowserPanel(
                                         files = files,
                                         favoritePaths = favoritePaths,
                                         currentPath = uiState.currentPath,
-                                        sourceTitle = sourceTitle,
-                                        breadcrumb = sourceBreadcrumb,
+                                        sourceTitle = contentSourceTitle,
+                                        breadcrumb = contentSourceBreadcrumb,
                                         metadataRefreshToken = uiState.fileMetadataRefreshToken,
                                         viewModel = viewModel,
                                         isConnected = true,
@@ -4373,8 +4007,7 @@ fun MainDashboardScreen(
                                         modifier = Modifier
                                             .weight(1f)
                                             .fillMaxHeight(),
-                                        )
-                                    }
+                                    )
 
                                     ConnectedPaneResizeHandle(
                                         onDragDeltaPx = { deltaPx ->
@@ -4404,7 +4037,7 @@ fun MainDashboardScreen(
                         }
 
                         PrimaryDestination.SmbFiles -> {
-                            if (!isSmbModeConnected) {
+                            if (!contentState.isSmbConnected) {
                                 ServerListPanel(
                                     servers = availableSmbSources,
                                     isConnecting = uiState.isConnecting,
@@ -4422,10 +4055,10 @@ fun MainDashboardScreen(
                                     },
                                     modifier = Modifier.fillMaxSize(),
                                 )
-                            } else if (fileWorkspaceMode == FileWorkspaceMode.Av) {
+                            } else if (contentState.workspaceMode == FileWorkspaceMode.Av) {
                                 AvWorkspacePanel(
-                                    sourceTitle = sourceTitle,
-                                    breadcrumb = sourceBreadcrumb,
+                                    sourceTitle = contentSourceTitle,
+                                    breadcrumb = contentSourceBreadcrumb,
                                     sourceActionContent = {
                                         CompactSourceSwitcherButton(
                                             selectedSource = uiState.selectedServer,
@@ -4517,56 +4150,15 @@ fun MainDashboardScreen(
                                         maxPreviewWidth.value,
                                     ).dp
 
-                                val activePreviewItem = if (
-                                    fileWorkspaceMode == FileWorkspaceMode.Library
-                                ) {
-                                    libraryPreviewItem
-                                } else {
-                                    browserPreviewItem
-                                }
+                                val activePreviewItem = browserPreviewItem
 
                                 Row(modifier = Modifier.fillMaxSize()) {
-                                    if (fileWorkspaceMode == FileWorkspaceMode.Library) {
-                                        FavoritesPanel(
-                                            favorites = favorites,
-                                            viewModel = viewModel,
-                                            metadataRefreshToken = uiState.fileMetadataRefreshToken,
-                                            isConnected = true,
-                                            currentPreviewKey = libraryPreviewItem?.key,
-                                            onFavoriteClick = { video ->
-                                                libraryPreviewItem = null
-                                                navController.navigate(
-                                                    Screen.VideoPlayer.createRoute(
-                                                        video.filePath,
-                                                        video.fileName
-                                                    )
-                                                ) {
-                                                    launchSingleTop = true
-                                                }
-                                            },
-                                            onFavoriteToggle = { filePath, fileName, serverAddress, shareName, isFavorite ->
-                                                viewModel.toggleFavoriteEntry(
-                                                    filePath = filePath,
-                                                    fileName = fileName,
-                                                    serverAddress = serverAddress,
-                                                    shareName = shareName,
-                                                    currentIsFavorite = isFavorite,
-                                                )
-                                            },
-                                            onPreviewFocused = { preview ->
-                                                libraryPreviewItem = preview
-                                            },
-                                            modifier = Modifier
-                                                .weight(1f)
-                                                .fillMaxHeight(),
-                                        )
-                                    } else {
-                                        FileBrowserPanel(
+                                    FileBrowserPanel(
                                         files = files,
                                         favoritePaths = favoritePaths,
                                         currentPath = uiState.currentPath,
-                                        sourceTitle = sourceTitle,
-                                        breadcrumb = sourceBreadcrumb,
+                                        sourceTitle = contentSourceTitle,
+                                        breadcrumb = contentSourceBreadcrumb,
                                         metadataRefreshToken = uiState.fileMetadataRefreshToken,
                                         viewModel = viewModel,
                                         isConnected = true,
@@ -4638,8 +4230,7 @@ fun MainDashboardScreen(
                                         modifier = Modifier
                                             .weight(1f)
                                             .fillMaxHeight(),
-                                        )
-                                    }
+                                    )
 
                                     ConnectedPaneResizeHandle(
                                         onDragDeltaPx = { deltaPx ->
@@ -4671,84 +4262,21 @@ fun MainDashboardScreen(
                 }
             }
         }
+        }
 
-        key(useSideOrbiters) {
-            if (useSideOrbiters) {
-                Orbiter(
-                    position = ContentEdge.Start,
-                    offset = 20.dp,
-                    offsetType = OrbiterOffsetType.InnerEdge,
-                    alignment = Alignment.CenterVertically,
-                    elevation = 16.dp,
-                    shouldRenderInNonSpatial = true,
-                ) {
-                    DashboardSourceRail(
-                        selectedMode = primaryDestination,
-                        onModeSelected = ::selectPrimaryDestination,
-                    )
-                }
-
-                if (showLibraryOrbiter) {
-                    Orbiter(
-                        position = ContentEdge.End,
-                        offset = 20.dp,
-                        offsetType = OrbiterOffsetType.InnerEdge,
-                        alignment = Alignment.CenterVertically,
-                        elevation = 16.dp,
-                        shouldRenderInNonSpatial = true,
-                    ) {
-                        LibraryOrbiterRail(
-                            isSelected = fileWorkspaceMode == FileWorkspaceMode.Library,
-                            onClick = {
-                                clearAllPreviewItems()
-                                fileWorkspaceMode =
-                                    if (fileWorkspaceMode == FileWorkspaceMode.Library) {
-                                        FileWorkspaceMode.Browser
-                                    } else {
-                                        FileWorkspaceMode.Library
-                                    }
-                            },
-                        )
-                    }
-                }
-            } else {
-                Orbiter(
-                    position = ContentEdge.Bottom,
-                    offset = 20.dp,
-                    offsetType = OrbiterOffsetType.InnerEdge,
-                    alignment = Alignment.CenterHorizontally,
-                    elevation = 16.dp,
-                    shouldRenderInNonSpatial = true,
-                ) {
-                    DashboardSourceBar(
-                        selectedMode = primaryDestination,
-                        onModeSelected = ::selectPrimaryDestination,
-                    )
-                }
-
-                if (showLibraryOrbiter) {
-                    Orbiter(
-                        position = ContentEdge.Top,
-                        offset = 20.dp,
-                        offsetType = OrbiterOffsetType.InnerEdge,
-                        alignment = Alignment.CenterHorizontally,
-                        elevation = 16.dp,
-                        shouldRenderInNonSpatial = true,
-                    ) {
-                        LibraryOrbiterBar(
-                            isSelected = fileWorkspaceMode == FileWorkspaceMode.Library,
-                            onClick = {
-                                clearAllPreviewItems()
-                                fileWorkspaceMode =
-                                    if (fileWorkspaceMode == FileWorkspaceMode.Library) {
-                                        FileWorkspaceMode.Browser
-                                    } else {
-                                        FileWorkspaceMode.Library
-                                    }
-                            },
-                        )
-                    }
-                }
+        if (!useIntegratedSourceRail) {
+            Orbiter(
+                position = ContentEdge.Top,
+                offset = 24.dp,
+                offsetType = OrbiterOffsetType.InnerEdge,
+                alignment = Alignment.CenterHorizontally,
+                elevation = 16.dp,
+                shouldRenderInNonSpatial = true,
+            ) {
+                DashboardSourceBar(
+                    selectedMode = primaryDestination,
+                    onModeSelected = ::selectPrimaryDestination,
+                )
             }
         }
 
@@ -7617,6 +7145,82 @@ private fun FileThumbnailCard(
         anchorBounds = popupAnchorBounds,
         onClick = onPopupClick,
     )
+}
+
+@Composable
+private fun LibraryDestinationPanel(
+    favorites: List<FavoriteVideo>,
+    viewModel: MainDashboardViewModel,
+    metadataRefreshToken: Long,
+    dashboardContentWidth: Dp,
+    previewItem: DashboardPreviewItem?,
+    onFavoriteClick: (FavoriteVideo) -> Unit,
+    onFavoriteToggle: (String, String, String, String, Boolean) -> Unit,
+    onPreviewFocused: (DashboardPreviewItem?) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val density = LocalDensity.current
+    var previewWidthOverrideDp by rememberSaveable { mutableStateOf<Float?>(null) }
+    val defaultPreviewWidth = when {
+        dashboardContentWidth >= 1500.dp -> 420.dp
+        dashboardContentWidth >= 1180.dp -> 360.dp
+        else -> 300.dp
+    }
+    val minPreviewWidth = 280.dp
+    val minPrimaryPaneWidth = 460.dp
+    val dividerWidth = 18.dp
+    val maxPreviewWidth = (dashboardContentWidth - dividerWidth - minPrimaryPaneWidth)
+        .coerceAtLeast(minPreviewWidth)
+
+    LaunchedEffect(defaultPreviewWidth, minPreviewWidth, maxPreviewWidth) {
+        val currentWidth = previewWidthOverrideDp ?: defaultPreviewWidth.value
+        val clampedWidth = currentWidth.coerceIn(
+            minPreviewWidth.value,
+            maxPreviewWidth.value,
+        )
+        if (previewWidthOverrideDp != clampedWidth) {
+            previewWidthOverrideDp = clampedWidth
+        }
+    }
+
+    val previewWidth = (previewWidthOverrideDp ?: defaultPreviewWidth.value)
+        .coerceIn(minPreviewWidth.value, maxPreviewWidth.value)
+        .dp
+
+    Row(modifier = modifier) {
+        FavoritesPanel(
+            favorites = favorites,
+            viewModel = viewModel,
+            metadataRefreshToken = metadataRefreshToken,
+            isConnected = true,
+            currentPreviewKey = previewItem?.key,
+            onFavoriteClick = onFavoriteClick,
+            onFavoriteToggle = onFavoriteToggle,
+            onPreviewFocused = onPreviewFocused,
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxHeight(),
+        )
+
+        ConnectedPaneResizeHandle(
+            onDragDeltaPx = { deltaPx ->
+                val deltaDp = with(density) { deltaPx.toDp().value }
+                val currentWidth = previewWidthOverrideDp ?: defaultPreviewWidth.value
+                previewWidthOverrideDp = (currentWidth - deltaDp).coerceIn(
+                    minPreviewWidth.value,
+                    maxPreviewWidth.value,
+                )
+            },
+            modifier = Modifier.fillMaxHeight(),
+        )
+
+        DashboardPreviewPanel(
+            previewItem = previewItem,
+            modifier = Modifier
+                .width(previewWidth)
+                .fillMaxHeight(),
+        )
+    }
 }
 
 @Composable

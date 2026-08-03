@@ -1,6 +1,9 @@
 package blackark.app.vr.ui.navigation
 
 import android.content.Context
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -41,16 +44,26 @@ fun AppNavigation(
         navController = navController,
         startDestination = Screen.MainDashboard.route,
         enterTransition = {
-            androidx.compose.animation.EnterTransition.None
+            fadeIn(
+                animationSpec = tween(
+                    durationMillis = 220,
+                    delayMillis = 60,
+                )
+            )
         },
         exitTransition = {
-            androidx.compose.animation.ExitTransition.None
+            fadeOut(animationSpec = tween(durationMillis = 140))
         },
         popEnterTransition = {
-            androidx.compose.animation.EnterTransition.None
+            fadeIn(
+                animationSpec = tween(
+                    durationMillis = 180,
+                    delayMillis = 40,
+                )
+            )
         },
         popExitTransition = {
-            androidx.compose.animation.ExitTransition.None
+            fadeOut(animationSpec = tween(durationMillis = 120))
         },
     ) {
         composable(Screen.MainDashboard.route) {
