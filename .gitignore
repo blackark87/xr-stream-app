@@ -1,7 +1,11 @@
-*.iml
-
 # IDE files
 .idea/
+.vscode/
+*.iml
+
+# Local assistant configuration
+.claude/
+CLAUDE.md
 
 # Local machine configuration
 .gradle/
@@ -13,11 +17,14 @@ local.properties
 # OS files
 .DS_Store
 
-# Build outputs
-/build/
+# Gradle and Android build outputs
+**/build/
 /captures/
 .externalNativeBuild/
 .cxx/
+
+# Accidental archive metadata extracted at repository root
+/META-INF/
 
 # JVM crash logs
 java_pid*.hprof

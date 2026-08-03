@@ -28,6 +28,7 @@ import blackark.app.vr.utils.AppSettingsStore
 import blackark.app.vr.utils.ActorFolderArtworkResolver
 import blackark.app.vr.utils.BrowserFolderArtworkResolution
 import blackark.app.vr.utils.BrowserFolderArtworkKind
+import blackark.app.vr.utils.ExtraFanartResolver
 import blackark.app.vr.utils.JvrLibraryMetadataProvider
 import blackark.app.vr.utils.JvrMovieMetadata
 import blackark.app.vr.utils.LocalNfoMetadataResolver
@@ -205,6 +206,9 @@ class MainDashboardViewModel(
     private val actorFolderArtworkCache =
         mutableMapOf<String, Deferred<BrowserFolderArtworkResolution>>()
     private val actorFolderArtworkSemaphore = Semaphore(2)
+    private val extraFanartCacheLock = Any()
+    private val extraFanartCache = mutableMapOf<String, Deferred<List<String>>>()
+    private val extraFanartSemaphore = Semaphore(2)
     private val actorContentFolderListingSemaphore = Semaphore(4)
     private val systemZoneId: ZoneId = ZoneId.systemDefault()
 
@@ -1202,6 +1206,43 @@ class MainDashboardViewModel(
             folder = folder,
             kind = BrowserFolderArtworkKind.ACTOR,
         ).actorArtworkUrl
+    }
+
+    suspend fun resolveExtraFanartPaths(videoPath: String): List<String> {
+        if (videoPath.isBlank()) return emptyList()
+        val selectedServer = _uiState.value.selectedServer ?: return emptyList()
+        val cacheKey = buildString {
+            append(selectedServer.serverAddress)
+            append('|')
+            append(selectedServer.shareName)
+            append('|')
+            append(videoPath)
+            append('|')
+            append(_uiState.value.fileMetadataRefreshToken)
+        }
+        val activeSmbClient = smbClient
+        val activeLocalClient = localClient
+        val deferred = synchronized(extraFanartCacheLock) {
+            extraFanartCache.getOrPut(cacheKey) {
+                viewModelScope.async(Dispatchers.IO) {
+                    extraFanartSemaphore.withPermit {
+                        val paths = ExtraFanartResolver(
+                            smbClient = activeSmbClient,
+                            localClient = activeLocalClient,
+                            localRootTreeUri = selectedServer.shareName.takeIf {
+                                selectedServer.isLocalStorage
+                            },
+                        ).resolve(videoPath)
+                        Log.d(
+                            "ExtraFanartPreview",
+                            "Resolved video=$videoPath count=${paths.size}",
+                        )
+                        paths
+                    }
+                }
+            }
+        }
+        return deferred.await()
     }
 
     suspend fun resolveBrowserFolderArtwork(
@@ -2220,6 +2261,13 @@ class MainDashboardViewModel(
             }
         }
         pending.forEach { deferred -> deferred.cancel() }
+
+        val pendingFanart = synchronized(extraFanartCacheLock) {
+            extraFanartCache.values.toList().also {
+                extraFanartCache.clear()
+            }
+        }
+        pendingFanart.forEach { deferred -> deferred.cancel() }
     }
 
     private fun currentSourceScope(): String? {

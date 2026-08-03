@@ -1122,6 +1122,7 @@ private fun LocalSourceLandingPanel(
 }
 
 private const val YOUTUBE_HOME_URL = "https://m.youtube.com/"
+private const val HOME_VIDEO_NAVIGATION_INPUT_SETTLE_MS = 80L
 
 @Composable
 private fun HomePanel(
@@ -1846,6 +1847,7 @@ private fun YouTubePanel(
 @Composable
 private fun DashboardPreviewPanel(
     previewItem: DashboardPreviewItem?,
+    viewModel: MainDashboardViewModel,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -1896,6 +1898,28 @@ private fun DashboardPreviewPanel(
                     previewItem.previewSpec
                 }
                 if (previewSpec != null) {
+                    val motionPreviewPath =
+                        previewSpec.trailerPath ?: previewSpec.fallbackVideoPath
+                    val motionPreviewEnabled = remember(context, motionPreviewPath) {
+                        isMotionPreviewEnabled(context, motionPreviewPath)
+                    }
+                    val shouldResolveExtraFanart =
+                        motionPreviewEnabled &&
+                            previewSpec.trailerPath == null &&
+                            !previewSpec.extraFanartLookupPath.isNullOrBlank()
+                    val extraFanartPaths by produceState<List<String>?>(
+                        initialValue = if (shouldResolveExtraFanart) null else emptyList(),
+                        previewItem.key,
+                        previewSpec.trailerPath,
+                        previewSpec.extraFanartLookupPath,
+                        shouldResolveExtraFanart,
+                    ) {
+                        value = if (shouldResolveExtraFanart) {
+                            viewModel.resolveExtraFanartPaths(previewSpec.extraFanartLookupPath)
+                        } else {
+                            emptyList()
+                        }
+                    }
                     val requestBuilder = ImageRequest.Builder(context)
                         .data(previewSpec.model)
                         .diskCachePolicy(CachePolicy.ENABLED)
@@ -1930,10 +1954,33 @@ private fun DashboardPreviewPanel(
                                 }
                             },
                         )
-                        HoverVideoPreview(
-                            spec = previewSpec,
-                            modifier = Modifier.fillMaxSize(),
-                        )
+                        when {
+                            motionPreviewEnabled && previewSpec.trailerPath != null -> {
+                                MotionVideoPreview(
+                                    videoPath = previewSpec.trailerPath,
+                                    source = "trailer",
+                                    modifier = Modifier.fillMaxSize(),
+                                )
+                            }
+
+                            !extraFanartPaths.isNullOrEmpty() -> {
+                                ExtraFanartSlideshow(
+                                    imagePaths = extraFanartPaths.orEmpty(),
+                                    modifier = Modifier.fillMaxSize(),
+                                )
+                            }
+
+                            motionPreviewEnabled &&
+                                extraFanartPaths != null &&
+                                previewSpec.fallbackVideoPath != null -> {
+                                MotionVideoPreview(
+                                    videoPath = previewSpec.fallbackVideoPath,
+                                    source = "main-fallback",
+                                    playbackLimitMs = MAIN_VIDEO_PREVIEW_DURATION_MS,
+                                    modifier = Modifier.fillMaxSize(),
+                                )
+                            }
+                        }
                     }
                 } else {
                     Box(
@@ -1981,27 +2028,31 @@ private fun DashboardPreviewPanel(
     }
 }
 
+private const val MAIN_VIDEO_PREVIEW_DURATION_MS = 60_000L
+
 @Composable
-private fun HoverVideoPreview(
-    spec: GroupHoverPreviewSpec,
+private fun MotionVideoPreview(
+    videoPath: String,
+    source: String,
+    playbackLimitMs: Long? = null,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
     val appContext = context.applicationContext
-    val videoPath = spec.videoPath?.takeIf(String::isNotBlank) ?: return
+    if (videoPath.isBlank()) return
     val isSmb = videoPath.startsWith("smb://", ignoreCase = true)
     val enabled = remember(videoPath) {
-        AppSettingsStore.isLibraryHoverPreviewEnabled(appContext) &&
-            (!isSmb || AppSettingsStore.isSmbHoverPreviewEnabled(appContext))
+        isMotionPreviewEnabled(appContext, videoPath)
     }
     if (!enabled) return
 
-    var previewPlayer by remember(videoPath) { mutableStateOf<ExoPlayer?>(null) }
-    var hasRenderedFirstFrame by remember(videoPath) { mutableStateOf(false) }
-    LaunchedEffect(videoPath, spec.startPositionMs, spec.startAtBeginning) {
+    var previewPlayer by remember(videoPath, source) { mutableStateOf<ExoPlayer?>(null) }
+    var hasRenderedFirstFrame by remember(videoPath, source) { mutableStateOf(false) }
+    LaunchedEffect(videoPath, source, playbackLimitMs) {
         delay(800L)
         val readySignal = CompletableDeferred<Boolean>()
         val firstFrameSignal = CompletableDeferred<Unit>()
+        val endedSignal = CompletableDeferred<Unit>()
         val player = runCatching {
             val builder = ExoPlayer.Builder(appContext)
             if (isSmb) {
@@ -2023,15 +2074,19 @@ private fun HoverVideoPreview(
                         if (playbackState == Player.STATE_READY && !readySignal.isCompleted) {
                             readySignal.complete(true)
                         }
+                        if (playbackState == Player.STATE_ENDED && !endedSignal.isCompleted) {
+                            endedSignal.complete(Unit)
+                        }
                     }
 
                     override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
                         Log.e(
-                            "HoverVideoPreview",
-                            "Preview player failed path=$videoPath reason=${error.message}",
+                            "MotionVideoPreview",
+                            "Preview player failed source=$source path=$videoPath reason=${error.message}",
                             error,
                         )
                         if (!readySignal.isCompleted) readySignal.complete(false)
+                        if (!endedSignal.isCompleted) endedSignal.complete(Unit)
                     }
 
                     override fun onRenderedFirstFrame() {
@@ -2043,8 +2098,8 @@ private fun HoverVideoPreview(
             }
         }.onFailure { error ->
             Log.e(
-                "HoverVideoPreview",
-                "Could not create preview player path=$videoPath reason=${error.message}",
+                "MotionVideoPreview",
+                "Could not create preview player source=$source path=$videoPath reason=${error.message}",
                 error,
             )
         }.getOrNull() ?: return@LaunchedEffect
@@ -2054,22 +2109,19 @@ private fun HoverVideoPreview(
             // The poster remains visible until onRenderedFirstFrame confirms real output.
             previewPlayer = player
             Log.d(
-                "HoverVideoPreview",
-                "Preparing source=${if (spec.startAtBeginning) "trailer" else "main"} path=$videoPath",
+                "MotionVideoPreview",
+                "Preparing source=$source path=$videoPath limitMs=$playbackLimitMs",
             )
             val isReady = withTimeoutOrNull(20_000L) { readySignal.await() } == true
             if (!isReady) {
-                Log.w("HoverVideoPreview", "Preview prepare timed out path=$videoPath")
+                Log.w(
+                    "MotionVideoPreview",
+                    "Preview prepare timed out source=$source path=$videoPath",
+                )
                 return@LaunchedEffect
             }
 
-            val startPosition = if (spec.startAtBeginning) {
-                0L
-            } else {
-                spec.startPositionMs.takeIf { it > 0L }
-                    ?: (player.duration / 10L).coerceAtLeast(0L)
-            }
-            player.seekTo(startPosition)
+            player.seekTo(0L)
             player.play()
 
             val renderedFirstFrame = withTimeoutOrNull(10_000L) {
@@ -2077,21 +2129,37 @@ private fun HoverVideoPreview(
                 true
             } == true
             if (!renderedFirstFrame) {
-                Log.w("HoverVideoPreview", "Preview first frame timed out path=$videoPath")
+                Log.w(
+                    "MotionVideoPreview",
+                    "Preview first frame timed out source=$source path=$videoPath",
+                )
                 return@LaunchedEffect
             }
 
             Log.d(
-                "HoverVideoPreview",
-                "Playing source=${if (spec.startAtBeginning) "trailer" else "main"} path=$videoPath startMs=$startPosition",
+                "MotionVideoPreview",
+                "Playing source=$source path=$videoPath startMs=0 limitMs=$playbackLimitMs",
             )
-            delay(6_000L)
-            player.pause()
+            if (playbackLimitMs == null) {
+                endedSignal.await()
+            } else {
+                val endedNaturally = withTimeoutOrNull(playbackLimitMs) {
+                    endedSignal.await()
+                    true
+                } == true
+                if (!endedNaturally) {
+                    player.pause()
+                    Log.d(
+                        "MotionVideoPreview",
+                        "Playback limit reached source=$source path=$videoPath limitMs=$playbackLimitMs",
+                    )
+                }
+            }
         } finally {
             if (previewPlayer === player) previewPlayer = null
             hasRenderedFirstFrame = false
             player.release()
-            Log.d("HoverVideoPreview", "Released path=$videoPath")
+            Log.d("MotionVideoPreview", "Released source=$source path=$videoPath")
         }
     }
 
@@ -2107,6 +2175,55 @@ private fun HoverVideoPreview(
                 }
             },
             update = { view -> view.player = player },
+        )
+    }
+}
+
+private fun isMotionPreviewEnabled(context: Context, path: String?): Boolean {
+    if (path.isNullOrBlank()) return false
+    val appContext = context.applicationContext
+    val isSmb = path.startsWith("smb://", ignoreCase = true)
+    return AppSettingsStore.isLibraryHoverPreviewEnabled(appContext) &&
+        (!isSmb || AppSettingsStore.isSmbHoverPreviewEnabled(appContext))
+}
+
+@Composable
+private fun ExtraFanartSlideshow(
+    imagePaths: List<String>,
+    modifier: Modifier = Modifier,
+) {
+    if (imagePaths.isEmpty()) return
+    val context = LocalContext.current
+    var currentIndex by remember(imagePaths) { mutableStateOf(0) }
+
+    LaunchedEffect(imagePaths) {
+        currentIndex = 0
+        if (imagePaths.size <= 1) return@LaunchedEffect
+        while (true) {
+            delay(4_000L)
+            currentIndex = (currentIndex + 1) % imagePaths.size
+        }
+    }
+
+    AnimatedContent(
+        targetState = imagePaths[currentIndex.coerceIn(imagePaths.indices)],
+        transitionSpec = {
+            fadeIn(animationSpec = tween(600)) togetherWith
+                fadeOut(animationSpec = tween(600))
+        },
+        label = "extra-fanart-slideshow",
+        modifier = modifier,
+    ) { imagePath ->
+        AsyncImage(
+            model = ImageRequest.Builder(context)
+                .data(imagePath)
+                .diskCachePolicy(CachePolicy.ENABLED)
+                .memoryCachePolicy(CachePolicy.ENABLED)
+                .build(),
+            imageLoader = ThumbnailImageLoaderProvider.get(context),
+            contentDescription = "Extra fanart preview",
+            modifier = Modifier.fillMaxSize(),
+            contentScale = ContentScale.Crop,
         )
     }
 }
@@ -3563,25 +3680,22 @@ fun MainDashboardScreen(
     }
 
     fun openHomeVideo(video: LibraryVideoItem) {
+        pendingHomeVideo = video
+        clearAllPreviewItems()
         val isSmbVideo = video.filePath.startsWith("smb://", ignoreCase = true)
         if (isSmbVideo) {
             val server = availableSmbSources.firstOrNull { source ->
                 video.matchesHomeVideoSource(source)
-            } ?: return
-            if (isSmbModeConnected && uiState.selectedServer?.id == server.id) {
-                navController.navigate(Screen.VideoPlayer.createRoute(video.filePath, video.fileName))
-            } else {
-                pendingHomeVideo = video
-                clearAllPreviewItems()
+            } ?: run {
+                pendingHomeVideo = null
+                return
+            }
+            if (!isSmbModeConnected || uiState.selectedServer?.id != server.id) {
                 fileWorkspaceMode = FileWorkspaceMode.Browser
                 primaryDestination = PrimaryDestination.SmbFiles
                 viewModel.connectToServer(server)
             }
-        } else if (isLocalModeConnected) {
-            navController.navigate(Screen.VideoPlayer.createRoute(video.filePath, video.fileName))
-        } else {
-            pendingHomeVideo = video
-            clearAllPreviewItems()
+        } else if (!isLocalModeConnected) {
             fileWorkspaceMode = FileWorkspaceMode.Browser
             primaryDestination = PrimaryDestination.LocalFiles
             requestLocalStorageConnection()
@@ -3595,6 +3709,9 @@ fun MainDashboardScreen(
             video.matchesHomeVideoSource(source)
         } == true
         if (sourceMatches) {
+            // Let the SpatialMainPanel finish dispatching the click before navigation
+            // removes its SceneCore parent.
+            delay(HOME_VIDEO_NAVIGATION_INPUT_SETTLE_MS)
             pendingHomeVideo = null
             navController.navigate(Screen.VideoPlayer.createRoute(video.filePath, video.fileName)) {
                 launchSingleTop = true
@@ -4090,6 +4207,7 @@ fun MainDashboardScreen(
 
                                     DashboardPreviewPanel(
                                         previewItem = activePreviewItem,
+                                        viewModel = viewModel,
                                         modifier = Modifier
                                             .width(previewWidth)
                                             .fillMaxHeight(),
@@ -4313,6 +4431,7 @@ fun MainDashboardScreen(
 
                                     DashboardPreviewPanel(
                                         previewItem = activePreviewItem,
+                                        viewModel = viewModel,
                                         modifier = Modifier
                                             .width(previewWidth)
                                             .fillMaxHeight(),
@@ -5661,9 +5780,9 @@ private data class GroupHoverPreviewSpec(
     val model: Any,
     val diskCacheKey: String?,
     val source: String,
-    val videoPath: String? = null,
-    val startPositionMs: Long = 0L,
-    val startAtBeginning: Boolean = false,
+    val trailerPath: String? = null,
+    val extraFanartLookupPath: String? = null,
+    val fallbackVideoPath: String? = null,
 )
 
 private fun buildGroupHoverPreviewSpec(
@@ -5675,13 +5794,17 @@ private fun buildGroupHoverPreviewSpec(
 ): GroupHoverPreviewSpec? {
     val resolvedPreviewVideoPath = previewVideoPath ?: representativePath
     val usesTrailer = !previewVideoPath.isNullOrBlank() && previewVideoPath != representativePath
+    val trailerPath = resolvedPreviewVideoPath.takeIf { usesTrailer }
+    val extraFanartLookupPath = representativePath.takeIf { !usesTrailer }
+    val fallbackVideoPath = representativePath.takeIf { !usesTrailer }
     return when {
         shouldUsePoster && !posterUrl.isNullOrBlank() -> GroupHoverPreviewSpec(
             model = posterUrl,
             diskCacheKey = posterCacheKey,
             source = "poster",
-            videoPath = resolvedPreviewVideoPath,
-            startAtBeginning = usesTrailer,
+            trailerPath = trailerPath,
+            extraFanartLookupPath = extraFanartLookupPath,
+            fallbackVideoPath = fallbackVideoPath,
         )
 
         !representativePath.isNullOrBlank() -> GroupHoverPreviewSpec(
@@ -5692,8 +5815,9 @@ private fun buildGroupHoverPreviewSpec(
                 representativePath,
             ),
             source = "generated",
-            videoPath = resolvedPreviewVideoPath,
-            startAtBeginning = usesTrailer,
+            trailerPath = trailerPath,
+            extraFanartLookupPath = extraFanartLookupPath,
+            fallbackVideoPath = fallbackVideoPath,
         )
 
         else -> null
@@ -5710,9 +5834,8 @@ private fun buildLibraryPreviewSpec(
             model = generatedFramePath,
             diskCacheKey = generatedFramePath,
             source = "cached",
-            videoPath = video.filePath,
-            startPositionMs = video.lastPosition.takeIf { it > 0L }
-                ?: (video.duration / 10L).coerceAtLeast(0L),
+            extraFanartLookupPath = video.filePath,
+            fallbackVideoPath = video.filePath,
         )
 
         video.filePath.isNotBlank() -> GroupHoverPreviewSpec(
@@ -5723,9 +5846,8 @@ private fun buildLibraryPreviewSpec(
                 video.filePath,
             ),
             source = "generated",
-            videoPath = video.filePath,
-            startPositionMs = video.lastPosition.takeIf { it > 0L }
-                ?: (video.duration / 10L).coerceAtLeast(0L),
+            extraFanartLookupPath = video.filePath,
+            fallbackVideoPath = video.filePath,
         )
 
         else -> null
@@ -7300,6 +7422,7 @@ private fun LibraryDestinationPanel(
 
         DashboardPreviewPanel(
             previewItem = previewItem,
+            viewModel = viewModel,
             modifier = Modifier
                 .width(previewWidth)
                 .fillMaxHeight(),
@@ -7489,9 +7612,8 @@ private fun LibraryMovieEntry(
             model = artworkSelection.url,
             diskCacheKey = posterCacheKey,
             source = "poster",
-            videoPath = video.filePath,
-            startPositionMs = video.lastPosition.takeIf { it > 0L }
-                ?: (video.duration / 10L).coerceAtLeast(0L),
+            extraFanartLookupPath = video.filePath,
+            fallbackVideoPath = video.filePath,
         )
 
         is VideoArtworkSelection.GeneratedFrame -> buildLibraryPreviewSpec(
