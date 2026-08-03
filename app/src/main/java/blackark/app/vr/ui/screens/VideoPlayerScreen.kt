@@ -10,6 +10,8 @@ import android.content.ContextWrapper
 import android.graphics.Color as AndroidColor
 import android.graphics.Rect
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.text.SpannableString
 import android.text.Spanned
 import android.text.style.TypefaceSpan
@@ -183,7 +185,9 @@ private fun clickInteractionPolicy(
                 return
             }
             if (onClick != null && isSpatialRevealClick(event.action)) {
-                onClick()
+                // SceneCore continues transforming the hit entity after this callback returns.
+                // Defer state changes that can remove the clicked panel until input dispatch ends.
+                Handler(Looper.getMainLooper()).post { onClick() }
             }
         }
     }

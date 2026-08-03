@@ -98,7 +98,7 @@ class ActorFolderContentFlatteningTest {
     }
 
     @Test
-    fun `일치하는 trailer가 없으면 본편 프리뷰를 유지한다`() {
+    fun `일치하는 trailer가 없으면 trailer 경로를 만들지 않는다`() {
         val main = file("SQTE-502.mp4")
         val otherTrailer = file("OTHER-001-trailer.mp4")
 
