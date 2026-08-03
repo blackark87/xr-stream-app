@@ -19,6 +19,11 @@ internal sealed interface VideoArtworkSelection {
     data class GeneratedFrame(val videoPath: String) : VideoArtworkSelection
 }
 
+internal enum class VideoArtworkPolicy {
+    MetadataPreferred,
+    GeneratedFrameOnly,
+}
+
 internal sealed interface FolderArtworkSelection {
     data object Placeholder : FolderArtworkSelection
 
@@ -51,6 +56,24 @@ internal fun selectVideoArtwork(
         !videoPath.isNullOrBlank() -> VideoArtworkSelection.GeneratedFrame(videoPath)
         else -> VideoArtworkSelection.Placeholder
     }
+}
+
+internal fun selectVideoArtwork(
+    policy: VideoArtworkPolicy,
+    metadataState: ArtworkState<JvrMovieMetadata>,
+    posterFailureCount: Int,
+    videoPath: String?,
+): VideoArtworkSelection = when (policy) {
+    VideoArtworkPolicy.MetadataPreferred -> selectVideoArtwork(
+        metadataState = metadataState,
+        posterFailureCount = posterFailureCount,
+        videoPath = videoPath,
+    )
+
+    VideoArtworkPolicy.GeneratedFrameOnly -> videoPath
+        ?.takeIf(String::isNotBlank)
+        ?.let(VideoArtworkSelection::GeneratedFrame)
+        ?: VideoArtworkSelection.Placeholder
 }
 
 /** Compatibility helper for call sites that only have a single poster candidate. */

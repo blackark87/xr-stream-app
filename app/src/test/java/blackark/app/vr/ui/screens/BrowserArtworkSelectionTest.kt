@@ -38,6 +38,42 @@ class BrowserArtworkSelectionTest {
     }
 
     @Test
+    fun `continue watching always selects a generated frame even when poster metadata exists`() {
+        val selection = selectVideoArtwork(
+            policy = VideoArtworkPolicy.GeneratedFrameOnly,
+            metadataState = ArtworkState.Resolved(
+                JvrMovieMetadata(
+                    code = "GDRD-043",
+                    title = "Title",
+                    posterUrl = "poster.jpg",
+                )
+            ),
+            posterFailureCount = 0,
+            videoPath = "smb://server/share/GDRD-043.mp4",
+        )
+
+        assertEquals(
+            VideoArtworkSelection.GeneratedFrame("smb://server/share/GDRD-043.mp4"),
+            selection,
+        )
+    }
+
+    @Test
+    fun `continue watching frame policy does not wait for metadata`() {
+        val selection = selectVideoArtwork(
+            policy = VideoArtworkPolicy.GeneratedFrameOnly,
+            metadataState = ArtworkState.Loading,
+            posterFailureCount = 0,
+            videoPath = "smb://server/share/GDRD-043.mp4",
+        )
+
+        assertEquals(
+            VideoArtworkSelection.GeneratedFrame("smb://server/share/GDRD-043.mp4"),
+            selection,
+        )
+    }
+
+    @Test
     fun `only japan children are resolved as actor folders`() {
         assertEquals(
             BrowserFolderArtworkKind.ACTOR,

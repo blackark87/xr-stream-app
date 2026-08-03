@@ -239,6 +239,7 @@ import blackark.app.vr.utils.extractVirtualGroupKey
 import blackark.app.vr.utils.groupMultipartVideoFiles
 import blackark.app.vr.utils.BrowserFolderArtworkKind
 import blackark.app.vr.utils.extractVirtualGroupPart
+import blackark.app.vr.utils.parseVideoIdentity
 import blackark.app.vr.utils.resolveParentFolderBaseName
 import coil3.compose.AsyncImage
 import coil3.compose.rememberAsyncImagePainter
@@ -1299,6 +1300,7 @@ private fun HomePanel(
                     selectedSource = selectedSource,
                     favoritePaths = favoritePaths,
                     showProgress = true,
+                    artworkPolicy = VideoArtworkPolicy.GeneratedFrameOnly,
                     onVideoClick = onRecentClick,
                 )
             }
@@ -1359,10 +1361,24 @@ private fun HomePanel(
 
 private fun LibraryVideoItem.hasAvailableHomeSource(servers: List<SavedServer>): Boolean {
     if (!filePath.startsWith("smb://", ignoreCase = true)) return true
-    return servers.any { server ->
-        server.serverAddress.equals(serverAddress, ignoreCase = true) &&
-                server.shareName.equals(shareName, ignoreCase = true)
-    }
+    return servers.any { source -> matchesHomeVideoSource(source) }
+}
+
+private fun LibraryVideoItem.matchesHomeVideoSource(source: SavedServer): Boolean {
+    val isSmbVideo = filePath.startsWith("smb://", ignoreCase = true)
+    if (!isSmbVideo) return source.isLocalStorage
+    if (source.isLocalStorage) return false
+
+    val parsedIdentity = parseVideoIdentity(filePath)
+    val effectiveServerAddress = serverAddress.takeIf(String::isNotBlank)
+        ?: parsedIdentity?.serverAddress.orEmpty()
+    if (!source.serverAddress.equals(effectiveServerAddress, ignoreCase = true)) return false
+
+    // An empty configured share represents the server root and can reach every share.
+    if (source.shareName.isBlank()) return true
+    val effectiveShareName = shareName.takeIf(String::isNotBlank)
+        ?: parsedIdentity?.shareName.orEmpty()
+    return source.shareName.equals(effectiveShareName, ignoreCase = true)
 }
 
 @Composable
@@ -1472,6 +1488,7 @@ private fun <T : LibraryVideoItem> HomeVideoShelf(
     selectedSource: SavedServer?,
     favoritePaths: Set<String>,
     showProgress: Boolean,
+    artworkPolicy: VideoArtworkPolicy = VideoArtworkPolicy.MetadataPreferred,
     onVideoClick: (T) -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -1488,6 +1505,7 @@ private fun <T : LibraryVideoItem> HomeVideoShelf(
                     viewModel = viewModel,
                     metadataRefreshToken = metadataRefreshToken,
                     selectedSource = selectedSource,
+                    artworkPolicy = artworkPolicy,
                     onClick = { onVideoClick(video) },
                 )
             }
@@ -1526,6 +1544,7 @@ private fun HomeVideoCard(
     viewModel: MainDashboardViewModel,
     metadataRefreshToken: Long,
     selectedSource: SavedServer?,
+    artworkPolicy: VideoArtworkPolicy,
     onClick: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -1538,17 +1557,12 @@ private fun HomeVideoCard(
             lastModified = 0L,
         )
     }
-    val isSmbVideo = video.filePath.startsWith("smb://", ignoreCase = true)
     val sourceMatches = selectedSource?.let { source ->
-        if (isSmbVideo) {
-            !source.isLocalStorage &&
-                    source.serverAddress.equals(video.serverAddress, ignoreCase = true) &&
-                    source.shareName.equals(video.shareName, ignoreCase = true)
-        } else {
-            source.isLocalStorage
-        }
+        video.matchesHomeVideoSource(source)
     } == true
-    val metadataState = if (sourceMatches) {
+    val metadataState = if (
+        artworkPolicy == VideoArtworkPolicy.MetadataPreferred && sourceMatches
+    ) {
         rememberVideoFileMetadata(
             viewModel = viewModel,
             file = file,
@@ -1565,6 +1579,7 @@ private fun HomeVideoCard(
         metadata?.posterFallbackUrls,
     ) { mutableStateOf(0) }
     val artworkSelection = selectVideoArtwork(
+        policy = artworkPolicy,
         metadataState = metadataState,
         posterFailureCount = posterFailureCount,
         videoPath = video.filePath,
@@ -3818,9 +3833,8 @@ fun MainDashboardScreen(
     fun openHomeVideo(video: LibraryVideoItem) {
         val isSmbVideo = video.filePath.startsWith("smb://", ignoreCase = true)
         if (isSmbVideo) {
-            val server = availableSmbSources.firstOrNull {
-                it.serverAddress.equals(video.serverAddress, ignoreCase = true) &&
-                    it.shareName.equals(video.shareName, ignoreCase = true)
+            val server = availableSmbSources.firstOrNull { source ->
+                video.matchesHomeVideoSource(source)
             } ?: return
             if (isSmbModeConnected && uiState.selectedServer?.id == server.id) {
                 navController.navigate(Screen.VideoPlayer.createRoute(video.filePath, video.fileName))
@@ -3841,12 +3855,9 @@ fun MainDashboardScreen(
     LaunchedEffect(pendingHomeVideo, uiState.isConnected, uiState.selectedServer?.id) {
         val video = pendingHomeVideo ?: return@LaunchedEffect
         if (!uiState.isConnected) return@LaunchedEffect
-        val sourceMatches = if (video.filePath.startsWith("smb://", ignoreCase = true)) {
-            uiState.selectedServer?.serverAddress.equals(video.serverAddress, ignoreCase = true) &&
-                uiState.selectedServer?.shareName.equals(video.shareName, ignoreCase = true)
-        } else {
-            uiState.selectedServer?.isLocalStorage == true
-        }
+        val sourceMatches = uiState.selectedServer?.let { source ->
+            video.matchesHomeVideoSource(source)
+        } == true
         if (sourceMatches) {
             pendingHomeVideo = null
             navController.navigate(Screen.VideoPlayer.createRoute(video.filePath, video.fileName)) {
