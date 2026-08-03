@@ -42,6 +42,7 @@ import blackark.app.vr.utils.extractFolderPath
 import blackark.app.vr.utils.extractNormalizedCodeFromFileName
 import blackark.app.vr.utils.extractVirtualGroupKey
 import blackark.app.vr.utils.extractVirtualGroupPart
+import blackark.app.vr.utils.attachTrailerPreviewPaths
 import blackark.app.vr.utils.flattenActorContentDirectories
 import blackark.app.vr.utils.isJapanActorFolderPath
 import blackark.app.vr.utils.isTrailerFile
@@ -594,7 +595,9 @@ class MainDashboardViewModel(
                 if (result.isSuccess) {
                     val fileList = flattenActorFolderListingIfNeeded(
                         path = path,
-                        fileList = result.getOrNull() ?: emptyList(),
+                        fileList = attachTrailerPreviewPaths(
+                            result.getOrNull() ?: emptyList(),
+                        ),
                     )
                     val sortedFiles = filterAndSortBrowsableFiles(fileList)
 

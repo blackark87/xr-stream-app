@@ -138,6 +138,7 @@ private val HIDDEN_MAIN_PANEL_ANCHOR_SIZE = 2.dp
 private val IMMERSIVE_CONTROLS_PANEL_HEIGHT = 360.dp
 private val IMMERSIVE_CONTROLS_PANEL_WIDTH_MONO = 1260.dp
 private val IMMERSIVE_CONTROLS_PANEL_WIDTH_STEREO = 1460.dp
+private val IMMERSIVE_CONTROLS_FOLLOW_DISTANCE = 900.dp
 private const val IMMERSIVE_CONTROLS_FRONT_FACTOR = 0.84f
 // Subspace uses positive Y upward, so a negative offset places controls lower.
 private val IMMERSIVE_CONTROLS_DOWN_OFFSET = (-320).dp
@@ -471,6 +472,11 @@ fun SpatialVideoPlayerContent(
     )
 
     val enableHeadFollowIn2D = playerState.videoFormat == VideoFormat.Format2D
+    val enablePlaybackUiHeadFollow = shouldEnablePlaybackUiHeadFollow(
+        isTwoDimensional = enableHeadFollowIn2D,
+        isImmersive = shouldUseImmersiveDome,
+        showControlsLayer = playbackLayerPolicy.showControlsLayer,
+    )
     val enableImmersiveRevealHeadFollow =
         shouldUseImmersiveDome && playbackLayerPolicy.showFallbackRevealLayer
     val enableImmersiveSeekPreviewHeadFollow =
@@ -483,10 +489,10 @@ fun SpatialVideoPlayerContent(
     val headFollowPose by produceState<HeadFollowPose?>(
         initialValue = null,
         session,
-        enableHeadFollowIn2D,
+        enablePlaybackUiHeadFollow,
     ) {
         value = null
-        if (!enableHeadFollowIn2D) return@produceState
+        if (!enablePlaybackUiHeadFollow) return@produceState
 
         val activeSession = session ?: return@produceState
         val arDevice = runCatching { ArDevice.getInstance(activeSession) }.getOrNull()
@@ -570,9 +576,9 @@ fun SpatialVideoPlayerContent(
     }
 
     // Device tracking must be enabled for head-follow behavior.
-    LaunchedEffect(session, enableHeadFollowIn2D, enableImmersiveHeadFollow) {
+    LaunchedEffect(session, enablePlaybackUiHeadFollow, enableImmersiveHeadFollow) {
         val activeSession = session ?: return@LaunchedEffect
-        if (!enableHeadFollowIn2D && !enableImmersiveHeadFollow) return@LaunchedEffect
+        if (!enablePlaybackUiHeadFollow && !enableImmersiveHeadFollow) return@LaunchedEffect
 
         val currentConfig = activeSession.config
         if (currentConfig.deviceTracking != DeviceTrackingMode.DISABLED) {
@@ -722,6 +728,7 @@ fun SpatialVideoPlayerContent(
                 SpatialPanel(
                     modifier = buildImmersiveControlsModifier(
                         dashboardPanelPose = dashboardPanelPose,
+                        headFollowPose = headFollowPose,
                         density = density,
                         stereoMode = playerState.stereoMode,
                         horizontalOffsetMeters = playerState.immersiveUiHorizontalOffsetMeters,
@@ -755,6 +762,7 @@ fun SpatialVideoPlayerContent(
                     SpatialPanel(
                         modifier = buildImmersivePlaybackMenuModifier(
                             dashboardPanelPose = dashboardPanelPose,
+                            headFollowPose = headFollowPose,
                             density = density,
                             activeMenu = playerState.activePlaybackMenu,
                             videoFormat = playerState.videoFormat,
@@ -1255,6 +1263,7 @@ private fun buildImmersiveSubtitleModifier(
 
 private fun buildImmersiveControlsModifier(
     dashboardPanelPose: Pose?,
+    headFollowPose: HeadFollowPose?,
     density: Density,
     stereoMode: blackark.app.vr.ui.viewmodel.StereoMode,
     horizontalOffsetMeters: Float,
@@ -1270,13 +1279,28 @@ private fun buildImmersiveControlsModifier(
         SubspaceModifier
             .width(panelWidth)
             .height(IMMERSIVE_CONTROLS_PANEL_HEIGHT)
-    val rotation = dashboardPanelPose?.rotation ?: Quaternion.Identity
+    val rotation = headFollowPose?.rotation ?: dashboardPanelPose?.rotation ?: Quaternion.Identity
     val horizontalOffsetDp =
         resolveImmersiveUiHorizontalOffsetDp(
             worldRight = rotation * Vector3.Right,
             horizontalOffsetMeters = horizontalOffsetMeters,
             dpPerMeter = 1.meters.toDp().value,
         )
+    if (headFollowPose != null) {
+        val worldUp = rotation * Vector3.Up
+        return baseModifier.offset(
+            x = (headFollowPose.forward.x * IMMERSIVE_CONTROLS_FOLLOW_DISTANCE.value).dp +
+                (worldUp.x * IMMERSIVE_CONTROLS_DOWN_OFFSET.value).dp +
+                horizontalOffsetDp.x.dp,
+            y = (headFollowPose.forward.y * IMMERSIVE_CONTROLS_FOLLOW_DISTANCE.value).dp +
+                (worldUp.y * IMMERSIVE_CONTROLS_DOWN_OFFSET.value).dp +
+                horizontalOffsetDp.y.dp,
+            z = (headFollowPose.forward.z * IMMERSIVE_CONTROLS_FOLLOW_DISTANCE.value).dp +
+                (worldUp.z * IMMERSIVE_CONTROLS_DOWN_OFFSET.value).dp +
+                horizontalOffsetDp.z.dp,
+        ).rotate(rotation)
+    }
+
     if (dashboardPanelPose == null) {
         return baseModifier.offset(
             x = horizontalOffsetDp.x.dp,
@@ -1328,14 +1352,20 @@ private fun buildImmersiveSeekPreviewModifier(
 
 private fun buildImmersivePlaybackMenuModifier(
     dashboardPanelPose: Pose?,
+    headFollowPose: HeadFollowPose?,
     density: Density,
     activeMenu: PlaybackMenu,
     videoFormat: VideoFormat,
     stereoMode: blackark.app.vr.ui.viewmodel.StereoMode,
     horizontalOffsetMeters: Float,
 ): SubspaceModifier {
+    val menuContentWidth = activeMenu.playbackMenuWidth(videoFormat)
     val panelWidth =
-        activeMenu.playbackMenuWidth(videoFormat) + IMMERSIVE_MENU_PANEL_PADDING
+        if (activeMenu == PlaybackMenu.Display) {
+            menuContentWidth
+        } else {
+            menuContentWidth + IMMERSIVE_MENU_PANEL_PADDING
+        }
     val panelHeight = resolveImmersivePlaybackMenuPanelHeight(activeMenu, videoFormat)
     val menuUpOffset =
         (IMMERSIVE_CONTROLS_PANEL_HEIGHT + panelHeight) / 2f +
@@ -1356,7 +1386,7 @@ private fun buildImmersivePlaybackMenuModifier(
         SubspaceModifier
             .width(panelWidth)
             .height(panelHeight)
-    val rotation = dashboardPanelPose?.rotation ?: Quaternion.Identity
+    val rotation = headFollowPose?.rotation ?: dashboardPanelPose?.rotation ?: Quaternion.Identity
     val horizontalOffsetDp =
         resolveImmersiveUiHorizontalOffsetDp(
             worldRight = rotation * Vector3.Right,
@@ -1375,6 +1405,25 @@ private fun buildImmersivePlaybackMenuModifier(
     val menuFrontX = (-worldForward.x * IMMERSIVE_MENU_FRONT_OFFSET.value).dp
     val menuFrontY = (-worldForward.y * IMMERSIVE_MENU_FRONT_OFFSET.value).dp
     val menuFrontZ = (-worldForward.z * IMMERSIVE_MENU_FRONT_OFFSET.value).dp
+
+    if (headFollowPose != null) {
+        val controlsX =
+            (headFollowPose.forward.x * IMMERSIVE_CONTROLS_FOLLOW_DISTANCE.value).dp +
+                (worldUp.x * IMMERSIVE_CONTROLS_DOWN_OFFSET.value).dp
+        val controlsY =
+            (headFollowPose.forward.y * IMMERSIVE_CONTROLS_FOLLOW_DISTANCE.value).dp +
+                (worldUp.y * IMMERSIVE_CONTROLS_DOWN_OFFSET.value).dp
+        val controlsZ =
+            (headFollowPose.forward.z * IMMERSIVE_CONTROLS_FOLLOW_DISTANCE.value).dp +
+                (worldUp.z * IMMERSIVE_CONTROLS_DOWN_OFFSET.value).dp
+        return baseModifier
+            .offset(
+                x = controlsX + horizontalOffsetDp.x.dp + menuRightX + menuUpX + menuFrontX,
+                y = controlsY + horizontalOffsetDp.y.dp + menuRightY + menuUpY + menuFrontY,
+                z = controlsZ + horizontalOffsetDp.z.dp + menuRightZ + menuUpZ + menuFrontZ,
+            )
+            .rotate(rotation)
+    }
 
     if (dashboardPanelPose == null) {
         return baseModifier.offset(
@@ -1410,7 +1459,7 @@ internal fun resolveImmersivePlaybackMenuRightOffset(
     menuPanelWidth: Dp,
 ): Dp =
     if (activeMenu == PlaybackMenu.Display) {
-        (controlsPanelWidth + menuPanelWidth) / 2f + IMMERSIVE_MENU_CONTROLS_GAP
+        ((controlsPanelWidth - menuPanelWidth) / 2f).coerceAtLeast(0.dp)
     } else {
         0.dp
     }

@@ -131,6 +131,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.scale
@@ -249,10 +250,12 @@ import coil3.compose.AsyncImage
 import coil3.compose.rememberAsyncImagePainter
 import coil3.request.CachePolicy
 import coil3.request.ImageRequest
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 import java.time.Instant
 import java.time.LocalDate
@@ -1994,8 +1997,11 @@ private fun HoverVideoPreview(
     if (!enabled) return
 
     var previewPlayer by remember(videoPath) { mutableStateOf<ExoPlayer?>(null) }
-    LaunchedEffect(videoPath, spec.startPositionMs) {
+    var hasRenderedFirstFrame by remember(videoPath) { mutableStateOf(false) }
+    LaunchedEffect(videoPath, spec.startPositionMs, spec.startAtBeginning) {
         delay(800L)
+        val readySignal = CompletableDeferred<Boolean>()
+        val firstFrameSignal = CompletableDeferred<Unit>()
         val player = runCatching {
             val builder = ExoPlayer.Builder(appContext)
             if (isSmb) {
@@ -2014,30 +2020,86 @@ private fun HoverVideoPreview(
                 setMediaItem(MediaItem.fromUri(videoPath))
                 addListener(object : Player.Listener {
                     override fun onPlaybackStateChanged(playbackState: Int) {
-                        if (playbackState != Player.STATE_READY) return
-                        val startPosition = spec.startPositionMs.takeIf { it > 0L }
-                            ?: (duration / 10L).coerceAtLeast(0L)
-                        seekTo(startPosition)
-                        play()
+                        if (playbackState == Player.STATE_READY && !readySignal.isCompleted) {
+                            readySignal.complete(true)
+                        }
+                    }
+
+                    override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                        Log.e(
+                            "HoverVideoPreview",
+                            "Preview player failed path=$videoPath reason=${error.message}",
+                            error,
+                        )
+                        if (!readySignal.isCompleted) readySignal.complete(false)
+                    }
+
+                    override fun onRenderedFirstFrame() {
+                        hasRenderedFirstFrame = true
+                        if (!firstFrameSignal.isCompleted) firstFrameSignal.complete(Unit)
                     }
                 })
                 prepare()
             }
+        }.onFailure { error ->
+            Log.e(
+                "HoverVideoPreview",
+                "Could not create preview player path=$videoPath reason=${error.message}",
+                error,
+            )
         }.getOrNull() ?: return@LaunchedEffect
 
-        previewPlayer = player
         try {
+            // Attach an invisible surface while buffering so the video decoder can reach READY.
+            // The poster remains visible until onRenderedFirstFrame confirms real output.
+            previewPlayer = player
+            Log.d(
+                "HoverVideoPreview",
+                "Preparing source=${if (spec.startAtBeginning) "trailer" else "main"} path=$videoPath",
+            )
+            val isReady = withTimeoutOrNull(20_000L) { readySignal.await() } == true
+            if (!isReady) {
+                Log.w("HoverVideoPreview", "Preview prepare timed out path=$videoPath")
+                return@LaunchedEffect
+            }
+
+            val startPosition = if (spec.startAtBeginning) {
+                0L
+            } else {
+                spec.startPositionMs.takeIf { it > 0L }
+                    ?: (player.duration / 10L).coerceAtLeast(0L)
+            }
+            player.seekTo(startPosition)
+            player.play()
+
+            val renderedFirstFrame = withTimeoutOrNull(10_000L) {
+                firstFrameSignal.await()
+                true
+            } == true
+            if (!renderedFirstFrame) {
+                Log.w("HoverVideoPreview", "Preview first frame timed out path=$videoPath")
+                return@LaunchedEffect
+            }
+
+            Log.d(
+                "HoverVideoPreview",
+                "Playing source=${if (spec.startAtBeginning) "trailer" else "main"} path=$videoPath startMs=$startPosition",
+            )
             delay(6_000L)
             player.pause()
         } finally {
             if (previewPlayer === player) previewPlayer = null
+            hasRenderedFirstFrame = false
             player.release()
+            Log.d("HoverVideoPreview", "Released path=$videoPath")
         }
     }
 
     previewPlayer?.let { player ->
         AndroidView(
-            modifier = modifier.background(Color.Black),
+            modifier = modifier
+                .alpha(if (hasRenderedFirstFrame) 1f else 0f)
+                .background(Color.Black),
             factory = { viewContext ->
                 PlayerView(viewContext).apply {
                     useController = false
@@ -5601,6 +5663,7 @@ private data class GroupHoverPreviewSpec(
     val source: String,
     val videoPath: String? = null,
     val startPositionMs: Long = 0L,
+    val startAtBeginning: Boolean = false,
 )
 
 private fun buildGroupHoverPreviewSpec(
@@ -5608,13 +5671,17 @@ private fun buildGroupHoverPreviewSpec(
     posterUrl: String?,
     posterCacheKey: String?,
     representativePath: String?,
+    previewVideoPath: String? = representativePath,
 ): GroupHoverPreviewSpec? {
+    val resolvedPreviewVideoPath = previewVideoPath ?: representativePath
+    val usesTrailer = !previewVideoPath.isNullOrBlank() && previewVideoPath != representativePath
     return when {
         shouldUsePoster && !posterUrl.isNullOrBlank() -> GroupHoverPreviewSpec(
             model = posterUrl,
             diskCacheKey = posterCacheKey,
             source = "poster",
-            videoPath = representativePath,
+            videoPath = resolvedPreviewVideoPath,
+            startAtBeginning = usesTrailer,
         )
 
         !representativePath.isNullOrBlank() -> GroupHoverPreviewSpec(
@@ -5625,7 +5692,8 @@ private fun buildGroupHoverPreviewSpec(
                 representativePath,
             ),
             source = "generated",
-            videoPath = representativePath,
+            videoPath = resolvedPreviewVideoPath,
+            startAtBeginning = usesTrailer,
         )
 
         else -> null
@@ -5863,6 +5931,7 @@ private fun VirtualGroupListCard(
     val displayDateText = formatFileBrowserDate(resolveDisplayDate(group, metadata))
 
     val representativePath = group.representativeFile?.path
+    val previewVideoPath = group.representativeFile?.trailerPath ?: representativePath
     var posterFailureCount by remember(
         group.key,
         metadata?.posterUrl,
@@ -5882,6 +5951,7 @@ private fun VirtualGroupListCard(
         posterUrl,
         posterCacheKey,
         representativePath,
+        previewVideoPath,
     ) {
         if (artworkSelection is VideoArtworkSelection.Placeholder) {
             null
@@ -5891,6 +5961,7 @@ private fun VirtualGroupListCard(
                 posterUrl = posterUrl,
                 posterCacheKey = posterCacheKey,
                 representativePath = representativePath,
+                previewVideoPath = previewVideoPath,
             )
         }
     }
@@ -5913,6 +5984,7 @@ private fun VirtualGroupListCard(
                     posterUrl = null,
                     posterCacheKey = null,
                     representativePath = representativePath,
+                    previewVideoPath = previewVideoPath,
                 )
             } else {
                 null
@@ -6219,6 +6291,7 @@ private fun VirtualGroupThumbnailCard(
     val displayDateText = formatFileBrowserDate(resolveDisplayDate(group, metadata))
 
     val representativePath = group.representativeFile?.path
+    val previewVideoPath = group.representativeFile?.trailerPath ?: representativePath
     var posterFailureCount by remember(
         group.key,
         metadata?.posterUrl,
@@ -6238,6 +6311,7 @@ private fun VirtualGroupThumbnailCard(
         posterUrl,
         posterCacheKey,
         representativePath,
+        previewVideoPath,
     ) {
         if (artworkSelection is VideoArtworkSelection.Placeholder) {
             null
@@ -6247,6 +6321,7 @@ private fun VirtualGroupThumbnailCard(
                 posterUrl = posterUrl,
                 posterCacheKey = posterCacheKey,
                 representativePath = representativePath,
+                previewVideoPath = previewVideoPath,
             )
         }
     }
@@ -6269,6 +6344,7 @@ private fun VirtualGroupThumbnailCard(
                     posterUrl = null,
                     posterCacheKey = null,
                     representativePath = representativePath,
+                    previewVideoPath = previewVideoPath,
                 )
             } else {
                 null
@@ -6513,6 +6589,7 @@ private fun FileListEntryCard(
 ) {
     val usesSharedMetadata = sharedMetadataState != null
     val artworkVideoPath = sharedArtworkVideoPath ?: file.path
+    val previewVideoPath = file.trailerPath ?: artworkVideoPath
     val metadataState = if (sharedMetadataState != null) {
         sharedMetadataState
     } else {
@@ -6607,6 +6684,7 @@ private fun FileListEntryCard(
         artworkSelection,
         posterUrl,
         posterCacheKey,
+        previewVideoPath,
     ) {
         if (!isVideoFile || artworkSelection is VideoArtworkSelection.Placeholder) {
             null
@@ -6616,6 +6694,7 @@ private fun FileListEntryCard(
                 posterUrl = posterUrl,
                 posterCacheKey = posterCacheKey,
                 representativePath = artworkVideoPath,
+                previewVideoPath = previewVideoPath,
             )
         }
     }
@@ -6638,6 +6717,7 @@ private fun FileListEntryCard(
                     posterUrl = null,
                     posterCacheKey = null,
                     representativePath = artworkVideoPath,
+                    previewVideoPath = previewVideoPath,
                 )
             } else {
                 null
@@ -6779,6 +6859,7 @@ private fun FileThumbnailCard(
     val context = LocalContext.current
     val usesSharedMetadata = sharedMetadataState != null
     val artworkVideoPath = sharedArtworkVideoPath ?: file.path
+    val previewVideoPath = file.trailerPath ?: artworkVideoPath
     val metadataState = if (sharedMetadataState != null) {
         sharedMetadataState
     } else {
@@ -6874,6 +6955,7 @@ private fun FileThumbnailCard(
         artworkSelection,
         posterUrl,
         posterCacheKey,
+        previewVideoPath,
     ) {
         if (!isVideoFile || artworkSelection is VideoArtworkSelection.Placeholder) {
             null
@@ -6883,6 +6965,7 @@ private fun FileThumbnailCard(
                 posterUrl = posterUrl,
                 posterCacheKey = posterCacheKey,
                 representativePath = artworkVideoPath,
+                previewVideoPath = previewVideoPath,
             )
         }
     }
@@ -6905,6 +6988,7 @@ private fun FileThumbnailCard(
                     posterUrl = null,
                     posterCacheKey = null,
                     representativePath = artworkVideoPath,
+                    previewVideoPath = previewVideoPath,
                 )
             } else {
                 null

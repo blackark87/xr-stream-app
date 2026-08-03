@@ -84,7 +84,8 @@ class ImmersiveSubtitleSettingsTest {
     }
 
     @Test
-    fun `horizontal offset defaults left and is clamped`() {
+    fun `horizontal offset defaults center and is clamped`() {
+        assertEquals(0.0f, DEFAULT_IMMERSIVE_UI_HORIZONTAL_OFFSET_METERS, 0.0001f)
         assertEquals(
             DEFAULT_IMMERSIVE_UI_HORIZONTAL_OFFSET_METERS,
             normalizeImmersiveUiHorizontalOffsetMeters(Float.NaN),

@@ -60,15 +60,52 @@ class ActorFolderContentFlatteningTest {
         val contentFolder = folder("CODE-123")
         val part1 = file("CODE-123-pt-1.mp4")
         val part2 = file("CODE-123-pt-2.mp4")
+        val trailer = file("CODE-123-trailer.mp4")
 
         val flattened = flattenActorContentDirectories(
             actorFolderChildren = listOf(contentFolder),
             contentFolderChildrenByPath = mapOf(
-                contentFolder.path to listOf(part1, part2),
+                contentFolder.path to listOf(part1, part2, trailer),
             ),
         )
 
-        assertEquals(listOf(part1, part2), flattened)
+        assertEquals(listOf(part1.path, part2.path), flattened.map(SMBFileItem::path))
+        assertEquals(listOf(trailer.path, trailer.path), flattened.map(SMBFileItem::trailerPath))
+    }
+
+    @Test
+    fun `동일 작품명의 trailer를 프리뷰 영상으로 연결한다`() {
+        val main = file("SQTE-502.mp4")
+        val matchingTrailer = file("SQTE-502-trailer.mp4")
+        val otherTrailer = file("OTHER-001-trailer.mp4")
+
+        val resolved = attachTrailerPreviewPaths(
+            listOf(main, matchingTrailer, otherTrailer),
+        )
+
+        assertEquals(matchingTrailer.path, resolved.first().trailerPath)
+    }
+
+    @Test
+    fun `작품이 하나인 폴더는 generic trailer를 프리뷰 영상으로 연결한다`() {
+        val main = file("SQTE-502.mp4")
+        val trailer = file("trailer.mp4")
+
+        assertEquals(
+            trailer.path,
+            resolveTrailerPreviewFile(main, listOf(main, trailer))?.path,
+        )
+    }
+
+    @Test
+    fun `일치하는 trailer가 없으면 본편 프리뷰를 유지한다`() {
+        val main = file("SQTE-502.mp4")
+        val otherTrailer = file("OTHER-001-trailer.mp4")
+
+        assertEquals(
+            null,
+            resolveTrailerPreviewFile(main, listOf(main, otherTrailer)),
+        )
     }
 
     @Test
