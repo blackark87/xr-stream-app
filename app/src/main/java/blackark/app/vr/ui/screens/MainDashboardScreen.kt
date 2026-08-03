@@ -33,6 +33,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -99,6 +100,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationRail
 import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.NavigationRailItemDefaults
@@ -714,51 +717,87 @@ private fun DashboardSourceRail(
     onModeSelected: (PrimaryDestination) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val selectedLabel = selectedMode.localizedLabel()
     Surface(
         modifier = modifier
-            .width(180.dp)
-            .clip(RoundedCornerShape(22.dp)),
+            .width(112.dp)
+            .clip(RoundedCornerShape(28.dp)),
         color = CardBackground.copy(alpha = 0.96f),
-        shape = RoundedCornerShape(22.dp),
+        shape = RoundedCornerShape(28.dp),
         tonalElevation = 6.dp,
         shadowElevation = 12.dp,
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(10.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
+        NavigationRail(
+            modifier = Modifier.padding(vertical = 8.dp),
+            containerColor = Color.Transparent,
         ) {
-            Text(
-                text = stringResource(R.string.app_name),
-                modifier = Modifier.fillMaxWidth(),
-                style = MaterialTheme.typography.titleMedium,
-                color = TextPrimary,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-
-            Text(
-                text = selectedLabel,
-                style = MaterialTheme.typography.labelMedium,
-                color = TextTertiary,
-                maxLines = 1,
-            )
-
-            HorizontalDivider(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 2.dp),
-                color = DividerGray.copy(alpha = 0.72f),
-            )
-
             PrimaryDestination.entries.forEach { mode ->
-                OrbiterRailButton(
-                    label = mode.localizedLabel(),
-                    icon = mode.icon(),
+                NavigationRailItem(
                     selected = selectedMode == mode,
                     onClick = { onModeSelected(mode) },
+                    icon = {
+                        Icon(
+                            imageVector = mode.icon(),
+                            contentDescription = mode.localizedLabel(),
+                        )
+                    },
+                    label = {
+                        Text(
+                            text = mode.localizedLabel(),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    },
+                    alwaysShowLabel = selectedMode == mode,
+                    colors = NavigationRailItemDefaults.colors(
+                        selectedIconColor = TextPrimary,
+                        selectedTextColor = TextPrimary,
+                        unselectedIconColor = TextSecondary,
+                        unselectedTextColor = TextTertiary,
+                        indicatorColor = NetflixRed.copy(alpha = 0.24f),
+                    ),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun DashboardSourceBar(
+    selectedMode: PrimaryDestination,
+    onModeSelected: (PrimaryDestination) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier
+            .width(720.dp)
+            .clip(RoundedCornerShape(28.dp)),
+        color = CardBackground.copy(alpha = 0.96f),
+        shape = RoundedCornerShape(28.dp),
+        tonalElevation = 6.dp,
+        shadowElevation = 12.dp,
+    ) {
+        NavigationBar(
+            containerColor = Color.Transparent,
+            tonalElevation = 0.dp,
+        ) {
+            PrimaryDestination.entries.forEach { mode ->
+                NavigationBarItem(
+                    selected = selectedMode == mode,
+                    onClick = { onModeSelected(mode) },
+                    icon = {
+                        Icon(
+                            imageVector = mode.icon(),
+                            contentDescription = mode.localizedLabel(),
+                        )
+                    },
+                    label = {
+                        Text(
+                            text = mode.localizedLabel(),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    },
+                    alwaysShowLabel = selectedMode == mode,
                 )
             }
         }
@@ -788,6 +827,29 @@ private fun LibraryOrbiterRail(
                 onClick = onClick,
             )
         }
+    }
+}
+
+@Composable
+private fun LibraryOrbiterBar(
+    isSelected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier.clip(RoundedCornerShape(24.dp)),
+        color = CardBackground.copy(alpha = 0.94f),
+        shape = RoundedCornerShape(24.dp),
+        tonalElevation = 6.dp,
+        shadowElevation = 12.dp,
+    ) {
+        DashboardHeaderChip(
+            text = stringResource(R.string.library),
+            icon = Icons.Filled.Favorite,
+            selected = isSelected,
+            onClick = onClick,
+            modifier = Modifier.padding(6.dp),
+        )
     }
 }
 
@@ -3717,6 +3779,8 @@ fun MainDashboardScreen(
     var dashboardPanelHeight by remember {
         mutableStateOf(initialDashboardPanelSize.heightDp.dp)
     }
+    val useSideOrbiters =
+        resolveDashboardWidthClass(dashboardPanelWidth) == DashboardWidthClass.Expanded
     val initialDashboardPose = remember { AppState.dashboardPanelPose.value?.let { Pose(it) } }
 
     fun requestLocalStorageConnection(forcePicker: Boolean = false) {
@@ -4554,40 +4618,79 @@ fun MainDashboardScreen(
             }
         }
 
-        Orbiter(
-            position = ContentEdge.Start,
-            offset = 24.dp,
-            offsetType = OrbiterOffsetType.InnerEdge,
-            alignment = Alignment.CenterVertically,
-            elevation = 20.dp,
-            shouldRenderInNonSpatial = true,
-        ) {
-            DashboardSourceRail(
-                selectedMode = primaryDestination,
-                onModeSelected = ::selectPrimaryDestination,
-            )
-        }
-
-        if (showLibraryOrbiter) {
+        if (useSideOrbiters) {
             Orbiter(
-                position = ContentEdge.End,
-                offset = 24.dp,
+                position = ContentEdge.Start,
+                offset = 20.dp,
                 offsetType = OrbiterOffsetType.InnerEdge,
                 alignment = Alignment.CenterVertically,
-                elevation = 20.dp,
+                elevation = 16.dp,
                 shouldRenderInNonSpatial = true,
             ) {
-                LibraryOrbiterRail(
-                    isSelected = secondaryPaneMode == SecondaryPaneMode.Library,
-                    onClick = {
-                        secondaryPaneMode =
-                            if (secondaryPaneMode == SecondaryPaneMode.Library) {
-                                SecondaryPaneMode.Preview
-                            } else {
-                                SecondaryPaneMode.Library
-                            }
-                    },
+                DashboardSourceRail(
+                    selectedMode = primaryDestination,
+                    onModeSelected = ::selectPrimaryDestination,
                 )
+            }
+
+            if (showLibraryOrbiter) {
+                Orbiter(
+                    position = ContentEdge.End,
+                    offset = 20.dp,
+                    offsetType = OrbiterOffsetType.InnerEdge,
+                    alignment = Alignment.CenterVertically,
+                    elevation = 16.dp,
+                    shouldRenderInNonSpatial = true,
+                ) {
+                    LibraryOrbiterRail(
+                        isSelected = secondaryPaneMode == SecondaryPaneMode.Library,
+                        onClick = {
+                            secondaryPaneMode =
+                                if (secondaryPaneMode == SecondaryPaneMode.Library) {
+                                    SecondaryPaneMode.Preview
+                                } else {
+                                    SecondaryPaneMode.Library
+                                }
+                        },
+                    )
+                }
+            }
+        } else {
+            Orbiter(
+                position = ContentEdge.Bottom,
+                offset = 20.dp,
+                offsetType = OrbiterOffsetType.InnerEdge,
+                alignment = Alignment.CenterHorizontally,
+                elevation = 16.dp,
+                shouldRenderInNonSpatial = true,
+            ) {
+                DashboardSourceBar(
+                    selectedMode = primaryDestination,
+                    onModeSelected = ::selectPrimaryDestination,
+                )
+            }
+
+            if (showLibraryOrbiter) {
+                Orbiter(
+                    position = ContentEdge.Top,
+                    offset = 20.dp,
+                    offsetType = OrbiterOffsetType.InnerEdge,
+                    alignment = Alignment.CenterHorizontally,
+                    elevation = 16.dp,
+                    shouldRenderInNonSpatial = true,
+                ) {
+                    LibraryOrbiterBar(
+                        isSelected = secondaryPaneMode == SecondaryPaneMode.Library,
+                        onClick = {
+                            secondaryPaneMode =
+                                if (secondaryPaneMode == SecondaryPaneMode.Library) {
+                                    SecondaryPaneMode.Preview
+                                } else {
+                                    SecondaryPaneMode.Library
+                                }
+                        },
+                    )
+                }
             }
         }
 
@@ -5053,6 +5156,46 @@ private fun ServerListPanel(
 }
 
 @Composable
+private fun DashboardWorkspaceHeader(
+    title: String,
+    summary: String?,
+    summaryColor: Color = TextTertiary,
+    actions: @Composable RowScope.() -> Unit,
+) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.headlineSmall,
+            color = TextPrimary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+
+        summary?.takeIf { it.isNotBlank() }?.let { value ->
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = value,
+                style = MaterialTheme.typography.bodySmall,
+                color = summaryColor,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            actions()
+        }
+    }
+}
+
+@Composable
 private fun AvWorkspacePanel(
     sourceTitle: String,
     breadcrumb: String?,
@@ -5089,41 +5232,17 @@ private fun AvWorkspacePanel(
                 .fillMaxSize()
                 .padding(18.dp),
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
+            DashboardWorkspaceHeader(
+                title = sourceTitle,
+                summary = breadcrumb,
             ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = sourceTitle,
-                        style = MaterialTheme.typography.headlineSmall,
-                        color = TextPrimary,
-                    )
-                    breadcrumb?.takeIf { it.isNotBlank() }?.let { summary ->
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = summary,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = TextTertiary,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                }
-
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    sourceActionContent()
-                    DashboardHeaderChip(
-                        text = "AV",
-                        icon = Icons.Filled.MovieCreation,
-                        selected = true,
-                        onClick = onToggleAvMode,
-                    )
-                }
+                sourceActionContent()
+                DashboardHeaderChip(
+                    text = "AV",
+                    icon = Icons.Filled.MovieCreation,
+                    selected = true,
+                    onClick = onToggleAvMode,
+                )
             }
 
             Spacer(modifier = Modifier.height(16.dp))
@@ -5393,38 +5512,16 @@ private fun FileBrowserPanel(
                 .padding(16.dp)
         ) {
             // Panel Header
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+            DashboardWorkspaceHeader(
+                title = sourceTitle,
+                summary = headerSummary,
+                summaryColor = if (isDeleteMode && selectedPaths.isNotEmpty()) {
+                    NetflixRed
+                } else {
+                    TextTertiary
+                },
             ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = sourceTitle,
-                        style = MaterialTheme.typography.headlineSmall,
-                        color = TextPrimary
-                    )
-                    headerSummary?.let { summary ->
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = summary,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = if (isDeleteMode && selectedPaths.isNotEmpty()) {
-                                NetflixRed
-                            } else {
-                                TextTertiary
-                            },
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                }
-
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    headerActions()
+                headerActions()
 
                     DashboardHeaderChip(
                         text = "AV",
@@ -5542,7 +5639,6 @@ private fun FileBrowserPanel(
                         )
                     }
 
-                }
             }
 
             Spacer(modifier = Modifier.height(16.dp))
