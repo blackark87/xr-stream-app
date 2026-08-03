@@ -1771,7 +1771,7 @@ private fun HomeVideoCard(
                         modifier = Modifier
                             .align(Alignment.TopStart)
                             .padding(10.dp),
-                        color = MaterialTheme.colorScheme.scrim.copy(alpha = 0.68f),
+                        color = MaterialTheme.colorScheme.error.copy(alpha = 0.92f),
                         shape = RoundedCornerShape(999.dp),
                     ) {
                         IconButton(
@@ -1781,7 +1781,7 @@ private fun HomeVideoCard(
                             Icon(
                                 imageVector = Icons.Filled.Delete,
                                 contentDescription = stringResource(R.string.remove_from_recent),
-                                tint = TextPrimary,
+                                tint = MaterialTheme.colorScheme.onError,
                                 modifier = Modifier.size(18.dp),
                             )
                         }
