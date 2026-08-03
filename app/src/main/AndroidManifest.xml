@@ -44,7 +44,7 @@
         android:roundIcon="@mipmap/app_icon_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.XRStream"
-        android:usesCleartextTraffic="true">
+        android:usesCleartextTraffic="false">
 
         <uses-native-library
             android:name="libopenxr.google.so"

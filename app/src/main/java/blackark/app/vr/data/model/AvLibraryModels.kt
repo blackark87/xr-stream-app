@@ -26,9 +26,15 @@ data class AvLibraryWork(
             ?: asset.cachedTitle?.takeIf { it.isNotBlank() }
             ?: asset.normalizedCode
 
+    val displayPosterUrls: List<String>
+        get() = buildList {
+            metadata?.posterUrl?.takeIf(String::isNotBlank)?.let(::add)
+            addAll(metadata?.posterFallbackUrls.orEmpty().filter(String::isNotBlank))
+            asset.cachedPosterUrl?.takeIf(String::isNotBlank)?.let(::add)
+        }.distinct()
+
     val displayPosterUrl: String?
-        get() = metadata?.posterUrl?.takeIf { it.isNotBlank() }
-            ?: asset.cachedPosterUrl?.takeIf { it.isNotBlank() }
+        get() = displayPosterUrls.firstOrNull()
 
     val fallbackThumbnailPath: String?
         get() = representativePath

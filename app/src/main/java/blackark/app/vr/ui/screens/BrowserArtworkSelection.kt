@@ -33,24 +33,36 @@ internal sealed interface FolderArtworkSelection {
 
 internal fun selectVideoArtwork(
     metadataState: ArtworkState<JvrMovieMetadata>,
-    posterLoadFailed: Boolean,
+    posterFailureCount: Int,
     videoPath: String?,
 ): VideoArtworkSelection {
     if (metadataState is ArtworkState.Loading) {
         return VideoArtworkSelection.Placeholder
     }
 
-    val posterUrl = (metadataState as? ArtworkState.Resolved)
-        ?.value
-        ?.posterUrl
-        ?.takeIf { it.isNotBlank() }
+    val metadata = (metadataState as? ArtworkState.Resolved)?.value
+    val posterUrl = buildList {
+        metadata?.posterUrl?.takeIf(String::isNotBlank)?.let(::add)
+        addAll(metadata?.posterFallbackUrls.orEmpty().filter(String::isNotBlank))
+    }.distinct().getOrNull(posterFailureCount.coerceAtLeast(0))
 
     return when {
-        posterUrl != null && !posterLoadFailed -> VideoArtworkSelection.Poster(posterUrl)
+        posterUrl != null -> VideoArtworkSelection.Poster(posterUrl)
         !videoPath.isNullOrBlank() -> VideoArtworkSelection.GeneratedFrame(videoPath)
         else -> VideoArtworkSelection.Placeholder
     }
 }
+
+/** Compatibility helper for call sites that only have a single poster candidate. */
+internal fun selectVideoArtwork(
+    metadataState: ArtworkState<JvrMovieMetadata>,
+    posterLoadFailed: Boolean,
+    videoPath: String?,
+): VideoArtworkSelection = selectVideoArtwork(
+    metadataState = metadataState,
+    posterFailureCount = if (posterLoadFailed) Int.MAX_VALUE else 0,
+    videoPath = videoPath,
+)
 
 internal fun <T> ArtworkState<T>.resolvedValueOrNull(): T? {
     return (this as? ArtworkState.Resolved)?.value
@@ -58,7 +70,7 @@ internal fun <T> ArtworkState<T>.resolvedValueOrNull(): T? {
 
 internal fun selectFolderArtwork(
     artworkState: ArtworkState<BrowserFolderArtworkResolution>,
-    imageLoadFailed: Boolean,
+    imageFailureCount: Int,
 ): FolderArtworkSelection {
     if (artworkState is ArtworkState.Loading) {
         return FolderArtworkSelection.Placeholder
@@ -67,18 +79,30 @@ internal fun selectFolderArtwork(
     val resolution = artworkState.resolvedValueOrNull()
         ?: return FolderArtworkSelection.FolderIcon
     val representativeVideoPath = resolution.representativeVideo?.path
-    val posterUrl = resolution.metadata?.posterUrl?.takeIf { it.isNotBlank() }
+    val posterCandidates = buildList {
+        resolution.metadata?.posterUrl?.takeIf(String::isNotBlank)?.let(::add)
+        addAll(resolution.metadata?.posterFallbackUrls.orEmpty().filter(String::isNotBlank))
+    }.distinct()
+    val posterUrl = posterCandidates.getOrNull(imageFailureCount.coerceAtLeast(0))
 
     return when {
-        posterUrl != null && !imageLoadFailed -> FolderArtworkSelection.Poster(posterUrl)
+        posterUrl != null -> FolderArtworkSelection.Poster(posterUrl)
         !representativeVideoPath.isNullOrBlank() -> {
             FolderArtworkSelection.GeneratedFrame(representativeVideoPath)
         }
 
-        !resolution.actorArtworkUrl.isNullOrBlank() && !imageLoadFailed -> {
+        !resolution.actorArtworkUrl.isNullOrBlank() && imageFailureCount == posterCandidates.size -> {
             FolderArtworkSelection.ActorImage(resolution.actorArtworkUrl)
         }
 
         else -> FolderArtworkSelection.FolderIcon
     }
 }
+
+internal fun selectFolderArtwork(
+    artworkState: ArtworkState<BrowserFolderArtworkResolution>,
+    imageLoadFailed: Boolean,
+): FolderArtworkSelection = selectFolderArtwork(
+    artworkState = artworkState,
+    imageFailureCount = if (imageLoadFailed) Int.MAX_VALUE else 0,
+)

@@ -44,6 +44,8 @@ data class JvrMovieMetadata(
     val genres: List<String> = emptyList(),
     val casts: List<JvrCastMetadata> = emptyList(),
     val description: String? = null,
+    /** Ordered after [posterUrl]; UI advances through these before frame extraction. */
+    val posterFallbackUrls: List<String> = emptyList(),
 )
 
 data class PersistedMetadataLookup(
@@ -62,6 +64,7 @@ object JvrLibraryMetadataProvider {
 
     private const val SOURCE_JVR = "jvr"
     private const val SOURCE_AV_WIKI = "avwiki"
+    private const val SOURCE_CONFIGURED = "configured"
     private const val SOURCE_NONE = "none"
     private const val ALIAS_KIND_ENGLISH = "english"
     private const val ALIAS_KIND_JAPANESE = "japanese"
@@ -103,7 +106,7 @@ object JvrLibraryMetadataProvider {
     fun peekCached(rawCode: String): JvrMovieMetadata? {
         val code = rawCode.trim().uppercase()
         if (code.isBlank()) return null
-        return metadataCache[buildCacheKey(code, SOURCE_JVR)]
+        return metadataCache[buildCacheKey(code, SOURCE_CONFIGURED)]
     }
 
     fun buildMetadataCacheKey(rawCode: String, source: String): String {
@@ -130,6 +133,7 @@ object JvrLibraryMetadataProvider {
         if (code.isBlank()) return null
 
         val source = metadataSourceForPath(folderPath)
+        if (source == SOURCE_NONE) return null
         val cacheKey = buildCacheKey(code, source)
         return metadataCache[cacheKey]?.let { cached ->
             val normalized = normalizeCachedMetadata(cached)
@@ -148,8 +152,9 @@ object JvrLibraryMetadataProvider {
         if (code.isBlank()) return null
 
         val source = metadataSourceForPath(folderPath)
+        if (source == SOURCE_NONE) return null
         val cacheKey = buildCacheKey(code, source)
-        val allowJvrLookup = shouldLookupJvrForPath(folderPath)
+        val allowJvrLookup = source == SOURCE_CONFIGURED
 
         logMetadataTrace("Lookup request code=$code path='$folderPath' source=$source allowJvr=$allowJvrLookup")
 
@@ -190,35 +195,6 @@ object JvrLibraryMetadataProvider {
             }
 
             logMetadataTrace("DB cache hit for $cacheKey (poster=${cachedMetadata.posterUrl ?: "<none>"})")
-            return cachedMetadata
-        }
-
-        loadPersistedMetadataByCode(appContext, code)?.let { persistedByCode ->
-            val persistedMetadata = toMovieMetadata(
-                record = persistedByCode,
-                fallbackCode = code,
-            )
-            val cachedMetadata = normalizeCachedMetadata(persistedMetadata)
-
-            metadataCache[cacheKey] = cachedMetadata
-            metadataCache[buildCacheKey(cachedMetadata.code, persistedByCode.metadata.source)] =
-                cachedMetadata
-            missCache.remove(cacheKey)
-
-            if (cachedMetadata != persistedMetadata) {
-                val resolvedMetadata = savePersistedMetadata(
-                    appContext,
-                    buildCacheKey(cachedMetadata.code, persistedByCode.metadata.source),
-                    persistedByCode.metadata.source,
-                    cachedMetadata,
-                )
-                metadataCache[buildCacheKey(cachedMetadata.code, persistedByCode.metadata.source)] =
-                    resolvedMetadata
-                metadataCache[cacheKey] = resolvedMetadata
-                return resolvedMetadata
-            }
-
-            logMetadataTrace("DB code-level cache hit for code=$code source=${persistedByCode.metadata.source} (poster=${cachedMetadata.posterUrl ?: "<none>"})")
             return cachedMetadata
         }
 
@@ -388,29 +364,6 @@ object JvrLibraryMetadataProvider {
         return null
     }
 
-    suspend fun getLatestPersistedHitByCode(
-        context: Context,
-        rawCode: String,
-    ): PersistedMetadataLookup? {
-        val normalizedCode = rawCode.trim().uppercase()
-        if (normalizedCode.isBlank()) return null
-
-        val persisted = loadPersistedMetadataByCode(context.applicationContext, normalizedCode)
-            ?: return null
-        val persistedMetadata = normalizeCachedMetadata(
-            toMovieMetadata(record = persisted, fallbackCode = normalizedCode)
-        )
-        val cacheKey = persisted.metadata.cacheKey
-        metadataCache[cacheKey] = persistedMetadata
-        missCache.remove(cacheKey)
-        return PersistedMetadataLookup(
-            cacheKey = cacheKey,
-            source = persisted.metadata.source,
-            metadata = persistedMetadata,
-            isMiss = false,
-        )
-    }
-
     suspend fun refreshByCacheKey(
         context: Context,
         cacheKey: String,
@@ -426,7 +379,8 @@ object JvrLibraryMetadataProvider {
 
         val source = normalizedCacheKey.substring(0, separatorIndex)
         val code = normalizedCacheKey.substring(separatorIndex + 1).uppercase()
-        val allowJvrLookup = source == SOURCE_JVR || shouldLookupJvrForPath(fallbackFolderPath)
+        val allowJvrLookup = source == SOURCE_CONFIGURED &&
+            MetadataScopeRegistry.isEnabled(fallbackFolderPath)
 
         metadataCache.remove(normalizedCacheKey)
         missCache.remove(normalizedCacheKey)
@@ -584,6 +538,11 @@ object JvrLibraryMetadataProvider {
                 releaseDateEpochDay = metadata.releaseDate?.toEpochDay(),
                 studio = metadata.studio?.trim()?.takeIf { it.isNotBlank() },
                 description = metadata.description?.trim()?.takeIf { it.isNotBlank() },
+                posterFallbackUrls = metadata.posterFallbackUrls
+                    .filter(String::isNotBlank)
+                    .distinct()
+                    .joinToString("\n")
+                    .takeIf(String::isNotBlank),
                 isMiss = isMiss,
                 updatedAt = updatedAt,
             ),
@@ -639,52 +598,29 @@ object JvrLibraryMetadataProvider {
                     }
                 }
                 .let(::normalizeCasts),
+            posterFallbackUrls = record.metadata.posterFallbackUrls
+                ?.lineSequence()
+                ?.map(String::trim)
+                ?.filter(String::isNotBlank)
+                ?.distinct()
+                ?.toList()
+                .orEmpty(),
         )
     }
 
     private fun metadataSourceForPath(folderPath: String): String {
         val normalized = normalizeFolderPath(folderPath)
-        val hasMakerYearPattern = hasMakerYearPath(normalized)
-        val hasAvVrPattern = shouldLookupJvrForPath(normalized)
-
-        val source = when {
-            hasMakerYearPattern -> SOURCE_AV_WIKI
-            hasAvVrPattern -> SOURCE_JVR
-            else -> SOURCE_NONE
+        val source = if (MetadataScopeRegistry.isEnabled(normalized)) {
+            SOURCE_CONFIGURED
+        } else {
+            SOURCE_NONE
         }
 
         logMetadataTrace(
-            "Metadata source routing path='$folderPath' normalized='$normalized' makerYear=$hasMakerYearPattern avVr=$hasAvVrPattern -> source=$source"
+            "Metadata source routing path='$folderPath' normalized='$normalized' -> source=$source"
         )
 
         return source
-    }
-
-    private fun hasMakerYearPath(folderPath: String): Boolean {
-        val segments = folderPath
-            .split('/')
-            .map { it.trim() }
-            .filter { it.isNotEmpty() }
-
-        if (segments.size < 2) return false
-
-        for (index in 0 until segments.size - 1) {
-            val makerSegment = segments[index]
-            val yearSegment = segments[index + 1]
-            if (
-                makerSegment.equals("maker", ignoreCase = true) &&
-                yearSegment.matches(Regex("(?:19|20)\\d{2}"))
-            ) {
-                return true
-            }
-        }
-
-        return false
-    }
-
-    private fun shouldLookupJvrForPath(folderPath: String): Boolean {
-        val normalized = normalizeFolderPath(folderPath)
-        return Regex("(^|/)av/vr(/|$)", RegexOption.IGNORE_CASE).containsMatchIn(normalized)
     }
 
     private fun normalizeFolderPath(folderPath: String): String {
@@ -702,18 +638,47 @@ object JvrLibraryMetadataProvider {
     ): JvrMovieMetadata? {
         return withContext(Dispatchers.IO) {
             when (source) {
-                SOURCE_AV_WIKI -> {
-                    fetchByCodeFromAvWiki(code) ?: if (allowJvrLookup) {
-                        fetchByCodeFromJvrLibrary(code)
-                    } else {
-                        null
-                    }
-                }
-
-                SOURCE_JVR -> if (allowJvrLookup) fetchByCodeFromJvrLibrary(code) else null
+                SOURCE_CONFIGURED -> if (allowJvrLookup) {
+                    mergeProviderChain(
+                        preferred = fetchByCodeFromJvrLibrary(code),
+                        fallback = fetchByCodeFromAvWiki(code),
+                        code = code,
+                    )
+                } else null
+                SOURCE_AV_WIKI -> fetchByCodeFromAvWiki(code)
+                SOURCE_JVR -> fetchByCodeFromJvrLibrary(code)
                 else -> null
             }
         }
+    }
+
+    /** JAVLibrary wins each populated field; AV-Wiki fills only what remains missing. */
+    private fun mergeProviderChain(
+        preferred: JvrMovieMetadata?,
+        fallback: JvrMovieMetadata?,
+        code: String,
+    ): JvrMovieMetadata? {
+        if (preferred == null) return fallback
+        if (fallback == null) return preferred
+        val posters = buildList {
+            preferred.posterUrl?.takeIf(String::isNotBlank)?.let(::add)
+            addAll(preferred.posterFallbackUrls)
+            fallback.posterUrl?.takeIf(String::isNotBlank)?.let(::add)
+            addAll(fallback.posterFallbackUrls)
+        }.distinct()
+        return preferred.copy(
+            code = preferred.code.ifBlank { fallback.code.ifBlank { code } },
+            title = preferred.title.takeIf { it.isNotBlank() && it != preferred.code }
+                ?: fallback.title,
+            posterUrl = posters.firstOrNull(),
+            posterFallbackUrls = posters.drop(1),
+            releaseDate = preferred.releaseDate ?: fallback.releaseDate,
+            studio = preferred.studio?.takeIf(String::isNotBlank) ?: fallback.studio,
+            genres = preferred.genres.ifEmpty { fallback.genres },
+            casts = preferred.casts.ifEmpty { fallback.casts },
+            description = preferred.description?.takeIf(String::isNotBlank)
+                ?: fallback.description,
+        )
     }
 
     private suspend fun fetchByCodeFromAvWiki(code: String): JvrMovieMetadata? {
@@ -798,26 +763,26 @@ object JvrLibraryMetadataProvider {
         cacheKey: String,
         metadata: JvrMovieMetadata
     ): JvrMovieMetadata {
-        val remotePoster = metadata.posterUrl?.trim().orEmpty()
-        if (remotePoster.isBlank()) {
-            return metadata.copy(posterUrl = null)
-        }
+        val candidates = buildList {
+            metadata.posterUrl?.takeIf(String::isNotBlank)?.let(::add)
+            addAll(metadata.posterFallbackUrls.filter(String::isNotBlank))
+        }.distinct()
+        if (candidates.isEmpty()) return metadata.copy(posterUrl = null)
 
-        val absolutePoster = toAbsoluteUrl(remotePoster)
-        val localPoster = downloadImageToLocal(
-            context = context,
-            directoryName = "group_posters",
-            fileKey = cacheKey.lowercase().replace(':', '_').replace('/', '_'),
-            imageUrl = absolutePoster,
+        val resolved = candidates.mapIndexed { index, candidate ->
+            val absolutePoster = toAbsoluteUrl(candidate)
+            downloadImageToLocal(
+                context = context,
+                directoryName = "group_posters",
+                fileKey = cacheKey.lowercase().replace(':', '_').replace('/', '_') + "_$index",
+                imageUrl = absolutePoster,
+            ) ?: absolutePoster
+        }.distinct()
+
+        return metadata.copy(
+            posterUrl = resolved.firstOrNull(),
+            posterFallbackUrls = resolved.drop(1),
         )
-
-        if (localPoster != null) {
-            Log.d(TAG, "Poster localized for $cacheKey: $localPoster")
-            return metadata.copy(posterUrl = localPoster)
-        }
-
-        Log.w(TAG, "Poster localization failed for $cacheKey. Falling back to generated thumbnail.")
-        return metadata.copy(posterUrl = null)
     }
 
     private suspend fun localizeCastImages(
@@ -932,25 +897,6 @@ object JvrLibraryMetadataProvider {
         }
     }
 
-    private suspend fun loadPersistedMetadataByCode(
-        context: Context,
-        code: String
-    ): VirtualGroupMetadataRecord? {
-        return withContext(Dispatchers.IO) {
-            try {
-                AppDatabase.getDatabase(context)
-                    .virtualGroupMetadataDao()
-                    .getLatestHitByCode(code)
-            } catch (e: Exception) {
-                Log.w(
-                    TAG,
-                    "Failed to load virtual group metadata by code from DB for $code: ${e.message}"
-                )
-                null
-            }
-        }
-    }
-
     private suspend fun loadPersistedMetadata(
         context: Context,
         cacheKey: String
@@ -1042,6 +988,14 @@ object JvrLibraryMetadataProvider {
             studio = validated.studio?.trim()?.takeIf { it.isNotBlank() },
             genres = normalizeGenres(validated.genres),
             casts = normalizeCasts(validateLocalCastImagePaths(validated.casts)),
+            posterFallbackUrls = validated.posterFallbackUrls
+                .mapNotNull { candidate ->
+                    validateLocalImageUrl(candidate)
+                        ?: candidate.takeUnless(::isLocalImageUrl)
+                }
+                .filter(String::isNotBlank)
+                .distinct()
+                .filterNot { it == validated.posterUrl },
         )
     }
 

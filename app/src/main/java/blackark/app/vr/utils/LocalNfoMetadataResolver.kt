@@ -213,7 +213,7 @@ class LocalNfoMetadataResolver(
                 ?: posterUrl?.let { artworkUrl ->
                     JvrMovieMetadata(
                         code = fallbackCode.uppercase(Locale.US),
-                        title = fallbackCode,
+                        title = "",
                         posterUrl = artworkUrl,
                     )
                 }
@@ -523,9 +523,16 @@ class LocalNfoMetadataResolver(
 
 fun JvrMovieMetadata.mergeLocalFirst(remote: JvrMovieMetadata?): JvrMovieMetadata {
     if (remote == null) return this
+    val orderedPosters = buildList {
+        posterUrl?.takeIf(String::isNotBlank)?.let(::add)
+        addAll(posterFallbackUrls.filter(String::isNotBlank))
+        remote.posterUrl?.takeIf(String::isNotBlank)?.let(::add)
+        addAll(remote.posterFallbackUrls.filter(String::isNotBlank))
+    }.distinct()
     return copy(
         title = title.takeIf { it.isNotBlank() } ?: remote.title,
-        posterUrl = posterUrl?.takeIf { it.isNotBlank() } ?: remote.posterUrl,
+        posterUrl = orderedPosters.firstOrNull(),
+        posterFallbackUrls = orderedPosters.drop(1),
         releaseDate = releaseDate ?: remote.releaseDate,
         studio = studio?.takeIf { it.isNotBlank() } ?: remote.studio,
         genres = genres.takeIf { it.isNotEmpty() } ?: remote.genres,

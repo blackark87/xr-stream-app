@@ -24,4 +24,5 @@ data class VirtualGroupMetadata(
     val isMiss: Boolean,
     val updatedAt: Long,
     val description: String? = null,
+    val posterFallbackUrls: String? = null,
 )

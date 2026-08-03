@@ -66,6 +66,11 @@ object AppState {
         }
     }
 
+    fun resetDashboardPanelPlacement() {
+        _dashboardPanelPose.value = null
+        _dashboardPanelSize.value = DashboardPanelSize()
+    }
+
     fun setConsumePlaybackBackKeyEvents(enabled: Boolean) {
         _consumePlaybackBackKeyEvents.value = enabled
     }

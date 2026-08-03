@@ -4,6 +4,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import blackark.app.vr.data.database.entity.SavedServer
 import blackark.app.vr.data.repository.ServerRepository
+import blackark.app.vr.data.security.SmbCredentialStore
+import blackark.app.vr.data.security.SmbCredentials
 import blackark.app.vr.network.SMBClient
 import blackark.app.vr.network.SMBConfig
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -20,7 +22,8 @@ data class ServerConnectionState(
 )
 
 class ServerConnectionViewModel(
-    private val serverRepository: ServerRepository
+    private val serverRepository: ServerRepository,
+    private val credentialStore: SmbCredentialStore,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(ServerConnectionState())
@@ -74,14 +77,17 @@ class ServerConnectionViewModel(
 
                     // Save server if requested
                     if (saveCredentials) {
+                        val credentialAlias = SmbCredentialStore.aliasForNewServer()
+                        credentialStore.save(
+                            credentialAlias,
+                            SmbCredentials(username, password, domain),
+                        )
                         val server = SavedServer(
                             serverName = serverName,
                             serverAddress = serverAddress,
                             port = port,
                             shareName = shareName,
-                            username = username,
-                            password = password,
-                            domain = domain,
+                            credentialAlias = credentialAlias,
                             lastConnected = System.currentTimeMillis()
                         )
 
@@ -119,14 +125,15 @@ class ServerConnectionViewModel(
     }
 
     fun connectToSavedServer(server: SavedServer) {
+        val credentials = credentialStore.load(server.credentialAlias)
         connectToServer(
             serverName = server.serverName,
             serverAddress = server.serverAddress,
             port = server.port,
             shareName = server.shareName,
-            username = server.username,
-            password = server.password,
-            domain = server.domain,
+            username = credentials.username,
+            password = credentials.password,
+            domain = credentials.domain,
             saveCredentials = false // Already saved
         )
 
@@ -140,6 +147,7 @@ class ServerConnectionViewModel(
 
     fun deleteSavedServer(server: SavedServer) {
         viewModelScope.launch {
+            credentialStore.delete(server.credentialAlias)
             serverRepository.deleteServer(server)
         }
     }

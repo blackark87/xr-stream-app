@@ -284,7 +284,8 @@ fun XRPlaybackControls(
 
         if (
             content != XRPlaybackControlsContent.MenuOnly &&
-                playerState.seekPreviewActive
+                playerState.seekPreviewActive &&
+                playerState.videoFormat == VideoFormat.Format2D
         ) {
             PlaybackSeekPreviewCard(
                 targetPositionMs = playerState.seekPreviewTargetPositionMs,
@@ -392,7 +393,89 @@ fun XRPlaybackControls(
                                 }
                             }
 
+                            if (playerState.audioTracks.isNotEmpty()) {
+                                Text(
+                                    text = "Audio track",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = textMuted,
+                                )
+                                playerState.audioTracks.chunked(2).forEach { row ->
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    ) {
+                                        row.forEach { track ->
+                                            PlaybackOptionButton(
+                                                text = track.label,
+                                                selected = track.selected,
+                                                onClick = {
+                                                    videoPlayerViewModel.selectAudioTrack(track)
+                                                },
+                                                selectedContainerColor = accentStrong,
+                                                selectedContentColor = onAccent,
+                                                idleContainerColor = chipIdle,
+                                                idleContentColor = textStrong,
+                                                borderColor = sectionBorder,
+                                                modifier = Modifier.weight(1f),
+                                            )
+                                        }
+                                        if (row.size == 1) Spacer(Modifier.weight(1f))
+                                    }
+                                }
+                            }
+
+                            if (playerState.textTracks.isNotEmpty()) {
+                                Text(
+                                    text = "Subtitle track",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = textMuted,
+                                )
+                                playerState.textTracks.chunked(2).forEach { row ->
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    ) {
+                                        row.forEach { track ->
+                                            PlaybackOptionButton(
+                                                text = track.label,
+                                                selected = track.selected,
+                                                onClick = {
+                                                    videoPlayerViewModel.selectTextTrack(track)
+                                                },
+                                                selectedContainerColor = accentStrong,
+                                                selectedContentColor = onAccent,
+                                                idleContainerColor = chipIdle,
+                                                idleContentColor = textStrong,
+                                                borderColor = sectionBorder,
+                                                modifier = Modifier.weight(1f),
+                                            )
+                                        }
+                                        if (row.size == 1) Spacer(Modifier.weight(1f))
+                                    }
+                                }
+                            }
+
                             if (playerState.videoFormat != VideoFormat.Format2D) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Button(
+                                        onClick = { videoPlayerViewModel.adjustZoom(-0.1f) },
+                                        modifier = Modifier.weight(1f),
+                                    ) { Text("FOV -") }
+                                    Text(
+                                        text = "${(playerState.zoomLevel * 100).roundToInt()}%",
+                                        color = textStrong,
+                                    )
+                                    Button(
+                                        onClick = { videoPlayerViewModel.adjustZoom(0.1f) },
+                                        modifier = Modifier.weight(1f),
+                                    ) { Text("FOV +") }
+                                }
                                 Text(
                                     text = "Stereo",
                                     style = MaterialTheme.typography.labelLarge,
@@ -865,6 +948,43 @@ fun XRPlaybackControls(
                             style = MaterialTheme.typography.labelLarge,
                             color = textMuted,
                         )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        PlaybackOptionButton(
+                            text = playerState.repeatPointA?.let { "A ${formatTime(it)}" } ?: "Set A",
+                            selected = playerState.repeatPointA != null,
+                            onClick = videoPlayerViewModel::setRepeatPointA,
+                            selectedContainerColor = accentStrong,
+                            selectedContentColor = onAccent,
+                            idleContainerColor = chipIdle,
+                            idleContentColor = textStrong,
+                            borderColor = sectionBorder,
+                            modifier = Modifier.weight(1f),
+                        )
+                        PlaybackOptionButton(
+                            text = playerState.repeatPointB?.let { "B ${formatTime(it)}" } ?: "Set B",
+                            selected = playerState.repeatPointB != null,
+                            onClick = videoPlayerViewModel::setRepeatPointB,
+                            selectedContainerColor = accentStrong,
+                            selectedContentColor = onAccent,
+                            idleContainerColor = chipIdle,
+                            idleContentColor = textStrong,
+                            borderColor = sectionBorder,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Button(
+                            onClick = videoPlayerViewModel::clearRepeatRange,
+                            enabled = playerState.repeatPointA != null,
+                        ) {
+                            Text("Clear A-B")
+                        }
+                        Button(onClick = videoPlayerViewModel::recenterView) {
+                            Text("Recenter")
+                        }
                     }
                 }
             }

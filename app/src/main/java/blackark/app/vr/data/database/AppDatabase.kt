@@ -7,6 +7,8 @@ import androidx.room.RoomDatabase
 import blackark.app.vr.data.database.dao.AvLibraryDao
 import blackark.app.vr.data.database.dao.FavoriteVideoDao
 import blackark.app.vr.data.database.dao.ServerDao
+import blackark.app.vr.data.database.dao.MetadataScopeDao
+import blackark.app.vr.data.database.dao.QuickAccessFolderDao
 import blackark.app.vr.data.database.dao.VideoDao
 import blackark.app.vr.data.database.dao.VideoDisplaySettingsDao
 import blackark.app.vr.data.database.dao.VirtualGroupMetadataDao
@@ -18,6 +20,8 @@ import blackark.app.vr.data.database.entity.JvrPerformerAlias
 import blackark.app.vr.data.database.entity.JvrPerformerMergeRule
 import blackark.app.vr.data.database.entity.RecentVideo
 import blackark.app.vr.data.database.entity.SavedServer
+import blackark.app.vr.data.database.entity.MetadataScope
+import blackark.app.vr.data.database.entity.QuickAccessFolder
 import blackark.app.vr.data.database.entity.VideoDisplaySettings
 import blackark.app.vr.data.database.entity.VirtualGroupMetadata
 import blackark.app.vr.data.database.entity.VirtualGroupMetadataGenre
@@ -26,6 +30,8 @@ import blackark.app.vr.data.database.entity.VirtualGroupMetadataPerformerCrossRe
 @Database(
     entities = [
         SavedServer::class,
+        MetadataScope::class,
+        QuickAccessFolder::class,
         RecentVideo::class,
         FavoriteVideo::class,
         VideoDisplaySettings::class,
@@ -38,11 +44,13 @@ import blackark.app.vr.data.database.entity.VirtualGroupMetadataPerformerCrossRe
         JvrPerformerMergeRule::class,
         VirtualGroupMetadataPerformerCrossRef::class,
     ],
-    version = 15,
+    version = 16,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun serverDao(): ServerDao
+    abstract fun metadataScopeDao(): MetadataScopeDao
+    abstract fun quickAccessFolderDao(): QuickAccessFolderDao
     abstract fun videoDao(): VideoDao
     abstract fun favoriteVideoDao(): FavoriteVideoDao
     abstract fun videoDisplaySettingsDao(): VideoDisplaySettingsDao

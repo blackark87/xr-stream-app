@@ -11,9 +11,15 @@ import blackark.app.vr.data.database.entity.AvLibraryAsset
 import blackark.app.vr.data.database.entity.FavoriteVideo
 import blackark.app.vr.data.database.entity.RecentVideo
 import blackark.app.vr.data.database.entity.SavedServer
+import blackark.app.vr.data.database.entity.MetadataScope
+import blackark.app.vr.data.database.entity.QuickAccessFolder
 import blackark.app.vr.data.repository.AvLibraryRepository
+import blackark.app.vr.data.repository.MetadataScopeRepository
+import blackark.app.vr.data.repository.QuickAccessRepository
 import blackark.app.vr.data.repository.ServerRepository
 import blackark.app.vr.data.repository.VideoRepository
+import blackark.app.vr.data.security.SmbCredentialStore
+import blackark.app.vr.data.security.SmbCredentials
 import blackark.app.vr.network.LocalFileClient
 import blackark.app.vr.network.SMBClient
 import blackark.app.vr.network.SMBConfig
@@ -25,6 +31,8 @@ import blackark.app.vr.utils.BrowserFolderArtworkKind
 import blackark.app.vr.utils.JvrLibraryMetadataProvider
 import blackark.app.vr.utils.JvrMovieMetadata
 import blackark.app.vr.utils.LocalNfoMetadataResolver
+import blackark.app.vr.utils.MetadataScopePaths
+import blackark.app.vr.utils.MetadataScopeRegistry
 import blackark.app.vr.utils.PersistedMetadataLookup
 import blackark.app.vr.utils.mergeLocalFirst
 import blackark.app.vr.utils.buildAssetKey
@@ -101,6 +109,9 @@ class MainDashboardViewModel(
     private val serverRepository: ServerRepository,
     private val videoRepository: VideoRepository,
     private val avLibraryRepository: AvLibraryRepository,
+    private val metadataScopeRepository: MetadataScopeRepository,
+    private val quickAccessRepository: QuickAccessRepository,
+    private val credentialStore: SmbCredentialStore,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(
@@ -125,6 +136,22 @@ class MainDashboardViewModel(
             started = SharingStarted.WhileSubscribed(5000),
             initialValue = emptyList()
         )
+
+    val metadataScopes: StateFlow<List<MetadataScope>> = metadataScopeRepository.allScopes
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptyList(),
+        )
+
+    val quickAccessFolders: StateFlow<List<QuickAccessFolder>> = quickAccessRepository.folders
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val allRecentVideos: StateFlow<List<RecentVideo>> = videoRepository.getRecentVideos(50)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val allFavorites: StateFlow<List<FavoriteVideo>> = videoRepository.getFavoriteVideos()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     private val _files = MutableStateFlow<List<SMBFileItem>>(emptyList())
     val files: StateFlow<List<SMBFileItem>> = _files.asStateFlow()
@@ -181,8 +208,8 @@ class MainDashboardViewModel(
     private val systemZoneId: ZoneId = ZoneId.systemDefault()
 
     private data class IndexedMetadataResolution(
-        val lookup: PersistedMetadataLookup?,
-        val hasPersistedMiss: Boolean,
+        val lookup: PersistedMetadataLookup? = null,
+        val hasPersistedMiss: Boolean = false,
     )
 
     private data class MetadataChainResolution(
@@ -310,14 +337,19 @@ class MainDashboardViewModel(
             .toEpochDay()
     }
 
-    fun addServer(server: SavedServer) {
+    fun loadCredentials(server: SavedServer): SmbCredentials =
+        credentialStore.load(server.credentialAlias)
+
+    fun addServer(server: SavedServer, credentials: SmbCredentials) {
         viewModelScope.launch {
+            credentialStore.save(server.credentialAlias, credentials)
             serverRepository.insertServer(server)
         }
     }
 
-    fun updateServer(server: SavedServer) {
+    fun updateServer(server: SavedServer, credentials: SmbCredentials) {
         viewModelScope.launch {
+            credentialStore.save(server.credentialAlias, credentials)
             serverRepository.updateServer(server)
             if (_uiState.value.selectedServer?.id == server.id) {
                 disconnect()
@@ -327,6 +359,7 @@ class MainDashboardViewModel(
 
     fun deleteServer(server: SavedServer) {
         viewModelScope.launch {
+            credentialStore.delete(server.credentialAlias)
             serverRepository.deleteServer(server)
             if (_uiState.value.selectedServer?.id == server.id) {
                 disconnect()
@@ -334,15 +367,18 @@ class MainDashboardViewModel(
         }
     }
 
-    suspend fun testConnection(server: SavedServer): Result<Unit> {
+    suspend fun testConnection(
+        server: SavedServer,
+        credentials: SmbCredentials,
+    ): Result<Unit> {
         return try {
             val config = SMBConfig(
                 serverAddress = server.serverAddress,
                 port = server.port,
                 shareName = server.shareName,
-                username = server.username,
-                password = server.password,
-                domain = server.domain
+                username = credentials.username,
+                password = credentials.password,
+                domain = credentials.domain,
             )
 
             val client = SMBClient(config)
@@ -354,7 +390,7 @@ class MainDashboardViewModel(
         }
     }
 
-    fun connectToServer(server: SavedServer) {
+    fun connectToServer(server: SavedServer, requestedPath: String? = null) {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(
                 isConnecting = true,
@@ -394,13 +430,14 @@ class MainDashboardViewModel(
                         connectionResult
                     }
                 } else {
+                    val credentials = credentialStore.load(server.credentialAlias)
                     val config = SMBConfig(
                         serverAddress = server.serverAddress,
                         port = server.port,
                         shareName = server.shareName,
-                        username = server.username,
-                        password = server.password,
-                        domain = server.domain
+                        username = credentials.username,
+                        password = credentials.password,
+                        domain = credentials.domain,
                     )
 
                     val client = SMBClient(config)
@@ -417,6 +454,9 @@ class MainDashboardViewModel(
                         serverRepository.updateLastConnected(connectedServer.id)
                     }
 
+                    val restoredPath = requestedPath
+                        ?: AppSettingsStore.getLastFolder(context.applicationContext, server.id)
+                        ?: ""
                     _uiState.value = _uiState.value.copy(
                         isConnecting = false,
                         isConnected = true,
@@ -430,7 +470,10 @@ class MainDashboardViewModel(
                         ),
                     )
 
-                    loadFiles("")
+                    loadFiles(
+                        path = restoredPath,
+                        fallbackToRootOnFailure = restoredPath.isNotBlank(),
+                    )
                     refreshAvSnapshot(
                         buildSourceScope(
                             connectedServer.serverAddress,
@@ -525,7 +568,10 @@ class MainDashboardViewModel(
         _files.value = emptyList()
     }
 
-    fun loadFiles(path: String) {
+    fun loadFiles(
+        path: String,
+        fallbackToRootOnFailure: Boolean = false,
+    ) {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(
                 isLoadingFiles = true,
@@ -558,8 +604,19 @@ class MainDashboardViewModel(
                         currentPath = path,
                         errorMessage = null
                     )
+                    _uiState.value.selectedServer?.id?.let { serverId ->
+                        AppSettingsStore.setLastFolder(
+                            context.applicationContext,
+                            serverId,
+                            path,
+                        )
+                    }
                     syncCurrentListingForAv(sortedFiles)
                 } else {
+                    if (fallbackToRootOnFailure && path.isNotBlank()) {
+                        loadFiles("")
+                        return@launch
+                    }
                     _uiState.value = _uiState.value.copy(
                         isLoadingFiles = false,
                         errorMessage = result.exceptionOrNull()?.message ?: "Failed to load files"
@@ -568,6 +625,10 @@ class MainDashboardViewModel(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
+                if (fallbackToRootOnFailure && path.isNotBlank()) {
+                    loadFiles("")
+                    return@launch
+                }
                 _uiState.value = _uiState.value.copy(
                     isLoadingFiles = false,
                     errorMessage = e.message ?: "Error loading files"
@@ -942,25 +1003,82 @@ class MainDashboardViewModel(
         }
     }
 
+    fun addCurrentFolderMetadataScope() {
+        val server = _uiState.value.selectedServer ?: return
+        if (server.id <= 0L) return
+        val currentPath = _uiState.value.currentPath
+        val canonicalPath = if (server.isLocalStorage) {
+            MetadataScopePaths.canonicalize(
+                currentPath.ifBlank { server.shareName }
+            )
+        } else {
+            MetadataScopePaths.forServerFolder(
+                serverAddress = server.serverAddress,
+                port = server.port,
+                shareName = server.shareName,
+                folderPath = currentPath,
+            )
+        }
+        if (canonicalPath.isBlank()) return
+
+        viewModelScope.launch {
+            metadataScopeRepository.add(
+                MetadataScope(
+                    serverId = server.id,
+                    canonicalPath = canonicalPath,
+                    displayPath = currentPath.ifBlank { "/" },
+                )
+            )
+        }
+    }
+
+    fun addCurrentFolderToQuickAccess() {
+        val server = _uiState.value.selectedServer ?: return
+        if (server.id <= 0L) return
+        val path = _uiState.value.currentPath
+        val displayName = path.trimEnd('/').substringAfterLast('/').ifBlank { server.serverName }
+        viewModelScope.launch {
+            quickAccessRepository.add(
+                QuickAccessFolder(
+                    serverId = server.id,
+                    path = path,
+                    displayName = displayName,
+                )
+            )
+        }
+    }
+
+    fun openQuickAccess(folder: QuickAccessFolder) {
+        viewModelScope.launch {
+            val server = serverRepository.getServerById(folder.serverId) ?: return@launch
+            connectToServer(server, folder.path)
+        }
+    }
+
+    fun removeQuickAccess(folder: QuickAccessFolder) {
+        viewModelScope.launch { quickAccessRepository.delete(folder.id) }
+    }
+
+    fun setMetadataScopeEnabled(scope: MetadataScope, enabled: Boolean) {
+        viewModelScope.launch {
+            metadataScopeRepository.update(scope.copy(enabled = enabled))
+            if (enabled) startAvLibraryIndexingIfEnabled(_uiState.value.selectedServer ?: return@launch)
+        }
+    }
+
+    fun setMetadataScopeRecursive(scope: MetadataScope, recursive: Boolean) {
+        viewModelScope.launch {
+            metadataScopeRepository.update(scope.copy(includeDescendants = recursive))
+        }
+    }
+
+    fun deleteMetadataScope(scope: MetadataScope) {
+        viewModelScope.launch { metadataScopeRepository.delete(scope.id) }
+    }
+
     fun rescanAvMetadata() {
         val server = _uiState.value.selectedServer ?: return
-        viewModelScope.launch(Dispatchers.IO) {
-            val sourceScope = buildSourceScope(server.serverAddress, server.shareName)
-            val scanStartedAt = System.currentTimeMillis()
-            _files.value
-                .filter { !it.isDirectory && SMBClient.isVideoFile(it.name) && !isTrailerFile(it.name) }
-                .forEach { file ->
-                    processScannedVideo(
-                        sourceScope = sourceScope,
-                        file = file,
-                        scanStartedAt = scanStartedAt,
-                        allowFingerprint = false,
-                        forceMetadataRefresh = true,
-                    )
-                }
-            refreshAvSnapshot(sourceScope)
-            bumpFileMetadataRefreshToken()
-        }
+        startAvLibraryIndexing(server, forceMetadataRefresh = true)
     }
 
     fun mergeAvPerformers(
@@ -1426,7 +1544,10 @@ class MainDashboardViewModel(
         startAvLibraryIndexing(server)
     }
 
-    private fun startAvLibraryIndexing(server: SavedServer) {
+    private fun startAvLibraryIndexing(
+        server: SavedServer,
+        forceMetadataRefresh: Boolean = false,
+    ) {
         avScanJob?.cancel()
         avScanJob = viewModelScope.launch {
             val sourceScope = buildSourceScope(server.serverAddress, server.shareName)
@@ -1444,7 +1565,20 @@ class MainDashboardViewModel(
             var refreshCounter = 0
 
             try {
-                val directories = ArrayDeque(resolveScanRoots())
+                val scanRoots = resolveScanRoots(server)
+                if (scanRoots.isEmpty()) {
+                    updateScanState(
+                        _uiState.value.avLibrary.scan.copy(
+                            isRunning = false,
+                            currentPath = null,
+                            scannedFileCount = 0,
+                            lastCompletedAt = System.currentTimeMillis(),
+                            errorMessage = null,
+                        )
+                    )
+                    return@launch
+                }
+                val directories = ArrayDeque(scanRoots)
                 while (directories.isNotEmpty() && isActive) {
                     val path = directories.removeFirst()
                     updateScanState(
@@ -1468,11 +1602,17 @@ class MainDashboardViewModel(
                     items.forEach { item ->
                         if (item.isDirectory) {
                             val nextPath = buildNextScanPath(path, item)
-                            if (nextPath != null) {
+                            val activeScope = nextPath?.let(MetadataScopeRegistry::resolve)
+                            if (nextPath != null && activeScope?.includeDescendants == true) {
                                 directories.addLast(nextPath)
                             }
                         } else if (SMBClient.isVideoFile(item.name)) {
-                            processScannedVideo(sourceScope, item, scanStartedAt)
+                            processScannedVideo(
+                                sourceScope = sourceScope,
+                                file = item,
+                                scanStartedAt = scanStartedAt,
+                                forceMetadataRefresh = forceMetadataRefresh,
+                            )
                             scannedFiles += 1
                             refreshCounter += 1
                             if (refreshCounter >= 20) {
@@ -1571,12 +1711,8 @@ class MainDashboardViewModel(
             )
         }
 
-        val codeLookup = JvrLibraryMetadataProvider.getLatestPersistedHitByCode(
-            context = context.applicationContext,
-            rawCode = normalizedCode,
-        )
         return IndexedMetadataResolution(
-            lookup = codeLookup,
+            lookup = null,
             hasPersistedMiss = hasPersistedMiss,
         )
     }
@@ -1623,15 +1759,18 @@ class MainDashboardViewModel(
         )
         val localMetadata = localSidecar.metadata
         val localPosterUrl = localSidecar.posterUrl?.takeIf { it.isNotBlank() }
-        val indexedResolution = resolveIndexedMetadata(
-            normalizedCode = normalizedCode,
-            resolvedAsset = resolvedAsset,
-            resolvedSource = resolvedSource,
-        )
+        val indexedResolution = if (resolvedSource != null) {
+            resolveIndexedMetadata(
+                normalizedCode = normalizedCode,
+                resolvedAsset = resolvedAsset,
+                resolvedSource = resolvedSource,
+            )
+        } else {
+            IndexedMetadataResolution()
+        }
 
         val shouldAttemptRemoteLookup =
-            localMetadata == null &&
-                    indexedResolution.lookup?.metadata == null &&
+            indexedResolution.lookup?.metadata == null &&
                     resolvedSource != null &&
                     (forceMetadataRefresh || !indexedResolution.hasPersistedMiss)
 
@@ -1647,16 +1786,19 @@ class MainDashboardViewModel(
         }
 
         val downstreamMetadata = indexedResolution.lookup?.metadata ?: remoteMetadata
-        val finalMetadata = when {
-            localMetadata != null -> localMetadata.mergeLocalFirst(downstreamMetadata)
-            localPosterUrl != null && downstreamMetadata != null -> {
-                downstreamMetadata.copy(posterUrl = localPosterUrl)
-            }
-            else -> downstreamMetadata
+        val localStage = localMetadata ?: localPosterUrl?.let { poster ->
+            JvrMovieMetadata(
+                code = normalizedCode,
+                title = "",
+                posterUrl = poster,
+            )
         }
+        val finalMetadata = (localStage?.mergeLocalFirst(downstreamMetadata) ?: downstreamMetadata)
+            ?.let { metadata ->
+                if (metadata.title.isBlank()) metadata.copy(title = normalizedCode) else metadata
+            }
 
-        val localCompositeMetadata =
-            localMetadata != null || (localPosterUrl != null && downstreamMetadata != null)
+        val localCompositeMetadata = localStage != null
         if (finalMetadata != null && localCompositeMetadata) {
             val localCacheKey = JvrLibraryMetadataProvider.buildMetadataCacheKey(
                 rawCode = normalizedCode,
@@ -1924,25 +2066,25 @@ class MainDashboardViewModel(
         }
     }
 
-    private suspend fun resolveScanRoots(): List<String> {
-        return when {
-            localClient != null -> {
-                val roots = localClient!!.listFiles("")
-                    .getOrNull()
-                    .orEmpty()
-                    .filter { it.isDirectory }
-                    .map { it.path }
-                    .distinct()
-                    .sortedBy { it.length }
-
-                roots.filter { candidate ->
-                    roots.none { other ->
-                        other != candidate && candidate.startsWith("${other.trimEnd('/')}/")
-                    }
-                }
+    private fun resolveScanRoots(server: SavedServer): List<String> {
+        val roots = metadataScopes.value
+            .asSequence()
+            .filter { it.serverId == server.id && it.enabled }
+            .map { MetadataScopePaths.canonicalize(it.canonicalPath) }
+            .filter(String::isNotBlank)
+            .distinct()
+            .sortedBy(String::length)
+            .toList()
+        return roots.filter { candidate ->
+            roots.none { other ->
+                other != candidate && candidate.regionMatches(
+                    0,
+                    "${other.trimEnd('/')}/",
+                    0,
+                    other.trimEnd('/').length + 1,
+                    ignoreCase = true,
+                )
             }
-
-            else -> listOf("")
         }
     }
 
@@ -1958,7 +2100,13 @@ class MainDashboardViewModel(
         return when {
             localClient != null -> item.path
             smbClient != null -> {
-                if (currentPath.isBlank()) item.name else "$currentPath/${item.name}"
+                if (currentPath.startsWith("smb://", ignoreCase = true)) {
+                    item.path
+                } else if (currentPath.isBlank()) {
+                    item.name
+                } else {
+                    "$currentPath/${item.name}"
+                }
             }
 
             else -> null
