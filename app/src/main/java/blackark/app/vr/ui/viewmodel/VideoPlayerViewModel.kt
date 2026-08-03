@@ -18,6 +18,7 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.common.Tracks
+import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.text.Cue
 import androidx.media3.common.text.CueGroup
 import androidx.media3.common.util.UnstableApi
@@ -149,6 +150,17 @@ data class VideoPlayerState(
         DEFAULT_IMMERSIVE_UI_HORIZONTAL_OFFSET_METERS,
     val subtitleCues: List<Cue> = emptyList(),
     val externalSubtitleFileName: String? = null,
+    val repeatPointA: Long? = null,
+    val repeatPointB: Long? = null,
+    val audioTracks: List<PlayerTrackOption> = emptyList(),
+    val textTracks: List<PlayerTrackOption> = emptyList(),
+)
+
+data class PlayerTrackOption(
+    val groupIndex: Int,
+    val trackIndex: Int,
+    val label: String,
+    val selected: Boolean,
 )
 
 enum class PlaybackMenu {
@@ -333,6 +345,92 @@ class VideoPlayerViewModel(
         )
         player?.currentTracks?.let(::logSubtitleTrackState)
         scheduleControlsAutoHideIfNeeded()
+    }
+
+    fun setRepeatPointA() {
+        val position = exoPlayer?.currentPosition?.coerceAtLeast(0L) ?: return
+        val current = _state.value
+        _state.value = current.copy(
+            repeatPointA = position,
+            repeatPointB = current.repeatPointB?.takeIf { it > position },
+        )
+        keepControlsVisibleWhileNotPlaying()
+    }
+
+    fun setRepeatPointB() {
+        val position = exoPlayer?.currentPosition?.coerceAtLeast(0L) ?: return
+        val current = _state.value
+        val pointA = current.repeatPointA
+        _state.value = if (pointA == null || position <= pointA) {
+            current.copy(repeatPointA = position, repeatPointB = null)
+        } else {
+            current.copy(repeatPointB = position)
+        }
+        keepControlsVisibleWhileNotPlaying()
+    }
+
+    fun clearRepeatRange() {
+        _state.value = _state.value.copy(repeatPointA = null, repeatPointB = null)
+        scheduleControlsAutoHideIfNeeded()
+    }
+
+    fun recenterView() {
+        blackark.app.vr.AppState.resetDashboardPanelPlacement()
+        _state.value = _state.value.copy(zoomLevel = 1.0f)
+        scheduleControlsAutoHideIfNeeded()
+    }
+
+    fun selectAudioTrack(option: PlayerTrackOption) {
+        selectTrack(C.TRACK_TYPE_AUDIO, option)
+    }
+
+    fun selectTextTrack(option: PlayerTrackOption) {
+        selectTrack(C.TRACK_TYPE_TEXT, option)
+        if (!_state.value.subtitlesEnabled) toggleSubtitles()
+    }
+
+    private fun selectTrack(trackType: Int, option: PlayerTrackOption) {
+        val player = exoPlayer ?: return
+        val group = player.currentTracks.groups.getOrNull(option.groupIndex) ?: return
+        if (group.type != trackType || option.trackIndex !in 0 until group.length) return
+        val override = TrackSelectionOverride(group.mediaTrackGroup, listOf(option.trackIndex))
+        player.trackSelectionParameters = player.trackSelectionParameters
+            .buildUpon()
+            .setOverrideForType(override)
+            .build()
+        updateTrackOptions(player.currentTracks)
+        scheduleControlsAutoHideIfNeeded()
+    }
+
+    private fun updateTrackOptions(tracks: Tracks) {
+        fun optionsFor(type: Int): List<PlayerTrackOption> = buildList {
+            tracks.groups.forEachIndexed { groupIndex, group ->
+                if (group.type != type) return@forEachIndexed
+                for (trackIndex in 0 until group.length) {
+                    if (!group.isTrackSupported(trackIndex)) continue
+                    val format = group.getTrackFormat(trackIndex)
+                    val label = format.label?.takeIf(String::isNotBlank)
+                        ?: format.language?.takeIf(String::isNotBlank)
+                        ?: if (type == C.TRACK_TYPE_AUDIO) {
+                            "Audio ${size + 1}"
+                        } else {
+                            "Subtitle ${size + 1}"
+                        }
+                    add(
+                        PlayerTrackOption(
+                            groupIndex = groupIndex,
+                            trackIndex = trackIndex,
+                            label = label,
+                            selected = group.isTrackSelected(trackIndex),
+                        )
+                    )
+                }
+            }
+        }
+        _state.value = _state.value.copy(
+            audioTracks = optionsFor(C.TRACK_TYPE_AUDIO),
+            textTracks = optionsFor(C.TRACK_TYPE_TEXT),
+        )
     }
 
     fun setSubtitleTextSize(textSize: SubtitleTextSize) {
@@ -672,6 +770,7 @@ class VideoPlayerViewModel(
                         context = context,
                         videoPath = videoPath,
                         targetPositionMs = nextTarget,
+                        preserveVrProjection = _state.value.videoFormat != VideoFormat.Format2D,
                     )
 
                 if (!isActive) {
@@ -1412,6 +1511,10 @@ class VideoPlayerViewModel(
                     immersiveUiHorizontalOffsetMeters = initialImmersiveUiHorizontalOffsetMeters,
                     subtitleCues = emptyList(),
                     externalSubtitleFileName = null,
+                    repeatPointA = null,
+                    repeatPointB = null,
+                    audioTracks = emptyList(),
+                    textTracks = emptyList(),
                 )
                 viewModelScope.launch {
                     VideoFramePreviewExtractor.prepareVideo(
@@ -1571,6 +1674,7 @@ class VideoPlayerViewModel(
                             override fun onTracksChanged(tracks: Tracks) {
                                 if (initializationGeneration != playerGeneration) return
                                 logSubtitleTrackState(tracks)
+                                updateTrackOptions(tracks)
                                 if (!autoDisplayInferencePending) {
                                     return
                                 }
@@ -2332,6 +2436,14 @@ class VideoPlayerViewModel(
         positionTrackingJob = viewModelScope.launch {
             while (isActive) {
                 exoPlayer?.let { player ->
+                    val repeatA = _state.value.repeatPointA
+                    val repeatB = _state.value.repeatPointB
+                    if (
+                        repeatA != null && repeatB != null &&
+                        repeatB > repeatA && player.currentPosition >= repeatB
+                    ) {
+                        player.seekTo(repeatA)
+                    }
                     _state.value = _state.value.copy(
                         currentPosition = player.currentPosition,
                         duration = player.duration,

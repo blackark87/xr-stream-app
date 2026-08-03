@@ -93,29 +93,18 @@ val internalGitSha = resolveGitSha()
 android {
     namespace = "blackark.app.vr"
     compileSdk {
-        version = release(36)
+        version = release(37)
     }
 
     defaultConfig {
         applicationId = "blackark.app.vr"
         minSdk = 34
-        targetSdk = 36
+    targetSdk = 37
         versionCode = internalVersionCode
         versionName = internalVersionName
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-        val defaultSmbUsername = (project.findProperty("SMB_DEFAULT_USERNAME") as String?)
-            .orEmpty()
-            .replace("\\", "\\\\")
-            .replace("\"", "\\\"")
-        val defaultSmbPassword = (project.findProperty("SMB_DEFAULT_PASSWORD") as String?)
-            .orEmpty()
-            .replace("\\", "\\\\")
-            .replace("\"", "\\\"")
-
-        buildConfigField("String", "SMB_DEFAULT_USERNAME", "\"$defaultSmbUsername\"")
-        buildConfigField("String", "SMB_DEFAULT_PASSWORD", "\"$defaultSmbPassword\"")
         buildConfigField("String", "PLAY_STORE_VERSION", "\"${escapeForBuildConfig(playVersionRaw)}\"")
         buildConfigField("int", "INTERNAL_MINOR_VERSION", internalMinor.toString())
         buildConfigField("String", "INTERNAL_DISPLAY_VERSION", "\"${escapeForBuildConfig(internalDisplayVersion)}\"")
@@ -136,8 +125,8 @@ android {
         }
     }
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_11
-        targetCompatibility = JavaVersion.VERSION_11
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
     }
     buildFeatures {
         compose = true
@@ -148,14 +137,14 @@ android {
     }
     sourceSets {
         getByName("androidTest") {
-            assets.srcDir(file("$projectDir/schemas"))
+            assets.directories.add("$projectDir/schemas")
         }
     }
 }
 
 kotlin {
     compilerOptions {
-        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_11)
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
     }
 }
 
@@ -201,8 +190,7 @@ dependencies {
     // Room Database
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)
-    implementation("androidx.documentfile:documentfile:1.1.0")
-    implementation(libs.androidx.ui)
+    implementation(libs.androidx.documentfile)
     ksp(libs.androidx.room.compiler)
 
     // DataStore
@@ -218,7 +206,7 @@ dependencies {
     implementation(libs.coil.compose)
     implementation(libs.coil.video)
     implementation(libs.coil.network.okhttp)
-    implementation("org.jsoup:jsoup:1.18.3")
+    implementation(libs.jsoup)
 
     // Testing
     testImplementation(libs.junit)

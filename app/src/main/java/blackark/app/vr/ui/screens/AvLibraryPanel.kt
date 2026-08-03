@@ -1011,7 +1011,7 @@ private fun AvWorkCard(
         ) {
             val castSummary = buildWorkCastSummary(work.casts)
             PosterThumbnail(
-                posterUrl = work.displayPosterUrl,
+                posterUrls = work.displayPosterUrls,
                 fallbackThumbnailPath = work.fallbackThumbnailPath,
                 showVrBadge = work.isVrContent,
                 modifier = Modifier.size(width = 108.dp, height = 144.dp),
@@ -1184,7 +1184,7 @@ private fun AvWorkDetailDialog(
                 }
 
                 PosterThumbnail(
-                    posterUrl = work.displayPosterUrl,
+                    posterUrls = work.displayPosterUrls,
                     fallbackThumbnailPath = work.fallbackThumbnailPath,
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1622,6 +1622,7 @@ private fun EditAvMetadataDialog(
                                     genres = work.metadata?.genres.orEmpty(),
                                     casts = editableCasts,
                                     description = work.metadata?.description,
+                                    posterFallbackUrls = work.metadata?.posterFallbackUrls.orEmpty(),
                                 )
                             )
                         },
@@ -1843,26 +1844,26 @@ private fun AvPartRow(
 
 @Composable
 private fun PosterThumbnail(
-    posterUrl: String?,
+    posterUrls: List<String>,
     fallbackThumbnailPath: String? = null,
     showVrBadge: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
-    var posterLoadFailed by remember(posterUrl) { mutableStateOf(false) }
+    var posterFailureCount by remember(posterUrls) { mutableStateOf(0) }
+    val posterUrl = posterUrls.getOrNull(posterFailureCount)
     val thumbnailModel = remember(
         posterUrl,
         fallbackThumbnailPath,
-        posterLoadFailed,
         context,
     ) {
         when {
-            !posterUrl.isNullOrBlank() && !posterLoadFailed -> {
+            !posterUrl.isNullOrBlank() -> {
                 ImageRequest.Builder(context)
                     .data(posterUrl)
                     .diskCachePolicy(CachePolicy.ENABLED)
                     .memoryCachePolicy(CachePolicy.ENABLED)
-                    .listener(onError = { _, _ -> posterLoadFailed = true })
+                    .listener(onError = { _, _ -> posterFailureCount += 1 })
                     .build()
             }
             !fallbackThumbnailPath.isNullOrBlank() -> {

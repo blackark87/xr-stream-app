@@ -1,5 +1,10 @@
 <resources>
     <string name="app_name">XR Stream</string>
+    <string name="home">Home</string>
+    <string name="continue_watching">Continue watching</string>
+    <string name="quick_access">Quick access</string>
+    <string name="no_quick_access_folders">Add a folder from the SMB browser for quick access.</string>
+    <string name="add_quick_access">Add to quick access</string>
     <string name="hello_android_xr">Hello Android XR.</string>
     <string name="switch_to_home_space_mode">Switch to Home Space Mode</string>
     <string name="switch_to_full_space_mode">Switch to Full Space Mode</string>
@@ -7,7 +12,7 @@
     <string name="av_add_alias_title">Add Alias</string>
     <string name="av_add_manual_cast">Add manual cast</string>
     <string name="av_background_indexing">AV background indexing</string>
-    <string name="av_background_indexing_description">Scans the full connected source in the background to build AV filters and work metadata. Off by default.</string>
+    <string name="av_background_indexing_description">Scans only enabled metadata folders in the background. Off by default.</string>
     <string name="av_casts">Casts</string>
     <string name="av_edit_metadata_title">Edit Metadata</string>
     <string name="av_english_name">English name</string>
@@ -73,6 +78,26 @@
     <string name="hand_tracking_description">Allows hand input throughout the app. Turn this off only if you want controller-only XR input. On by default.</string>
     <string name="ip_address">IP Address</string>
     <string name="ip_address_example">e.g., 192.168.1.100</string>
+    <string name="smb_address">SMB address</string>
+    <string name="smb_address_example">smb://server/share or server</string>
+    <string name="user_id_optional">User ID (optional for guest)</string>
+    <string name="show_advanced_options">Show advanced options</string>
+    <string name="hide_advanced_options">Hide advanced options</string>
+    <string name="server_name_optional">Server name (optional)</string>
+    <string name="port_optional">Port (optional)</string>
+    <string name="invalid_smb_port">SMB port must be between 1 and 65535</string>
+    <string name="metadata_folders">Online metadata folders</string>
+    <string name="metadata_folders_description">For each server, JAVLibrary and AV-Wiki run only in these folders. NFO remains first everywhere.</string>
+    <string name="add_current_folder">Add current folder</string>
+    <string name="rescan_metadata">Rescan</string>
+    <string name="no_metadata_folders">No folders selected for this server.</string>
+    <string name="enabled">Enabled</string>
+    <string name="include_subfolders">Include subfolders</string>
+    <string name="current_folder_only">This folder only</string>
+    <string name="hover_preview">Library hover preview</string>
+    <string name="hover_preview_description">After 0.8 seconds of focus, plays one muted preview for up to 6 seconds. Turn off to save power.</string>
+    <string name="smb_hover_preview">SMB hover preview</string>
+    <string name="smb_hover_preview_description">Allows hover video playback over the network. Static thumbnails remain available when off.</string>
     <string name="library">Library</string>
     <string name="local_files">Local Files</string>
     <string name="local_folder_ready">Saved local folder</string>

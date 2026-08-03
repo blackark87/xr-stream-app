@@ -9,6 +9,33 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class BrowserArtworkSelectionTest {
+    @Test
+    fun `poster failures advance through provider candidates before frame extraction`() {
+        val metadata = JvrMovieMetadata(
+            code = "ABC-123",
+            title = "Title",
+            posterUrl = "nfo.jpg",
+            posterFallbackUrls = listOf("jvr.jpg", "avwiki.jpg"),
+        )
+        val state = ArtworkState.Resolved(metadata)
+
+        assertEquals(
+            VideoArtworkSelection.Poster("nfo.jpg"),
+            selectVideoArtwork(state, posterFailureCount = 0, videoPath = "movie.mp4"),
+        )
+        assertEquals(
+            VideoArtworkSelection.Poster("jvr.jpg"),
+            selectVideoArtwork(state, posterFailureCount = 1, videoPath = "movie.mp4"),
+        )
+        assertEquals(
+            VideoArtworkSelection.Poster("avwiki.jpg"),
+            selectVideoArtwork(state, posterFailureCount = 2, videoPath = "movie.mp4"),
+        )
+        assertEquals(
+            VideoArtworkSelection.GeneratedFrame("movie.mp4"),
+            selectVideoArtwork(state, posterFailureCount = 3, videoPath = "movie.mp4"),
+        )
+    }
 
     @Test
     fun `only japan children are resolved as actor folders`() {

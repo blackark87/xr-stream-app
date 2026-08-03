@@ -8,10 +8,7 @@ import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.navOptions
-import blackark.app.vr.data.database.AppDatabase
-import blackark.app.vr.data.repository.AvLibraryRepository
-import blackark.app.vr.data.repository.ServerRepository
-import blackark.app.vr.data.repository.VideoRepository
+import blackark.app.vr.XRStreamApplication
 import blackark.app.vr.ui.screens.MainDashboardScreen
 import blackark.app.vr.ui.screens.VideoPlayerScreen
 import blackark.app.vr.ui.viewmodel.MainDashboardViewModel
@@ -36,19 +33,8 @@ fun AppNavigation(
     hasHandTrackingPermission: Boolean,
 ) {
     val appContext = remember(context) { context.applicationContext }
-    val database = remember(appContext) { AppDatabase.getDatabase(appContext) }
-    val serverRepository = remember(database) { ServerRepository(database.serverDao()) }
-    val videoRepository = remember(database) {
-        VideoRepository(
-            database.videoDao(),
-            database.favoriteVideoDao(),
-        )
-    }
-    val avLibraryRepository = remember(database) {
-        AvLibraryRepository(
-            avLibraryDao = database.avLibraryDao(),
-            virtualGroupMetadataDao = database.virtualGroupMetadataDao(),
-        )
+    val container = remember(appContext) {
+        (appContext as XRStreamApplication).container
     }
 
     NavHost(
@@ -72,9 +58,12 @@ fun AppNavigation(
             val viewModel: MainDashboardViewModel = viewModel(
                 factory = MainDashboardViewModelFactory(
                     appContext,
-                    serverRepository,
-                    videoRepository,
-                    avLibraryRepository,
+                    container.serverRepository,
+                    container.videoRepository,
+                    container.avLibraryRepository,
+                    container.metadataScopeRepository,
+                    container.quickAccessRepository,
+                    container.credentialStore,
                 )
             )
 

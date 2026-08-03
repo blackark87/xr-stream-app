@@ -22,10 +22,6 @@ interface VirtualGroupMetadataDao {
     @Query("SELECT * FROM virtual_group_metadata WHERE cacheKey IN (:cacheKeys)")
     suspend fun getByCacheKeys(cacheKeys: List<String>): List<VirtualGroupMetadataRecord>
 
-    @Transaction
-    @Query("SELECT * FROM virtual_group_metadata WHERE code = :code AND isMiss = 0 ORDER BY updatedAt DESC LIMIT 1")
-    suspend fun getLatestHitByCode(code: String): VirtualGroupMetadataRecord?
-
     @Upsert
     suspend fun upsertMetadata(metadata: VirtualGroupMetadata)
 

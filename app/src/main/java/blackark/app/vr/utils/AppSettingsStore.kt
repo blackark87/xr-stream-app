@@ -18,6 +18,9 @@ object AppSettingsStore {
         "immersive_ui_horizontal_offset_meters"
     private const val KEY_IMMERSIVE_SUBTITLE_VERTICAL_OFFSET_METERS =
         "immersive_subtitle_vertical_offset_meters"
+    private const val KEY_LIBRARY_HOVER_PREVIEW_ENABLED = "library_hover_preview_enabled"
+    private const val KEY_SMB_HOVER_PREVIEW_ENABLED = "smb_hover_preview_enabled"
+    private const val KEY_LAST_FOLDER_PREFIX = "last_folder_server_"
 
     private fun prefs(context: Context) =
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -31,6 +34,29 @@ object AppSettingsStore {
             .edit()
             .putBoolean(KEY_BACKGROUND_INDEXING_ENABLED, enabled)
             .apply()
+    }
+
+    fun isLibraryHoverPreviewEnabled(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_LIBRARY_HOVER_PREVIEW_ENABLED, true)
+
+    fun setLibraryHoverPreviewEnabled(context: Context, enabled: Boolean) {
+        prefs(context).edit().putBoolean(KEY_LIBRARY_HOVER_PREVIEW_ENABLED, enabled).apply()
+    }
+
+    fun isSmbHoverPreviewEnabled(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_SMB_HOVER_PREVIEW_ENABLED, true)
+
+    fun setSmbHoverPreviewEnabled(context: Context, enabled: Boolean) {
+        prefs(context).edit().putBoolean(KEY_SMB_HOVER_PREVIEW_ENABLED, enabled).apply()
+    }
+
+    fun getLastFolder(context: Context, serverId: Long): String? =
+        prefs(context).getString("$KEY_LAST_FOLDER_PREFIX$serverId", null)
+            ?.takeIf(String::isNotBlank)
+
+    fun setLastFolder(context: Context, serverId: Long, path: String) {
+        if (serverId <= 0L) return
+        prefs(context).edit().putString("$KEY_LAST_FOLDER_PREFIX$serverId", path).apply()
     }
 
     fun isHandTrackingEnabled(context: Context): Boolean {

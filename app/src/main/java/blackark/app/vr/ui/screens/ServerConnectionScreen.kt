@@ -38,16 +38,19 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import blackark.app.vr.data.database.AppDatabase
 import blackark.app.vr.data.database.entity.SavedServer
 import blackark.app.vr.data.repository.ServerRepository
+import blackark.app.vr.data.security.SmbCredentialStore
+import blackark.app.vr.network.SmbEndpointParser
 import blackark.app.vr.ui.viewmodel.ServerConnectionViewModel
 
 // ViewModel Factory
 class ServerConnectionViewModelFactory(
-    private val repository: ServerRepository
+    private val repository: ServerRepository,
+    private val credentialStore: SmbCredentialStore,
 ) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(ServerConnectionViewModel::class.java)) {
             @Suppress("UNCHECKED_CAST")
-            return ServerConnectionViewModel(repository) as T
+            return ServerConnectionViewModel(repository, credentialStore) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")
     }
@@ -61,7 +64,7 @@ fun ServerConnectionScreen(
     val database = remember { AppDatabase.getDatabase(context) }
     val repository = remember { ServerRepository(database.serverDao()) }
     val viewModel: ServerConnectionViewModel = viewModel(
-        factory = ServerConnectionViewModelFactory(repository)
+        factory = ServerConnectionViewModelFactory(repository, remember { SmbCredentialStore(context) })
     )
 
     val state by viewModel.state.collectAsState()
@@ -192,10 +195,6 @@ fun SavedServerCard(
                     text = "${server.serverAddress}:${server.port}/${server.shareName}",
                     style = MaterialTheme.typography.bodySmall
                 )
-                Text(
-                    text = "User: ${server.username}",
-                    style = MaterialTheme.typography.bodySmall
-                )
             }
 
             Row {
@@ -218,16 +217,10 @@ fun NewServerDialog(
     onDismiss: () -> Unit,
     onConnect: (String, String, Int, String, String, String, String, Boolean) -> Unit
 ) {
-    // Hardcoded for testing
-    val serverName = "Test Server"
-    val serverAddress = "192.168.1.105"
-    val port = 445
-    val shareName = ""
-    val username = "blackark87"
-    val domain = ""
-    val saveCredentials = true
-
+    var address by remember { mutableStateOf("") }
+    var username by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
+    var error by remember { mutableStateOf<String?>(null) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -237,11 +230,21 @@ fun NewServerDialog(
                 modifier = Modifier.padding(vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Text(
-                    text = "Server: blackark87@192.168.1.105",
-                    style = MaterialTheme.typography.bodyMedium
+                OutlinedTextField(
+                    value = address,
+                    onValueChange = { address = it },
+                    label = { Text("SMB address") },
+                    placeholder = { Text("smb://server/share") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
                 )
-
+                OutlinedTextField(
+                    value = username,
+                    onValueChange = { username = it },
+                    label = { Text("User ID (optional)") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                )
                 OutlinedTextField(
                     value = password,
                     onValueChange = { password = it },
@@ -250,23 +253,30 @@ fun NewServerDialog(
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true
                 )
+                error?.let { message ->
+                    Text(message, color = MaterialTheme.colorScheme.error)
+                }
             }
         },
         confirmButton = {
             Button(
                 onClick = {
+                    val endpoint = SmbEndpointParser.parse(address).getOrElse { failure ->
+                        error = failure.message
+                        return@Button
+                    }
                     onConnect(
-                        serverName,
-                        serverAddress,
-                        port,
-                        shareName,
+                        endpoint.suggestedName,
+                        endpoint.address,
+                        endpoint.port,
+                        endpoint.shareName,
                         username,
                         password,
-                        domain,
-                        saveCredentials
+                        "",
+                        true,
                     )
                 },
-                enabled = password.isNotBlank()
+                enabled = address.isNotBlank()
             ) {
                 Text("Connect")
             }

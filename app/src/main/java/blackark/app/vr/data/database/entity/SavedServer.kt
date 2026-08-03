@@ -11,9 +11,8 @@ data class SavedServer(
     val serverAddress: String,
     val port: Int = 445,
     val shareName: String = "", // Optional - empty for root/all shares
-    val username: String = "",
-    val password: String = "", // Note: In production, consider encrypting this
-    val domain: String = "",
+    /** Alias of an encrypted Keystore-backed record, never the credential itself. */
+    val credentialAlias: String = "",
     val lastConnected: Long = System.currentTimeMillis(),
     val isLocalStorage: Boolean = false // true if this is local device storage
 ) {
@@ -24,9 +23,7 @@ data class SavedServer(
                 serverAddress = "local://storage",
                 port = 0,
                 shareName = "",
-                username = "",
-                password = "",
-                domain = "",
+                credentialAlias = "",
                 isLocalStorage = true
             )
         }

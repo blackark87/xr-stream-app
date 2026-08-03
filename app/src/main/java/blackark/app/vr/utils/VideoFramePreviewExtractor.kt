@@ -53,6 +53,7 @@ object VideoFramePreviewExtractor {
         context: Context,
         videoPath: String,
         targetPositionMs: Long,
+        preserveVrProjection: Boolean = false,
     ): String? = withContext(Dispatchers.IO) {
         val previewDir = File(context.cacheDir, "seek_previews").apply { mkdirs() }
         val cacheKey = videoPath.toByteArray()
@@ -61,8 +62,15 @@ object VideoFramePreviewExtractor {
                 .digest(cacheKey)
                 .joinToString("") { "%02x".format(it) }
         val safeTargetPositionMs = targetPositionMs.coerceAtLeast(0L)
-        val previewFile = File(previewDir, "seek_preview_${fileHash}_$safeTargetPositionMs.jpg")
-        val tempFile = File(previewDir, "seek_preview_${fileHash}_$safeTargetPositionMs.tmp")
+        val projectionSuffix = if (preserveVrProjection) "_vr" else ""
+        val previewFile = File(
+            previewDir,
+            "seek_preview_${fileHash}_${safeTargetPositionMs}$projectionSuffix.jpg",
+        )
+        val tempFile = File(
+            previewDir,
+            "seek_preview_${fileHash}_${safeTargetPositionMs}$projectionSuffix.tmp",
+        )
 
         if (previewFile.exists() && previewFile.length() > 0L) {
             return@withContext previewFile.absolutePath
@@ -84,6 +92,7 @@ object VideoFramePreviewExtractor {
                         retriever = session.retriever,
                         durationMs = session.durationMs,
                         targetPositionMs = clampedTargetMs,
+                        preserveVrProjection = preserveVrProjection,
                     ) ?: return@withContext null
 
                 tempFile.outputStream().use { output ->
@@ -191,6 +200,7 @@ object VideoFramePreviewExtractor {
         retriever: MediaMetadataRetriever,
         durationMs: Long,
         targetPositionMs: Long,
+        preserveVrProjection: Boolean,
     ): Bitmap? {
         val candidateTimesUs = buildCandidateTimesUs(durationMs, targetPositionMs)
         val extractionOptions =
@@ -208,11 +218,11 @@ object VideoFramePreviewExtractor {
                         retriever.getScaledFrameAtTime(
                             candidateTimeUs,
                             option,
-                            PREVIEW_FRAME_WIDTH,
-                            PREVIEW_FRAME_HEIGHT,
+                            if (preserveVrProjection) PREVIEW_FRAME_WIDTH * 2 else PREVIEW_FRAME_WIDTH,
+                            if (preserveVrProjection) PREVIEW_FRAME_HEIGHT * 2 else PREVIEW_FRAME_HEIGHT,
                         ) ?: retriever.getFrameAtTime(candidateTimeUs, option)
                     if (bitmap != null) {
-                        return normalizePreviewFrame(bitmap)
+                        return if (preserveVrProjection) bitmap else normalizePreviewFrame(bitmap)
                     }
                 } catch (error: Exception) {
                     Log.v(

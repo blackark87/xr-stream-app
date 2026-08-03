@@ -4,6 +4,7 @@ import android.util.Log
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.xr.compose.platform.LocalSession
+import androidx.xr.runtime.Config
 import androidx.xr.runtime.HandTrackingMode
 import androidx.xr.runtime.SessionConfigureSuccess
 import androidx.xr.scenecore.InputEvent
@@ -29,9 +30,10 @@ internal fun ApplyHandTrackingPreference(
             return@LaunchedEffect
         }
 
-        val result = activeSession.configure(
-            activeSession.config.copy(handTracking = desiredMode)
-        )
+        val updatedConfig = Config.Builder(activeSession.config)
+            .setHandTracking(desiredMode)
+            .build()
+        val result = activeSession.configure(updatedConfig)
         if (result !is SessionConfigureSuccess) {
             Log.w(logTag, "Failed to update XR hand tracking: ${result::class.java.simpleName}")
         }

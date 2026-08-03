@@ -1,3 +1,7 @@
+@file:androidx.annotation.OptIn(
+    markerClass = [androidx.media3.common.util.UnstableApi::class],
+)
+
 package blackark.app.vr.ui.screens
 
 import android.annotation.SuppressLint
@@ -142,16 +146,24 @@ import androidx.compose.ui.window.PopupPositionProvider
 import androidx.compose.ui.window.PopupProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavController
+import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
+import androidx.media3.datasource.DefaultDataSource
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.ui.PlayerView
 import androidx.xr.compose.spatial.ContentEdge
 import androidx.xr.compose.spatial.Orbiter
 import androidx.xr.compose.spatial.OrbiterOffsetType
 import androidx.xr.compose.spatial.Subspace
-import androidx.xr.compose.subspace.MovePolicy
-import androidx.xr.compose.subspace.ResizePolicy
 import androidx.xr.compose.subspace.SpatialMainPanel
+import androidx.xr.compose.subspace.layout.MovePolicy
+import androidx.xr.compose.subspace.layout.ResizePolicy
 import androidx.xr.compose.subspace.layout.SubspaceModifier
 import androidx.xr.compose.subspace.layout.height
+import androidx.xr.compose.subspace.layout.movable
 import androidx.xr.compose.subspace.layout.offset
+import androidx.xr.compose.subspace.layout.resizable
 import androidx.xr.compose.subspace.layout.rotate
 import androidx.xr.compose.subspace.layout.width
 import androidx.xr.compose.unit.DpVolumeSize
@@ -162,9 +174,15 @@ import blackark.app.vr.R
 import blackark.app.vr.data.database.entity.FavoriteVideo
 import blackark.app.vr.data.database.entity.RecentVideo
 import blackark.app.vr.data.database.entity.SavedServer
+import blackark.app.vr.data.database.entity.MetadataScope
+import blackark.app.vr.data.database.entity.QuickAccessFolder
+import blackark.app.vr.data.security.SmbCredentialStore
+import blackark.app.vr.data.security.SmbCredentials
 import blackark.app.vr.data.model.LibraryVideoItem
 import blackark.app.vr.network.SMBClient
 import blackark.app.vr.network.SMBFileItem
+import blackark.app.vr.network.SmbEndpointParser
+import blackark.app.vr.player.SMBDataSource
 import blackark.app.vr.ui.ApplyHandTrackingPreference
 import blackark.app.vr.ui.components.EmptyState
 import blackark.app.vr.ui.components.FancyFileCard
@@ -197,7 +215,6 @@ import blackark.app.vr.utils.ImageCacheVersionStore
 import blackark.app.vr.utils.JvrCastMetadata
 import blackark.app.vr.utils.JvrLibraryMetadataProvider
 import blackark.app.vr.utils.JvrMovieMetadata
-import blackark.app.vr.utils.ServerCredentialAutofillStore
 import blackark.app.vr.utils.SubtitleFontCatalog
 import blackark.app.vr.utils.SubtitleFontOption
 import blackark.app.vr.utils.MAX_IMMERSIVE_SUBTITLE_DISTANCE_METERS
@@ -219,6 +236,7 @@ import coil3.compose.rememberAsyncImagePainter
 import coil3.request.CachePolicy
 import coil3.request.ImageRequest
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -240,6 +258,7 @@ private enum class DashboardPaneDestination(val label: String) {
 }
 
 private enum class PrimaryDestination(val label: String) {
+    Home("Home"),
     LocalFiles("Local Files"),
     SmbFiles("SMB Files"),
     YouTube("YouTube"),
@@ -316,6 +335,7 @@ private fun DashboardPaneDestination.icon(): ImageVector = when (this) {
 }
 
 private fun PrimaryDestination.icon(): ImageVector = when (this) {
+    PrimaryDestination.Home -> Icons.Filled.Home
     PrimaryDestination.LocalFiles -> Icons.Filled.FolderOpen
     PrimaryDestination.SmbFiles -> Icons.Filled.Cloud
     PrimaryDestination.YouTube -> Icons.Filled.Movie
@@ -380,6 +400,7 @@ private fun resolveSourceTitle(
     destination: PrimaryDestination,
     selectedServer: SavedServer?,
 ): String = when (destination) {
+    PrimaryDestination.Home -> "Home"
     PrimaryDestination.LocalFiles -> "Local Files"
     PrimaryDestination.SmbFiles -> selectedServer?.serverName?.takeIf { it.isNotBlank() }
         ?: "SMB Files"
@@ -394,6 +415,7 @@ private fun resolveSourceBreadcrumb(
     currentPath: String,
     localRootLabel: String?,
 ): String? = when (destination) {
+    PrimaryDestination.Home -> null
     PrimaryDestination.LocalFiles -> resolveLocalBreadcrumbLabel(
         currentPath = currentPath,
         rootLabel = localRootLabel,
@@ -1097,6 +1119,147 @@ private fun LocalSourceLandingPanel(
 
 private const val YOUTUBE_HOME_URL = "https://m.youtube.com/"
 
+@Composable
+private fun HomePanel(
+    recentVideos: List<RecentVideo>,
+    quickAccessFolders: List<QuickAccessFolder>,
+    favorites: List<FavoriteVideo>,
+    servers: List<SavedServer>,
+    onRecentClick: (RecentVideo) -> Unit,
+    onFavoriteClick: (FavoriteVideo) -> Unit,
+    onQuickAccessClick: (QuickAccessFolder) -> Unit,
+    onQuickAccessDelete: (QuickAccessFolder) -> Unit,
+    onLocalSourceClick: () -> Unit,
+    onSmbSourceClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val continueWatching = recentVideos.filter { it.lastPosition > 0L }.take(8)
+    Card(
+        modifier = modifier,
+        colors = CardDefaults.cardColors(containerColor = CardBackground),
+        shape = RoundedCornerShape(16.dp),
+    ) {
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            item {
+                Text(
+                    text = stringResource(R.string.home),
+                    style = MaterialTheme.typography.headlineSmall,
+                    color = TextPrimary,
+                )
+            }
+            item { HomeSectionTitle(stringResource(R.string.continue_watching)) }
+            if (continueWatching.isEmpty()) {
+                item { HomeEmptyRow(stringResource(R.string.no_recent_videos_yet)) }
+            } else {
+                items(continueWatching, key = { "continue:${it.id}" }) { video ->
+                    HomeEntryRow(
+                        title = video.resolvedTitle ?: video.fileName,
+                        onClick = { onRecentClick(video) },
+                    )
+                }
+            }
+
+            item { HomeSectionTitle(stringResource(R.string.quick_access)) }
+            if (quickAccessFolders.isEmpty()) {
+                item { HomeEmptyRow(stringResource(R.string.no_quick_access_folders)) }
+            } else {
+                items(quickAccessFolders, key = { "quick:${it.id}" }) { folder ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        HomeEntryRow(
+                            title = folder.displayName,
+                            onClick = { onQuickAccessClick(folder) },
+                            modifier = Modifier.weight(1f),
+                        )
+                        IconButton(onClick = { onQuickAccessDelete(folder) }) {
+                            Icon(Icons.Filled.Delete, contentDescription = stringResource(R.string.delete))
+                        }
+                    }
+                }
+            }
+
+            item { HomeSectionTitle(stringResource(R.string.favorites)) }
+            items(favorites.take(8), key = { "favorite:${it.filePath}" }) { video ->
+                HomeEntryRow(
+                    title = video.resolvedTitle ?: video.fileName,
+                    onClick = { onFavoriteClick(video) },
+                )
+            }
+
+            item { HomeSectionTitle(stringResource(R.string.recent)) }
+            items(recentVideos.take(8), key = { "recent:${it.id}" }) { video ->
+                HomeEntryRow(
+                    title = video.resolvedTitle ?: video.fileName,
+                    onClick = { onRecentClick(video) },
+                )
+            }
+
+            item { HomeSectionTitle(stringResource(R.string.sources)) }
+            item {
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Button(onClick = onLocalSourceClick, modifier = Modifier.weight(1f)) {
+                        Icon(Icons.Filled.FolderOpen, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text(stringResource(R.string.local_storage))
+                    }
+                    Button(onClick = onSmbSourceClick, modifier = Modifier.weight(1f)) {
+                        Icon(Icons.Filled.Cloud, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("SMB (${servers.size})")
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun HomeSectionTitle(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.titleLarge,
+        color = TextPrimary,
+        modifier = Modifier.padding(top = 10.dp),
+    )
+}
+
+@Composable
+private fun HomeEmptyRow(text: String) {
+    Text(text, color = TextTertiary, style = MaterialTheme.typography.bodySmall)
+}
+
+@Composable
+private fun HomeEntryRow(
+    title: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier.fillMaxWidth().clickable(onClick = onClick),
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        shape = RoundedCornerShape(12.dp),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Filled.Movie, contentDescription = null, tint = NetflixRed)
+            Spacer(Modifier.width(10.dp))
+            Text(
+                title,
+                color = TextPrimary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 private fun YouTubePanel(
@@ -1331,7 +1494,7 @@ private fun DashboardPreviewPanel(
                             onState = { state ->
                                 if (state is coil3.compose.AsyncImagePainter.State.Error) {
                                     if (
-                                        previewSpec?.source == "poster" &&
+                                        previewSpec.source == "poster" &&
                                         previewItem.fallbackPreviewSpec != null
                                     ) {
                                         primaryPreviewLoadFailed = true
@@ -1339,6 +1502,10 @@ private fun DashboardPreviewPanel(
                                     previewItem.onPreviewLoadError?.invoke(state.result.throwable)
                                 }
                             },
+                        )
+                        HoverVideoPreview(
+                            spec = previewSpec,
+                            modifier = Modifier.fillMaxSize(),
                         )
                     }
                 } else {
@@ -1384,6 +1551,77 @@ private fun DashboardPreviewPanel(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun HoverVideoPreview(
+    spec: GroupHoverPreviewSpec,
+    modifier: Modifier = Modifier,
+) {
+    val context = LocalContext.current
+    val appContext = context.applicationContext
+    val videoPath = spec.videoPath?.takeIf(String::isNotBlank) ?: return
+    val isSmb = videoPath.startsWith("smb://", ignoreCase = true)
+    val enabled = remember(videoPath) {
+        AppSettingsStore.isLibraryHoverPreviewEnabled(appContext) &&
+            (!isSmb || AppSettingsStore.isSmbHoverPreviewEnabled(appContext))
+    }
+    if (!enabled) return
+
+    var previewPlayer by remember(videoPath) { mutableStateOf<ExoPlayer?>(null) }
+    LaunchedEffect(videoPath, spec.startPositionMs) {
+        delay(800L)
+        val player = runCatching {
+            val builder = ExoPlayer.Builder(appContext)
+            if (isSmb) {
+                val config = AppState.smbConfig ?: return@runCatching null
+                builder.setMediaSourceFactory(
+                    DefaultMediaSourceFactory(SMBDataSource.Factory(config))
+                )
+            } else {
+                builder.setMediaSourceFactory(
+                    DefaultMediaSourceFactory(DefaultDataSource.Factory(appContext))
+                )
+            }
+            builder.build().apply {
+                volume = 0f
+                repeatMode = Player.REPEAT_MODE_OFF
+                setMediaItem(MediaItem.fromUri(videoPath))
+                addListener(object : Player.Listener {
+                    override fun onPlaybackStateChanged(playbackState: Int) {
+                        if (playbackState != Player.STATE_READY) return
+                        val startPosition = spec.startPositionMs.takeIf { it > 0L }
+                            ?: (duration / 10L).coerceAtLeast(0L)
+                        seekTo(startPosition)
+                        play()
+                    }
+                })
+                prepare()
+            }
+        }.getOrNull() ?: return@LaunchedEffect
+
+        previewPlayer = player
+        try {
+            delay(6_000L)
+            player.pause()
+        } finally {
+            if (previewPlayer === player) previewPlayer = null
+            player.release()
+        }
+    }
+
+    previewPlayer?.let { player ->
+        AndroidView(
+            modifier = modifier.background(Color.Black),
+            factory = { viewContext ->
+                PlayerView(viewContext).apply {
+                    useController = false
+                    this.player = player
+                }
+            },
+            update = { view -> view.player = player },
+        )
     }
 }
 
@@ -1842,11 +2080,19 @@ private fun SourceSwitcherButton(
 @Composable
 private fun SettingsPanel(
     versionInfo: AppVersionInfo,
+    servers: List<SavedServer>,
+    selectedServer: SavedServer?,
+    metadataScopes: List<MetadataScope>,
     isHandTrackingEnabled: Boolean,
     isAvBackgroundIndexingEnabled: Boolean,
     activeAction: SettingsAction?,
     onHandTrackingChange: (Boolean) -> Unit,
     onAvBackgroundIndexingChange: (Boolean) -> Unit,
+    onAddCurrentMetadataFolder: () -> Unit,
+    onMetadataScopeEnabled: (MetadataScope, Boolean) -> Unit,
+    onMetadataScopeRecursive: (MetadataScope, Boolean) -> Unit,
+    onDeleteMetadataScope: (MetadataScope) -> Unit,
+    onRescanMetadata: () -> Unit,
     onClearArtwork: () -> Unit,
     onClearThumbnails: () -> Unit,
     onClearRecentHistory: () -> Unit,
@@ -1878,6 +2124,12 @@ private fun SettingsPanel(
     }
     var selectedImmersiveUiHorizontalOffsetMeters by remember {
         mutableStateOf(AppSettingsStore.getImmersiveUiHorizontalOffsetMeters(context))
+    }
+    var hoverPreviewEnabled by remember {
+        mutableStateOf(AppSettingsStore.isLibraryHoverPreviewEnabled(context))
+    }
+    var smbHoverPreviewEnabled by remember {
+        mutableStateOf(AppSettingsStore.isSmbHoverPreviewEnabled(context))
     }
 
     Card(
@@ -1913,6 +2165,35 @@ private fun SettingsPanel(
                 description = stringResource(R.string.av_background_indexing_description),
                 checked = isAvBackgroundIndexingEnabled,
                 onCheckedChange = onAvBackgroundIndexingChange,
+            )
+            SettingsToggleRow(
+                title = stringResource(R.string.hover_preview),
+                description = stringResource(R.string.hover_preview_description),
+                checked = hoverPreviewEnabled,
+                onCheckedChange = { enabled ->
+                    hoverPreviewEnabled = enabled
+                    AppSettingsStore.setLibraryHoverPreviewEnabled(context, enabled)
+                },
+            )
+            SettingsToggleRow(
+                title = stringResource(R.string.smb_hover_preview),
+                description = stringResource(R.string.smb_hover_preview_description),
+                checked = smbHoverPreviewEnabled,
+                onCheckedChange = { enabled ->
+                    smbHoverPreviewEnabled = enabled
+                    AppSettingsStore.setSmbHoverPreviewEnabled(context, enabled)
+                },
+            )
+
+            MetadataScopeSettingsSection(
+                servers = servers.filterNot(SavedServer::isLocalStorage),
+                selectedServer = selectedServer?.takeUnless(SavedServer::isLocalStorage),
+                scopes = metadataScopes,
+                onAddCurrentFolder = onAddCurrentMetadataFolder,
+                onEnabledChange = onMetadataScopeEnabled,
+                onRecursiveChange = onMetadataScopeRecursive,
+                onDelete = onDeleteMetadataScope,
+                onRescan = onRescanMetadata,
             )
 
             HorizontalDivider(color = DividerGray)
@@ -2048,6 +2329,115 @@ private fun SettingsPanel(
                 title = stringResource(R.string.build_time_utc),
                 value = versionInfo.buildTimeUtc,
             )
+        }
+    }
+}
+
+@Composable
+private fun MetadataScopeSettingsSection(
+    servers: List<SavedServer>,
+    selectedServer: SavedServer?,
+    scopes: List<MetadataScope>,
+    onAddCurrentFolder: () -> Unit,
+    onEnabledChange: (MetadataScope, Boolean) -> Unit,
+    onRecursiveChange: (MetadataScope, Boolean) -> Unit,
+    onDelete: (MetadataScope) -> Unit,
+    onRescan: () -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text(
+            text = stringResource(R.string.metadata_folders),
+            style = MaterialTheme.typography.titleLarge,
+            color = TextPrimary,
+        )
+        Text(
+            text = stringResource(R.string.metadata_folders_description),
+            style = MaterialTheme.typography.bodySmall,
+            color = TextTertiary,
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(
+                onClick = onAddCurrentFolder,
+                enabled = selectedServer?.id?.let { it > 0L } == true,
+                colors = ButtonDefaults.buttonColors(containerColor = NetflixRed),
+            ) {
+                Text(stringResource(R.string.add_current_folder))
+            }
+            Button(
+                onClick = onRescan,
+                enabled = selectedServer != null,
+            ) {
+                Text(stringResource(R.string.rescan_metadata))
+            }
+        }
+
+        servers.forEach { server ->
+            val serverScopes = scopes.filter { it.serverId == server.id }
+            Text(
+                text = server.serverName,
+                style = MaterialTheme.typography.titleMedium,
+                color = TextPrimary,
+            )
+            if (serverScopes.isEmpty()) {
+                Text(
+                    text = stringResource(R.string.no_metadata_folders),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextTertiary,
+                )
+            }
+            serverScopes.forEach { scope ->
+                Card(
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    ),
+                ) {
+                    Column(
+                        modifier = Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Text(
+                            text = scope.displayPath,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            color = TextPrimary,
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(stringResource(R.string.enabled), color = TextSecondary)
+                                Switch(
+                                    checked = scope.enabled,
+                                    onCheckedChange = { onEnabledChange(scope, it) },
+                                )
+                            }
+                            TextButton(
+                                onClick = {
+                                    onRecursiveChange(scope, !scope.includeDescendants)
+                                },
+                            ) {
+                                Text(
+                                    stringResource(
+                                        if (scope.includeDescendants) {
+                                            R.string.include_subfolders
+                                        } else {
+                                            R.string.current_folder_only
+                                        }
+                                    )
+                                )
+                            }
+                            IconButton(onClick = { onDelete(scope) }) {
+                                Icon(
+                                    Icons.Filled.Delete,
+                                    contentDescription = stringResource(R.string.delete),
+                                )
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -2562,6 +2952,10 @@ fun MainDashboardScreen(
     val context = LocalContext.current
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val servers by viewModel.servers.collectAsStateWithLifecycle()
+    val metadataScopes by viewModel.metadataScopes.collectAsStateWithLifecycle()
+    val quickAccessFolders by viewModel.quickAccessFolders.collectAsStateWithLifecycle()
+    val allRecentVideos by viewModel.allRecentVideos.collectAsStateWithLifecycle()
+    val allFavorites by viewModel.allFavorites.collectAsStateWithLifecycle()
     val files by viewModel.files.collectAsStateWithLifecycle()
     val favorites by viewModel.favorites.collectAsStateWithLifecycle()
     val recentVideos by viewModel.recentVideos.collectAsStateWithLifecycle()
@@ -2570,7 +2964,7 @@ fun MainDashboardScreen(
     var showAddServerDialog by remember { mutableStateOf(false) }
     var serverToEdit by remember { mutableStateOf<SavedServer?>(null) }
     var primaryDestination by rememberSaveable {
-        mutableStateOf(PrimaryDestination.LocalFiles)
+        mutableStateOf(PrimaryDestination.Home)
     }
     var fileWorkspaceMode by rememberSaveable {
         mutableStateOf(FileWorkspaceMode.Browser)
@@ -2596,6 +2990,7 @@ fun MainDashboardScreen(
     var pendingSettingsAction by remember { mutableStateOf<SettingsAction?>(null) }
     var activeSettingsAction by remember { mutableStateOf<SettingsAction?>(null) }
     var settingsFeedback by remember { mutableStateOf<SettingsFeedback?>(null) }
+    var pendingHomeVideo by remember { mutableStateOf<LibraryVideoItem?>(null) }
     val dashboardScope = rememberCoroutineScope()
     val appVersionInfo = remember(context) { resolveAppVersionInfo(context) }
     val shouldShowControllerHandTrackingPrompt =
@@ -2647,6 +3042,7 @@ fun MainDashboardScreen(
         primaryDestination == PrimaryDestination.LocalFiles ||
                 primaryDestination == PrimaryDestination.SmbFiles
     val isSelectedSourceModeConnected = when (primaryDestination) {
+        PrimaryDestination.Home -> false
         PrimaryDestination.LocalFiles -> isLocalModeConnected
         PrimaryDestination.SmbFiles -> isSmbModeConnected
         PrimaryDestination.YouTube,
@@ -2712,6 +3108,46 @@ fun MainDashboardScreen(
         viewModel.connectToServer(server)
     }
 
+    fun openHomeVideo(video: LibraryVideoItem) {
+        val isSmbVideo = video.filePath.startsWith("smb://", ignoreCase = true)
+        if (isSmbVideo) {
+            val server = availableSmbSources.firstOrNull {
+                it.serverAddress.equals(video.serverAddress, ignoreCase = true) &&
+                    it.shareName.equals(video.shareName, ignoreCase = true)
+            } ?: return
+            if (isSmbModeConnected && uiState.selectedServer?.id == server.id) {
+                navController.navigate(Screen.VideoPlayer.createRoute(video.filePath, video.fileName))
+            } else {
+                pendingHomeVideo = video
+                primaryDestination = PrimaryDestination.SmbFiles
+                viewModel.connectToServer(server)
+            }
+        } else if (isLocalModeConnected) {
+            navController.navigate(Screen.VideoPlayer.createRoute(video.filePath, video.fileName))
+        } else {
+            pendingHomeVideo = video
+            primaryDestination = PrimaryDestination.LocalFiles
+            requestLocalStorageConnection()
+        }
+    }
+
+    LaunchedEffect(pendingHomeVideo, uiState.isConnected, uiState.selectedServer?.id) {
+        val video = pendingHomeVideo ?: return@LaunchedEffect
+        if (!uiState.isConnected) return@LaunchedEffect
+        val sourceMatches = if (video.filePath.startsWith("smb://", ignoreCase = true)) {
+            uiState.selectedServer?.serverAddress.equals(video.serverAddress, ignoreCase = true) &&
+                uiState.selectedServer?.shareName.equals(video.shareName, ignoreCase = true)
+        } else {
+            uiState.selectedServer?.isLocalStorage == true
+        }
+        if (sourceMatches) {
+            pendingHomeVideo = null
+            navController.navigate(Screen.VideoPlayer.createRoute(video.filePath, video.fileName)) {
+                launchSingleTop = true
+            }
+        }
+    }
+
     fun disconnectActiveSource() {
         clearAllPreviewItems()
         fileWorkspaceMode = FileWorkspaceMode.Browser
@@ -2735,6 +3171,7 @@ fun MainDashboardScreen(
         uiState.selectedServer?.id
     ) {
         when (primaryDestination) {
+            PrimaryDestination.Home -> Unit
             PrimaryDestination.LocalFiles -> {
                 viewModel.switchToLocalSource(persistedLocalTreeUri)
             }
@@ -2818,30 +3255,30 @@ fun MainDashboardScreen(
                     if (AppState.dashboardPanelPose.value == null) {
                         AppState.updateDashboardPanelPose(coordinates.poseInRoot)
                     }
-                },
-            dragPolicy = MovePolicy(
-                onMoveEnd = { event ->
-                    AppState.updateDashboardPanelPose(event.pose)
-                },
-            ),
-            resizePolicy = ResizePolicy(
-                minimumSize = DpVolumeSize(
-                    width = 760.dp,
-                    height = 480.dp,
-                    depth = 0.dp,
-                ),
-                onSizeChange = { newSize ->
-                    if (newSize.width > 0 && newSize.height > 0) {
-                        dashboardPanelWidth = with(density) { newSize.width.toDp() }
-                        dashboardPanelHeight = with(density) { newSize.height.toDp() }
-                        AppState.updateDashboardPanelSize(
-                            widthDp = dashboardPanelWidth.value,
-                            heightDp = dashboardPanelHeight.value,
-                        )
-                    }
-                    true
                 }
-            ),
+                .movable(
+                    movePolicy = MovePolicy.default { event ->
+                        AppState.updateDashboardPanelPose(event.pose)
+                    },
+                )
+                .resizable(
+                    minimumSize = DpVolumeSize(
+                        width = 760.dp,
+                        height = 480.dp,
+                        depth = 0.dp,
+                    ),
+                    resizePolicy = ResizePolicy.custom { event ->
+                        val newSize = event.size
+                        if (newSize.width > 0 && newSize.height > 0) {
+                            dashboardPanelWidth = with(density) { newSize.width.toDp() }
+                            dashboardPanelHeight = with(density) { newSize.height.toDp() }
+                            AppState.updateDashboardPanelSize(
+                                widthDp = dashboardPanelWidth.value,
+                                heightDp = dashboardPanelHeight.value,
+                            )
+                        }
+                    },
+                ),
         )
     }
 
@@ -2878,14 +3315,49 @@ fun MainDashboardScreen(
                             )
                         }
 
+                        PrimaryDestination.Home -> {
+                            HomePanel(
+                                recentVideos = allRecentVideos,
+                                quickAccessFolders = quickAccessFolders,
+                                favorites = allFavorites,
+                                servers = availableSmbSources,
+                                onRecentClick = { video ->
+                                    openHomeVideo(video)
+                                },
+                                onFavoriteClick = { video ->
+                                    openHomeVideo(video)
+                                },
+                                onQuickAccessClick = { folder ->
+                                    primaryDestination = PrimaryDestination.SmbFiles
+                                    viewModel.openQuickAccess(folder)
+                                },
+                                onQuickAccessDelete = viewModel::removeQuickAccess,
+                                onLocalSourceClick = {
+                                    primaryDestination = PrimaryDestination.LocalFiles
+                                },
+                                onSmbSourceClick = {
+                                    primaryDestination = PrimaryDestination.SmbFiles
+                                },
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                        }
+
                         PrimaryDestination.Settings -> {
                             SettingsPanel(
                                 versionInfo = appVersionInfo,
+                                servers = servers,
+                                selectedServer = uiState.selectedServer,
+                                metadataScopes = metadataScopes,
                                 isHandTrackingEnabled = uiState.isHandTrackingEnabled,
                                 isAvBackgroundIndexingEnabled = uiState.isAvBackgroundIndexingEnabled,
                                 activeAction = activeSettingsAction,
                                 onHandTrackingChange = viewModel::setHandTrackingEnabled,
                                 onAvBackgroundIndexingChange = viewModel::setAvBackgroundIndexingEnabled,
+                                onAddCurrentMetadataFolder = viewModel::addCurrentFolderMetadataScope,
+                                onMetadataScopeEnabled = viewModel::setMetadataScopeEnabled,
+                                onMetadataScopeRecursive = viewModel::setMetadataScopeRecursive,
+                                onDeleteMetadataScope = viewModel::deleteMetadataScope,
+                                onRescanMetadata = viewModel::rescanAvMetadata,
                                 onClearArtwork = {
                                     pendingSettingsAction = SettingsAction.ClearArtwork
                                 },
@@ -3187,6 +3659,16 @@ fun MainDashboardScreen(
                                             },
                                         )
                                         DashboardHeaderChip(
+                                            text = stringResource(R.string.add_current_folder),
+                                            icon = Icons.Filled.Add,
+                                            onClick = viewModel::addCurrentFolderMetadataScope,
+                                        )
+                                        DashboardHeaderChip(
+                                            text = stringResource(R.string.add_quick_access),
+                                            icon = Icons.Filled.Favorite,
+                                            onClick = viewModel::addCurrentFolderToQuickAccess,
+                                        )
+                                        DashboardHeaderChip(
                                             text = stringResource(R.string.disconnect),
                                             icon = Icons.Filled.Close,
                                             onClick = ::disconnectActiveSource,
@@ -3317,6 +3799,16 @@ fun MainDashboardScreen(
                                                 onSourceSelected = { server ->
                                                     connectToSource(server)
                                                 },
+                                            )
+                                            DashboardHeaderChip(
+                                                text = stringResource(R.string.add_current_folder),
+                                                icon = Icons.Filled.Add,
+                                                onClick = viewModel::addCurrentFolderMetadataScope,
+                                            )
+                                            DashboardHeaderChip(
+                                                text = stringResource(R.string.add_quick_access),
+                                                icon = Icons.Filled.Favorite,
+                                                onClick = viewModel::addCurrentFolderToQuickAccess,
                                             )
                                             DashboardHeaderChip(
                                                 text = stringResource(R.string.disconnect),
@@ -3459,33 +3951,24 @@ fun MainDashboardScreen(
         if (showAddServerDialog || serverToEdit != null) {
             AddServerDialog(
                 initialServer = serverToEdit,
-                defaultUsername = servers
-                    .asSequence()
-                    .filterNot { it.isLocalStorage }
-                    .maxByOrNull { it.lastConnected }
-                    ?.username
-                    .orEmpty(),
-                defaultPassword = servers
-                    .asSequence()
-                    .filterNot { it.isLocalStorage }
-                    .maxByOrNull { it.lastConnected }
-                    ?.password
-                    .orEmpty(),
+                initialCredentials = serverToEdit
+                    ?.let(viewModel::loadCredentials)
+                    ?: SmbCredentials(),
                 onDismiss = {
                     showAddServerDialog = false
                     serverToEdit = null
                 },
-                onSave = { server ->
+                onSave = { server, credentials ->
                     if (serverToEdit != null) {
-                        viewModel.updateServer(server)
+                        viewModel.updateServer(server, credentials)
                     } else {
-                        viewModel.addServer(server)
+                        viewModel.addServer(server, credentials)
                     }
                     showAddServerDialog = false
                     serverToEdit = null
                 },
-                onTestConnection = { server ->
-                    viewModel.testConnection(server)
+                onTestConnection = { server, credentials ->
+                    viewModel.testConnection(server, credentials)
                 }
             )
         }
@@ -4790,6 +5273,8 @@ private data class GroupHoverPreviewSpec(
     val model: Any,
     val diskCacheKey: String?,
     val source: String,
+    val videoPath: String? = null,
+    val startPositionMs: Long = 0L,
 )
 
 private fun buildGroupHoverPreviewSpec(
@@ -4803,6 +5288,7 @@ private fun buildGroupHoverPreviewSpec(
             model = posterUrl,
             diskCacheKey = posterCacheKey,
             source = "poster",
+            videoPath = representativePath,
         )
 
         !representativePath.isNullOrBlank() -> GroupHoverPreviewSpec(
@@ -4813,6 +5299,7 @@ private fun buildGroupHoverPreviewSpec(
                 representativePath,
             ),
             source = "generated",
+            videoPath = representativePath,
         )
 
         else -> null
@@ -4829,6 +5316,9 @@ private fun buildLibraryPreviewSpec(
             model = generatedFramePath,
             diskCacheKey = generatedFramePath,
             source = "cached",
+            videoPath = video.filePath,
+            startPositionMs = video.lastPosition.takeIf { it > 0L }
+                ?: (video.duration / 10L).coerceAtLeast(0L),
         )
 
         video.filePath.isNotBlank() -> GroupHoverPreviewSpec(
@@ -4839,6 +5329,9 @@ private fun buildLibraryPreviewSpec(
                 video.filePath,
             ),
             source = "generated",
+            videoPath = video.filePath,
+            startPositionMs = video.lastPosition.takeIf { it > 0L }
+                ?: (video.duration / 10L).coerceAtLeast(0L),
         )
 
         else -> null
@@ -5043,15 +5536,19 @@ private fun VirtualGroupListCard(
     }
     val displayDateText = formatFileBrowserDate(resolveDisplayDate(group, metadata))
 
-    val posterUrl = metadata?.posterUrl
     val representativePath = group.representativeFile?.path
-    val posterCacheKey = posterUrl?.let { buildGroupPosterCacheKey(group.key, it) }
-    var posterLoadFailed by remember(group.key, posterUrl) { mutableStateOf(false) }
+    var posterFailureCount by remember(
+        group.key,
+        metadata?.posterUrl,
+        metadata?.posterFallbackUrls,
+    ) { mutableStateOf(0) }
     val artworkSelection = selectVideoArtwork(
         metadataState = metadataState,
-        posterLoadFailed = posterLoadFailed,
+        posterFailureCount = posterFailureCount,
         videoPath = representativePath,
     )
+    val posterUrl = (artworkSelection as? VideoArtworkSelection.Poster)?.url
+    val posterCacheKey = posterUrl?.let { buildGroupPosterCacheKey(group.key, it) }
     val shouldUsePoster = artworkSelection is VideoArtworkSelection.Poster
     val shouldUseGeneratedFrame = artworkSelection is VideoArtworkSelection.GeneratedFrame
     val previewSpec = remember(
@@ -5097,7 +5594,7 @@ private fun VirtualGroupListCard(
             metadata = metadata,
             metadataLookupRequest = null,
             onPreviewLoadError = if (shouldUsePoster) {
-                { posterLoadFailed = true }
+                { posterFailureCount += 1 }
             } else {
                 null
             },
@@ -5109,7 +5606,7 @@ private fun VirtualGroupListCard(
         if (isPreviewFocused) onPreviewFocused(previewItem)
     }
 
-    LaunchedEffect(group.key, metadataState, posterLoadFailed) {
+    LaunchedEffect(group.key, metadataState, posterFailureCount) {
         val source = when {
             shouldUsePoster -> "remote-poster"
             shouldUseGeneratedFrame -> "generated-video-frame"
@@ -5128,7 +5625,7 @@ private fun VirtualGroupListCard(
 
         Log.d(
             GROUP_THUMBNAIL_LOG_TAG,
-            "Render group=${group.key} source=$source posterFailed=$posterLoadFailed posterUrl=${posterUrl ?: "<none>"} posterCacheKey=${posterCacheKey ?: "<none>"} posterCached=$posterCached representativePath=${representativePath ?: "<none>"}"
+            "Render group=${group.key} source=$source posterFailed=$posterFailureCount posterUrl=${posterUrl ?: "<none>"} posterCacheKey=${posterCacheKey ?: "<none>"} posterCached=$posterCached representativePath=${representativePath ?: "<none>"}"
         )
     }
 
@@ -5204,7 +5701,7 @@ private fun VirtualGroupListCard(
                                             GROUP_THUMBNAIL_LOG_TAG,
                                             "Poster load failed for group=${group.key}, url=$posterUrl, reason=${result.throwable.message}. Falling back to generated thumbnail."
                                         )
-                                        posterLoadFailed = true
+                                        posterFailureCount += 1
                                     }
                                 )
                                 .build(),
@@ -5395,15 +5892,19 @@ private fun VirtualGroupThumbnailCard(
     }
     val displayDateText = formatFileBrowserDate(resolveDisplayDate(group, metadata))
 
-    val posterUrl = metadata?.posterUrl
     val representativePath = group.representativeFile?.path
-    val posterCacheKey = posterUrl?.let { buildGroupPosterCacheKey(group.key, it) }
-    var posterLoadFailed by remember(group.key, posterUrl) { mutableStateOf(false) }
+    var posterFailureCount by remember(
+        group.key,
+        metadata?.posterUrl,
+        metadata?.posterFallbackUrls,
+    ) { mutableStateOf(0) }
     val artworkSelection = selectVideoArtwork(
         metadataState = metadataState,
-        posterLoadFailed = posterLoadFailed,
+        posterFailureCount = posterFailureCount,
         videoPath = representativePath,
     )
+    val posterUrl = (artworkSelection as? VideoArtworkSelection.Poster)?.url
+    val posterCacheKey = posterUrl?.let { buildGroupPosterCacheKey(group.key, it) }
     val shouldUsePoster = artworkSelection is VideoArtworkSelection.Poster
     val shouldUseGeneratedFrame = artworkSelection is VideoArtworkSelection.GeneratedFrame
     val previewSpec = remember(
@@ -5449,7 +5950,7 @@ private fun VirtualGroupThumbnailCard(
             metadata = metadata,
             metadataLookupRequest = null,
             onPreviewLoadError = if (shouldUsePoster) {
-                { posterLoadFailed = true }
+                { posterFailureCount += 1 }
             } else {
                 null
             },
@@ -5461,7 +5962,7 @@ private fun VirtualGroupThumbnailCard(
         if (isPreviewFocused) onPreviewFocused(previewItem)
     }
 
-    LaunchedEffect(group.key, metadataState, posterLoadFailed) {
+    LaunchedEffect(group.key, metadataState, posterFailureCount) {
         val source = when {
             shouldUsePoster -> "remote-poster"
             shouldUseGeneratedFrame -> "generated-video-frame"
@@ -5480,7 +5981,7 @@ private fun VirtualGroupThumbnailCard(
 
         Log.d(
             GROUP_THUMBNAIL_LOG_TAG,
-            "Render group=${group.key} source=$source posterFailed=$posterLoadFailed posterUrl=${posterUrl ?: "<none>"} posterCacheKey=${posterCacheKey ?: "<none>"} posterCached=$posterCached representativePath=${representativePath ?: "<none>"}"
+            "Render group=${group.key} source=$source posterFailed=$posterFailureCount posterUrl=${posterUrl ?: "<none>"} posterCacheKey=${posterCacheKey ?: "<none>"} posterCached=$posterCached representativePath=${representativePath ?: "<none>"}"
         )
     }
 
@@ -5554,7 +6055,7 @@ private fun VirtualGroupThumbnailCard(
                                             GROUP_THUMBNAIL_LOG_TAG,
                                             "Poster load failed for group=${group.key}, url=$posterUrl, reason=${result.throwable.message}. Falling back to generated thumbnail."
                                         )
-                                        posterLoadFailed = true
+                                        posterFailureCount += 1
                                     }
                                 )
                                 .build(),
@@ -5705,14 +6206,15 @@ private fun FileListEntryCard(
         refreshToken = metadataRefreshToken,
     )
     val folderResolution = folderArtworkState.resolvedValueOrNull()
-    var folderArtworkLoadFailed by remember(
+    var folderArtworkFailureCount by remember(
         file.path,
         folderResolution?.metadata?.posterUrl,
+        folderResolution?.metadata?.posterFallbackUrls,
         folderResolution?.actorArtworkUrl,
-    ) { mutableStateOf(false) }
+    ) { mutableStateOf(0) }
     val folderArtworkSelection = selectFolderArtwork(
         artworkState = folderArtworkState,
-        imageLoadFailed = folderArtworkLoadFailed,
+        imageFailureCount = folderArtworkFailureCount,
     )
     val folderImageUrl = when (folderArtworkSelection) {
         is FolderArtworkSelection.Poster -> folderArtworkSelection.url
@@ -5745,18 +6247,22 @@ private fun FileListEntryCard(
     } else {
         null
     }
-    val posterUrl = metadata?.posterUrl
-    val posterCacheKey = posterUrl?.let { buildFilePosterCacheKey(file.name, it) }
-    var posterLoadFailed by remember(file.name, posterUrl) { mutableStateOf(false) }
+    var posterFailureCount by remember(
+        file.name,
+        metadata?.posterUrl,
+        metadata?.posterFallbackUrls,
+    ) { mutableStateOf(0) }
     val artworkSelection = if (isVideoFile) {
         selectVideoArtwork(
             metadataState = metadataState,
-            posterLoadFailed = posterLoadFailed,
+            posterFailureCount = posterFailureCount,
             videoPath = artworkVideoPath,
         )
     } else {
         VideoArtworkSelection.Placeholder
     }
+    val posterUrl = (artworkSelection as? VideoArtworkSelection.Poster)?.url
+    val posterCacheKey = posterUrl?.let { buildFilePosterCacheKey(file.name, it) }
     val shouldUsePoster = artworkSelection is VideoArtworkSelection.Poster
     val shouldUseGeneratedFrame = artworkSelection is VideoArtworkSelection.GeneratedFrame
     val generatedThumbnailModel = remember(artworkVideoPath) {
@@ -5813,7 +6319,7 @@ private fun FileListEntryCard(
             metadata = metadata,
             metadataLookupRequest = null,
             onPreviewLoadError = if (shouldUsePoster) {
-                { posterLoadFailed = true }
+                { posterFailureCount += 1 }
             } else {
                 null
             },
@@ -5865,7 +6371,7 @@ private fun FileListEntryCard(
         },
         onThumbnailLoadError = { throwable ->
             if (shouldUseFolderImage) {
-                folderArtworkLoadFailed = true
+                folderArtworkFailureCount += 1
             } else if (shouldUseFolderGeneratedFrame) {
                 Log.e(
                     FILE_THUMBNAIL_LOG_TAG,
@@ -5876,7 +6382,7 @@ private fun FileListEntryCard(
                     FILE_THUMBNAIL_LOG_TAG,
                     "Poster load failed for file=${file.path}, url=$posterUrl, reason=${throwable?.message}. Falling back to generated thumbnail."
                 )
-                posterLoadFailed = true
+                posterFailureCount += 1
             } else if (shouldUseGeneratedFrame) {
                 Log.e(
                     FILE_THUMBNAIL_LOG_TAG,
@@ -5966,14 +6472,15 @@ private fun FileThumbnailCard(
         refreshToken = metadataRefreshToken,
     )
     val folderResolution = folderArtworkState.resolvedValueOrNull()
-    var folderArtworkLoadFailed by remember(
+    var folderArtworkFailureCount by remember(
         file.path,
         folderResolution?.metadata?.posterUrl,
+        folderResolution?.metadata?.posterFallbackUrls,
         folderResolution?.actorArtworkUrl,
-    ) { mutableStateOf(false) }
+    ) { mutableStateOf(0) }
     val folderArtworkSelection = selectFolderArtwork(
         artworkState = folderArtworkState,
-        imageLoadFailed = folderArtworkLoadFailed,
+        imageFailureCount = folderArtworkFailureCount,
     )
     val folderImageUrl = when (folderArtworkSelection) {
         is FolderArtworkSelection.Poster -> folderArtworkSelection.url
@@ -6007,18 +6514,22 @@ private fun FileThumbnailCard(
     } else {
         null
     }
-    val posterUrl = metadata?.posterUrl
-    val posterCacheKey = posterUrl?.let { buildFilePosterCacheKey(file.name, it) }
-    var posterLoadFailed by remember(file.name, posterUrl) { mutableStateOf(false) }
+    var posterFailureCount by remember(
+        file.name,
+        metadata?.posterUrl,
+        metadata?.posterFallbackUrls,
+    ) { mutableStateOf(0) }
     val artworkSelection = if (isVideoFile) {
         selectVideoArtwork(
             metadataState = metadataState,
-            posterLoadFailed = posterLoadFailed,
+            posterFailureCount = posterFailureCount,
             videoPath = artworkVideoPath,
         )
     } else {
         VideoArtworkSelection.Placeholder
     }
+    val posterUrl = (artworkSelection as? VideoArtworkSelection.Poster)?.url
+    val posterCacheKey = posterUrl?.let { buildFilePosterCacheKey(file.name, it) }
     val shouldUsePoster = artworkSelection is VideoArtworkSelection.Poster
     val shouldUseGeneratedFrame = artworkSelection is VideoArtworkSelection.GeneratedFrame
     val generatedThumbnailModel = remember(artworkVideoPath) {
@@ -6075,7 +6586,7 @@ private fun FileThumbnailCard(
             metadata = metadata,
             metadataLookupRequest = null,
             onPreviewLoadError = if (shouldUsePoster) {
-                { posterLoadFailed = true }
+                { posterFailureCount += 1 }
             } else {
                 null
             },
@@ -6173,7 +6684,7 @@ private fun FileThumbnailCard(
                                         FILE_THUMBNAIL_LOG_TAG,
                                         "Poster load failed for file=${file.path}, url=$posterUrl, reason=${result.throwable.message}. Falling back to generated thumbnail."
                                     )
-                                    posterLoadFailed = true
+                                    posterFailureCount += 1
                                 } else if (shouldUseGeneratedFrame) {
                                     Log.e(
                                         FILE_THUMBNAIL_LOG_TAG,
@@ -6229,7 +6740,7 @@ private fun FileThumbnailCard(
                                 state is coil3.compose.AsyncImagePainter.State.Error &&
                                 folderImageUrl != null
                             ) {
-                                folderArtworkLoadFailed = true
+                                folderArtworkFailureCount += 1
                             }
                         },
                     )
@@ -6562,13 +7073,17 @@ private fun LibraryMovieEntry(
         refreshToken = metadataRefreshToken,
     )
     val metadata = metadataState.resolvedValueOrNull()
-    val posterUrl = metadata?.posterUrl?.takeIf { it.isNotBlank() }
-    var posterLoadFailed by remember(video.filePath, posterUrl) { mutableStateOf(false) }
+    var posterFailureCount by remember(
+        video.filePath,
+        metadata?.posterUrl,
+        metadata?.posterFallbackUrls,
+    ) { mutableStateOf(0) }
     val artworkSelection = selectVideoArtwork(
         metadataState = metadataState,
-        posterLoadFailed = posterLoadFailed,
+        posterFailureCount = posterFailureCount,
         videoPath = video.filePath,
     )
+    val posterUrl = (artworkSelection as? VideoArtworkSelection.Poster)?.url
     val validGeneratedFramePath = if (
         artworkSelection is VideoArtworkSelection.GeneratedFrame &&
         VideoThumbnailFetcher.isCurrentGeneratedFramePath(
@@ -6607,6 +7122,9 @@ private fun LibraryMovieEntry(
             model = artworkSelection.url,
             diskCacheKey = posterCacheKey,
             source = "poster",
+            videoPath = video.filePath,
+            startPositionMs = video.lastPosition.takeIf { it > 0L }
+                ?: (video.duration / 10L).coerceAtLeast(0L),
         )
 
         is VideoArtworkSelection.GeneratedFrame -> buildLibraryPreviewSpec(
@@ -6642,7 +7160,7 @@ private fun LibraryMovieEntry(
             metadata = metadata,
             metadataLookupRequest = null,
             onPreviewLoadError = if (artworkSelection is VideoArtworkSelection.Poster) {
-                { posterLoadFailed = true }
+                { posterFailureCount += 1 }
             } else {
                 null
             },
@@ -6650,7 +7168,7 @@ private fun LibraryMovieEntry(
         )
     }
     val isPreviewFocused = currentPreviewKey == previewItem.key
-    LaunchedEffect(isPreviewFocused, previewSpec, metadata, posterLoadFailed) {
+    LaunchedEffect(isPreviewFocused, previewSpec, metadata, posterFailureCount) {
         if (isPreviewFocused) onPreviewFocused(previewItem)
     }
 
@@ -6661,7 +7179,7 @@ private fun LibraryMovieEntry(
         thumbnailModel = thumbnailModel,
         thumbnailDiskCacheKey = thumbnailDiskCacheKey,
         onThumbnailLoadError = if (artworkSelection is VideoArtworkSelection.Poster) {
-            { posterLoadFailed = true }
+            { posterFailureCount += 1 }
         } else {
             null
         },
@@ -6673,7 +7191,11 @@ private fun LibraryMovieEntry(
         isPreviewFocused = isPreviewFocused,
         onRequestPreview = { onPreviewFocused(previewItem) },
         onHoverFocusChanged = { isFocused ->
-            if (isFocused) onPreviewFocused(previewItem)
+            if (isFocused) {
+                onPreviewFocused(previewItem)
+            } else if (currentPreviewKey == previewItem.key) {
+                onPreviewFocused(null)
+            }
         },
     )
 }
@@ -6687,68 +7209,25 @@ private fun LibraryMovieEntry(
 @Composable
 private fun AddServerDialog(
     initialServer: SavedServer? = null,
-    defaultUsername: String = "",
-    defaultPassword: String = "",
+    initialCredentials: SmbCredentials = SmbCredentials(),
     onDismiss: () -> Unit,
-    onSave: (SavedServer) -> Unit,
-    onTestConnection: suspend (SavedServer) -> Result<Unit>
+    onSave: (SavedServer, SmbCredentials) -> Unit,
+    onTestConnection: suspend (SavedServer, SmbCredentials) -> Result<Unit>
 ) {
-    val context = LocalContext.current
     val connectionFailedPrefix = stringResource(R.string.connection_failed_prefix)
-    val (storedUsername, storedPassword) = remember {
-        ServerCredentialAutofillStore.load(context)
-    }
-
-    val buildConfigUsername = remember { BuildConfig.SMB_DEFAULT_USERNAME.trim() }
-    val buildConfigPassword = remember { BuildConfig.SMB_DEFAULT_PASSWORD.trim() }
-
-    val initialUsername = remember(
-        initialServer?.id,
-        defaultUsername,
-        storedUsername,
-        buildConfigUsername,
-    ) {
-        if (initialServer != null) {
-            initialServer.username
-        } else {
-            listOf(storedUsername, defaultUsername, buildConfigUsername)
-                .firstOrNull { it.isNotBlank() }
-                .orEmpty()
-        }
-    }
-
-    val initialPassword = remember(
-        initialServer?.id,
-        defaultPassword,
-        storedPassword,
-        buildConfigPassword,
-    ) {
-        if (initialServer != null) {
-            initialServer.password
-        } else {
-            listOf(storedPassword, defaultPassword, buildConfigPassword)
-                .firstOrNull { it.isNotBlank() }
-                .orEmpty()
-        }
-    }
-
+    val invalidPortMessage = stringResource(R.string.invalid_smb_port)
     var name by remember(initialServer?.id) { mutableStateOf(initialServer?.serverName ?: "") }
     var address by remember(initialServer?.id) {
-        mutableStateOf(
-            initialServer?.serverAddress ?: ""
-        )
+        mutableStateOf(initialServer?.serverAddress.orEmpty())
     }
     var shareName by remember(initialServer?.id) { mutableStateOf(initialServer?.shareName ?: "") }
-    var username by remember(initialServer?.id, initialUsername) { mutableStateOf(initialUsername) }
-    var password by remember(initialServer?.id, initialPassword) { mutableStateOf(initialPassword) }
-    var domain by remember(initialServer?.id) { mutableStateOf(initialServer?.domain ?: "") }
-
-    LaunchedEffect(initialServer?.id, initialUsername, initialPassword) {
-        Log.d(
-            "AddServerDialog",
-            "Autofill ready (editing=${initialServer != null}, usernameLength=${initialUsername.length}, hasPassword=${initialPassword.isNotBlank()})"
-        )
+    var port by remember(initialServer?.id) {
+        mutableStateOf(initialServer?.port?.toString().orEmpty())
     }
+    var username by remember(initialServer?.id) { mutableStateOf(initialCredentials.username) }
+    var password by remember(initialServer?.id) { mutableStateOf(initialCredentials.password) }
+    var domain by remember(initialServer?.id) { mutableStateOf(initialCredentials.domain) }
+    var showAdvanced by remember(initialServer?.id) { mutableStateOf(false) }
     var isTestingConnection by remember { mutableStateOf(false) }
     var connectionError by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
@@ -6785,27 +7264,10 @@ private fun AddServerDialog(
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     OutlinedTextField(
-                        value = name,
-                        onValueChange = { name = it },
-                        label = { Text(stringResource(R.string.server_name)) },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                        enabled = !isTestingConnection
-                    )
-                    OutlinedTextField(
                         value = address,
                         onValueChange = { address = it },
-                        label = { Text(stringResource(R.string.ip_address)) },
-                        placeholder = { Text(stringResource(R.string.ip_address_example)) },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                        enabled = !isTestingConnection
-                    )
-                    OutlinedTextField(
-                        value = shareName,
-                        onValueChange = { shareName = it },
-                        label = { Text(stringResource(R.string.share_name_optional)) },
-                        placeholder = { Text(stringResource(R.string.share_name_example)) },
+                        label = { Text(stringResource(R.string.smb_address)) },
+                        placeholder = { Text(stringResource(R.string.smb_address_example)) },
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true,
                         enabled = !isTestingConnection
@@ -6813,7 +7275,7 @@ private fun AddServerDialog(
                     OutlinedTextField(
                         value = username,
                         onValueChange = { username = it },
-                        label = { Text(stringResource(R.string.username)) },
+                        label = { Text(stringResource(R.string.user_id_optional)) },
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true,
                         enabled = !isTestingConnection
@@ -6827,14 +7289,51 @@ private fun AddServerDialog(
                         visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
                         enabled = !isTestingConnection
                     )
-                    OutlinedTextField(
-                        value = domain,
-                        onValueChange = { domain = it },
-                        label = { Text(stringResource(R.string.domain_optional)) },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                        enabled = !isTestingConnection
-                    )
+                    TextButton(
+                        onClick = { showAdvanced = !showAdvanced },
+                        enabled = !isTestingConnection,
+                    ) {
+                        Text(
+                            stringResource(
+                                if (showAdvanced) R.string.hide_advanced_options
+                                else R.string.show_advanced_options
+                            )
+                        )
+                    }
+                    if (showAdvanced) {
+                        OutlinedTextField(
+                            value = name,
+                            onValueChange = { name = it },
+                            label = { Text(stringResource(R.string.server_name_optional)) },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            enabled = !isTestingConnection,
+                        )
+                        OutlinedTextField(
+                            value = shareName,
+                            onValueChange = { shareName = it },
+                            label = { Text(stringResource(R.string.share_name_optional)) },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            enabled = !isTestingConnection,
+                        )
+                        OutlinedTextField(
+                            value = port,
+                            onValueChange = { value -> port = value.filter(Char::isDigit) },
+                            label = { Text(stringResource(R.string.port_optional)) },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            enabled = !isTestingConnection,
+                        )
+                        OutlinedTextField(
+                            value = domain,
+                            onValueChange = { domain = it },
+                            label = { Text(stringResource(R.string.domain_optional)) },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            enabled = !isTestingConnection,
+                        )
+                    }
                 }
 
                 if (connectionError != null) {
@@ -6858,8 +7357,7 @@ private fun AddServerDialog(
                     }
                     Spacer(modifier = Modifier.width(8.dp))
 
-                    val isSaveEnabled =
-                        name.isNotBlank() && address.isNotBlank() && !isTestingConnection
+                    val isSaveEnabled = address.isNotBlank() && !isTestingConnection
 
                     Button(
                         onClick = {
@@ -6868,29 +7366,38 @@ private fun AddServerDialog(
                                     isTestingConnection = true
                                     connectionError = null
 
-                                    val serverToSave = SavedServer(
-                                        id = initialServer?.id ?: 0, // Preserve ID if editing
-                                        serverName = name,
-                                        serverAddress = address,
-                                        shareName = shareName,
-                                        username = username,
+                                    val endpointResult = SmbEndpointParser.parse(address)
+                                    val endpoint = endpointResult.getOrElse { error ->
+                                        connectionError = error.message
+                                        isTestingConnection = false
+                                        return@launch
+                                    }
+                                    val advancedPort = port.toIntOrNull()
+                                    if (advancedPort != null && advancedPort !in 1..65535) {
+                                        connectionError = invalidPortMessage
+                                        isTestingConnection = false
+                                        return@launch
+                                    }
+                                    val credentials = SmbCredentials(
+                                        username = username.trim(),
                                         password = password,
-                                        domain = domain
+                                        domain = domain.trim(),
+                                    )
+                                    val serverToSave = SavedServer(
+                                        id = initialServer?.id ?: 0,
+                                        serverName = name.trim().ifBlank { endpoint.suggestedName },
+                                        serverAddress = endpoint.address,
+                                        port = advancedPort ?: endpoint.port,
+                                        shareName = shareName.trim().ifBlank { endpoint.shareName },
+                                        credentialAlias = initialServer?.credentialAlias
+                                            ?.takeIf(String::isNotBlank)
+                                            ?: SmbCredentialStore.aliasForNewServer(),
                                     )
 
-                                    val result = onTestConnection(serverToSave)
+                                    val result = onTestConnection(serverToSave, credentials)
 
                                     if (result.isSuccess) {
-                                        ServerCredentialAutofillStore.save(
-                                            context,
-                                            username,
-                                            password
-                                        )
-                                        Log.d(
-                                            "AddServerDialog",
-                                            "Stored manual autofill credentials (usernameLength=${username.length}, hasPassword=${password.isNotBlank()})"
-                                        )
-                                        onSave(serverToSave)
+                                        onSave(serverToSave, credentials)
                                     } else {
                                         connectionError = buildString {
                                             append(connectionFailedPrefix)

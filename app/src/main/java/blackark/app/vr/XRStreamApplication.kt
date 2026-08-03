@@ -1,7 +1,10 @@
 package blackark.app.vr
 
 import android.app.Application
+import blackark.app.vr.data.AppDataResetCoordinator
+import blackark.app.vr.di.AppContainer
 import blackark.app.vr.utils.ImageCacheVersionStore
+import blackark.app.vr.utils.MetadataScopeRegistry
 import blackark.app.vr.utils.VideoThumbnailFetcher
 import coil3.ImageLoader
 import coil3.SingletonImageLoader
@@ -10,6 +13,9 @@ import coil3.memory.MemoryCache
 import coil3.request.CachePolicy
 import coil3.video.VideoFrameDecoder
 import okio.Path.Companion.toOkioPath
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 
 /**
  * Application class for XR Stream App
@@ -17,8 +23,16 @@ import okio.Path.Companion.toOkioPath
  */
 class XRStreamApplication : Application(), SingletonImageLoader.Factory {
 
+    lateinit var container: AppContainer
+        private set
+
+    private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
     override fun onCreate() {
         super.onCreate()
+        AppDataResetCoordinator.resetIfNeeded(this)
+        container = AppContainer(this)
+        MetadataScopeRegistry.initialize(container.metadataScopeRepository, applicationScope)
         android.util.Log.d("XRStreamApplication", "Application created")
         ImageCacheVersionStore.initialize(this)
 
@@ -68,5 +82,4 @@ class XRStreamApplication : Application(), SingletonImageLoader.Factory {
             .build()
     }
 }
-
 

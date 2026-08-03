@@ -6,12 +6,18 @@ import androidx.lifecycle.ViewModelProvider
 import blackark.app.vr.data.repository.AvLibraryRepository
 import blackark.app.vr.data.repository.ServerRepository
 import blackark.app.vr.data.repository.VideoRepository
+import blackark.app.vr.data.repository.MetadataScopeRepository
+import blackark.app.vr.data.repository.QuickAccessRepository
+import blackark.app.vr.data.security.SmbCredentialStore
 
 class MainDashboardViewModelFactory(
     private val context: Context,
     private val serverRepository: ServerRepository,
     private val videoRepository: VideoRepository,
     private val avLibraryRepository: AvLibraryRepository,
+    private val metadataScopeRepository: MetadataScopeRepository,
+    private val quickAccessRepository: QuickAccessRepository,
+    private val credentialStore: SmbCredentialStore,
 ) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(MainDashboardViewModel::class.java)) {
@@ -21,6 +27,9 @@ class MainDashboardViewModelFactory(
                 serverRepository = serverRepository,
                 videoRepository = videoRepository,
                 avLibraryRepository = avLibraryRepository,
+                metadataScopeRepository = metadataScopeRepository,
+                quickAccessRepository = quickAccessRepository,
+                credentialStore = credentialStore,
             ) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")
