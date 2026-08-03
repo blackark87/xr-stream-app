@@ -4557,7 +4557,7 @@ fun MainDashboardScreen(
         Orbiter(
             position = ContentEdge.Start,
             offset = 24.dp,
-            offsetType = OrbiterOffsetType.OuterEdge,
+            offsetType = OrbiterOffsetType.InnerEdge,
             alignment = Alignment.CenterVertically,
             elevation = 20.dp,
             shouldRenderInNonSpatial = true,
@@ -4572,7 +4572,7 @@ fun MainDashboardScreen(
             Orbiter(
                 position = ContentEdge.End,
                 offset = 24.dp,
-                offsetType = OrbiterOffsetType.OuterEdge,
+                offsetType = OrbiterOffsetType.InnerEdge,
                 alignment = Alignment.CenterVertically,
                 elevation = 20.dp,
                 shouldRenderInNonSpatial = true,
