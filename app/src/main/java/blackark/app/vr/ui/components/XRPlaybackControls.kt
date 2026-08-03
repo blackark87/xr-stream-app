@@ -952,36 +952,8 @@ fun XRPlaybackControls(
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        horizontalArrangement = Arrangement.End,
                     ) {
-                        PlaybackOptionButton(
-                            text = playerState.repeatPointA?.let { "A ${formatTime(it)}" } ?: "Set A",
-                            selected = playerState.repeatPointA != null,
-                            onClick = videoPlayerViewModel::setRepeatPointA,
-                            selectedContainerColor = accentStrong,
-                            selectedContentColor = onAccent,
-                            idleContainerColor = chipIdle,
-                            idleContentColor = textStrong,
-                            borderColor = sectionBorder,
-                            modifier = Modifier.weight(1f),
-                        )
-                        PlaybackOptionButton(
-                            text = playerState.repeatPointB?.let { "B ${formatTime(it)}" } ?: "Set B",
-                            selected = playerState.repeatPointB != null,
-                            onClick = videoPlayerViewModel::setRepeatPointB,
-                            selectedContainerColor = accentStrong,
-                            selectedContentColor = onAccent,
-                            idleContainerColor = chipIdle,
-                            idleContentColor = textStrong,
-                            borderColor = sectionBorder,
-                            modifier = Modifier.weight(1f),
-                        )
-                        Button(
-                            onClick = videoPlayerViewModel::clearRepeatRange,
-                            enabled = playerState.repeatPointA != null,
-                        ) {
-                            Text("Clear A-B")
-                        }
                         Button(onClick = videoPlayerViewModel::recenterView) {
                             Text("Recenter")
                         }
