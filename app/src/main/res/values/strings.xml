@@ -125,6 +125,8 @@
     <string name="recent">Recent</string>
     <string name="remove_from_favorites">Remove from favorites</string>
     <string name="remove_from_recent">Remove from recent</string>
+    <string name="scroll_next_items">Scroll to next items</string>
+    <string name="scroll_previous_items">Scroll to previous items</string>
     <string name="select_files_to_delete">Select files to delete</string>
     <string name="selected">Selected</string>
     <string name="selected_for_deletion">Selected for deletion</string>

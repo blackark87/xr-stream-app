@@ -54,6 +54,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -294,12 +295,8 @@ private enum class DashboardWidthClass {
 
 private enum class FileWorkspaceMode {
     Browser,
-    Av,
-}
-
-private enum class SecondaryPaneMode {
-    Preview,
     Library,
+    Av,
 }
 
 private enum class SettingsAction {
@@ -1226,7 +1223,8 @@ private fun HomePanel(
     selectedSource: SavedServer?,
     viewModel: MainDashboardViewModel,
     metadataRefreshToken: Long,
-    onRecentClick: (RecentVideo) -> Unit,
+    onContinueClick: (RecentVideo) -> Unit,
+    onContinueRemove: (RecentVideo) -> Unit,
     onFavoriteClick: (FavoriteVideo) -> Unit,
     onQuickAccessClick: (QuickAccessFolder) -> Unit,
     onQuickAccessDelete: (QuickAccessFolder) -> Unit,
@@ -1244,13 +1242,7 @@ private fun HomePanel(
         sortedRecentVideos.filter { video ->
             video.lastPosition > 0L &&
                     (video.duration <= 0L || video.lastPosition < video.duration * 95L / 100L)
-        }.take(8)
-    }
-    val continueWatchingPaths = remember(continueWatching) {
-        continueWatching.mapTo(hashSetOf()) { it.filePath }
-    }
-    val recentShelf = remember(sortedRecentVideos, continueWatchingPaths) {
-        sortedRecentVideos.filterNot { it.filePath in continueWatchingPaths }.take(12)
+        }
     }
     val availableFavorites = remember(favorites, servers) {
         favorites.filter { it.hasAvailableHomeSource(servers) }.distinctBy { it.filePath }
@@ -1259,15 +1251,14 @@ private fun HomePanel(
     val favoritePaths = remember(favoriteShelf) {
         favoriteShelf.mapTo(hashSetOf()) { it.filePath }
     }
-    val libraryItemCount = remember(sortedRecentVideos, availableFavorites) {
+    val libraryItemCount = remember(continueWatching, availableFavorites) {
         buildSet {
-            sortedRecentVideos.forEach { add(it.filePath) }
+            continueWatching.forEach { add(it.filePath) }
             availableFavorites.forEach { add(it.filePath) }
         }.size
     }
     val serverNamesById = remember(servers) { servers.associate { it.id to it.serverName } }
-    val hasLibraryContent = continueWatching.isNotEmpty() ||
-            recentShelf.isNotEmpty() || favoriteShelf.isNotEmpty()
+    val hasLibraryContent = continueWatching.isNotEmpty() || favoriteShelf.isNotEmpty()
 
     LazyColumn(
         modifier = modifier,
@@ -1301,7 +1292,9 @@ private fun HomePanel(
                     favoritePaths = favoritePaths,
                     showProgress = true,
                     artworkPolicy = VideoArtworkPolicy.GeneratedFrameOnly,
-                    onVideoClick = onRecentClick,
+                    showScrollControls = true,
+                    onRemove = onContinueRemove,
+                    onVideoClick = onContinueClick,
                 )
             }
         }
@@ -1328,21 +1321,6 @@ private fun HomePanel(
                     favoritePaths = favoritePaths,
                     showProgress = false,
                     onVideoClick = onFavoriteClick,
-                )
-            }
-        }
-
-        if (recentShelf.isNotEmpty()) {
-            item {
-                HomeVideoShelf(
-                    title = stringResource(R.string.recent),
-                    videos = recentShelf,
-                    viewModel = viewModel,
-                    metadataRefreshToken = metadataRefreshToken,
-                    selectedSource = selectedSource,
-                    favoritePaths = favoritePaths,
-                    showProgress = false,
-                    onVideoClick = onRecentClick,
                 )
             }
         }
@@ -1489,13 +1467,70 @@ private fun <T : LibraryVideoItem> HomeVideoShelf(
     favoritePaths: Set<String>,
     showProgress: Boolean,
     artworkPolicy: VideoArtworkPolicy = VideoArtworkPolicy.MetadataPreferred,
+    showScrollControls: Boolean = false,
+    onRemove: ((T) -> Unit)? = null,
     onVideoClick: (T) -> Unit,
 ) {
+    val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        HomeSectionHeader(title = title, itemCount = videos.size)
+        if (showScrollControls) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                HomeSectionHeader(
+                    title = title,
+                    itemCount = videos.size,
+                    modifier = Modifier.weight(1f),
+                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(
+                        enabled = listState.canScrollBackward,
+                        onClick = {
+                            val visibleCount = listState.layoutInfo.visibleItemsInfo.size
+                                .coerceAtLeast(1)
+                            val targetIndex = (listState.firstVisibleItemIndex - visibleCount)
+                                .coerceAtLeast(0)
+                            scope.launch { listState.animateScrollToItem(targetIndex) }
+                        },
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = stringResource(R.string.scroll_previous_items),
+                        )
+                    }
+                    IconButton(
+                        enabled = listState.canScrollForward,
+                        onClick = {
+                            val visibleCount = listState.layoutInfo.visibleItemsInfo.size
+                                .coerceAtLeast(1)
+                            val targetIndex = (listState.firstVisibleItemIndex + visibleCount)
+                                .coerceAtMost(videos.lastIndex)
+                            scope.launch { listState.animateScrollToItem(targetIndex) }
+                        },
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.ChevronRight,
+                            contentDescription = stringResource(R.string.scroll_next_items),
+                        )
+                    }
+                }
+            }
+        } else {
+            HomeSectionHeader(title = title, itemCount = videos.size)
+        }
         LazyRow(
+            state = listState,
             horizontalArrangement = Arrangement.spacedBy(14.dp),
-            contentPadding = PaddingValues(end = 8.dp),
+            contentPadding = PaddingValues(
+                start = 8.dp,
+                top = 6.dp,
+                end = 8.dp,
+                bottom = 6.dp,
+            ),
         ) {
             items(videos, key = { it.filePath }) { video ->
                 HomeVideoCard(
@@ -1506,6 +1541,7 @@ private fun <T : LibraryVideoItem> HomeVideoShelf(
                     metadataRefreshToken = metadataRefreshToken,
                     selectedSource = selectedSource,
                     artworkPolicy = artworkPolicy,
+                    onRemove = onRemove?.let { remove -> { remove(video) } },
                     onClick = { onVideoClick(video) },
                 )
             }
@@ -1517,9 +1553,10 @@ private fun <T : LibraryVideoItem> HomeVideoShelf(
 private fun HomeSectionHeader(
     title: String,
     itemCount: Int,
+    modifier: Modifier = Modifier.fillMaxWidth(),
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -1545,6 +1582,7 @@ private fun HomeVideoCard(
     metadataRefreshToken: Long,
     selectedSource: SavedServer?,
     artworkPolicy: VideoArtworkPolicy,
+    onRemove: (() -> Unit)?,
     onClick: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -1725,6 +1763,28 @@ private fun HomeVideoCard(
                             tint = NetflixRed,
                             modifier = Modifier.padding(8.dp).size(18.dp),
                         )
+                    }
+                }
+
+                onRemove?.let { remove ->
+                    Surface(
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .padding(10.dp),
+                        color = MaterialTheme.colorScheme.scrim.copy(alpha = 0.68f),
+                        shape = RoundedCornerShape(999.dp),
+                    ) {
+                        IconButton(
+                            onClick = remove,
+                            modifier = Modifier.size(34.dp),
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Delete,
+                                contentDescription = stringResource(R.string.remove_from_recent),
+                                tint = TextPrimary,
+                                modifier = Modifier.size(18.dp),
+                            )
+                        }
                     }
                 }
 
@@ -3678,7 +3738,6 @@ fun MainDashboardScreen(
     val allFavorites by viewModel.allFavorites.collectAsStateWithLifecycle()
     val files by viewModel.files.collectAsStateWithLifecycle()
     val favorites by viewModel.favorites.collectAsStateWithLifecycle()
-    val recentVideos by viewModel.recentVideos.collectAsStateWithLifecycle()
     val favoritePaths = remember(favorites) { favorites.mapTo(linkedSetOf()) { it.filePath } }
 
     var showAddServerDialog by remember { mutableStateOf(false) }
@@ -3688,9 +3747,6 @@ fun MainDashboardScreen(
     }
     var fileWorkspaceMode by rememberSaveable {
         mutableStateOf(FileWorkspaceMode.Browser)
-    }
-    var secondaryPaneMode by rememberSaveable {
-        mutableStateOf(SecondaryPaneMode.Preview)
     }
     val browserPreviewResetKey =
         "preview:${primaryDestination.name}:${uiState.selectedServer?.id}:${uiState.currentPath}"
@@ -3787,7 +3843,7 @@ fun MainDashboardScreen(
     val showLibraryOrbiter =
         isFileSourceDestination &&
                 isSelectedSourceModeConnected &&
-                fileWorkspaceMode == FileWorkspaceMode.Browser
+                fileWorkspaceMode != FileWorkspaceMode.Av
     val density = LocalDensity.current
     val initialDashboardPanelSize = remember { AppState.dashboardPanelSize.value }
     var dashboardPanelWidth by remember {
@@ -4042,8 +4098,13 @@ fun MainDashboardScreen(
                                 selectedSource = uiState.selectedServer,
                                 viewModel = viewModel,
                                 metadataRefreshToken = uiState.fileMetadataRefreshToken,
-                                onRecentClick = { video ->
+                                onContinueClick = { video ->
                                     openHomeVideo(video)
+                                },
+                                onContinueRemove = { video ->
+                                    dashboardScope.launch {
+                                        viewModel.removeFromRecent(video)
+                                    }
                                 },
                                 onFavoriteClick = { video ->
                                     openHomeVideo(video)
@@ -4193,8 +4254,51 @@ fun MainDashboardScreen(
                                         maxPreviewWidth.value,
                                     ).dp
 
+                                val activePreviewItem = if (
+                                    fileWorkspaceMode == FileWorkspaceMode.Library
+                                ) {
+                                    libraryPreviewItem
+                                } else {
+                                    browserPreviewItem
+                                }
+
                                 Row(modifier = Modifier.fillMaxSize()) {
-                                    FileBrowserPanel(
+                                    if (fileWorkspaceMode == FileWorkspaceMode.Library) {
+                                        FavoritesPanel(
+                                            favorites = favorites,
+                                            viewModel = viewModel,
+                                            metadataRefreshToken = uiState.fileMetadataRefreshToken,
+                                            isConnected = true,
+                                            currentPreviewKey = libraryPreviewItem?.key,
+                                            onFavoriteClick = { video ->
+                                                libraryPreviewItem = null
+                                                navController.navigate(
+                                                    Screen.VideoPlayer.createRoute(
+                                                        video.filePath,
+                                                        video.fileName
+                                                    )
+                                                ) {
+                                                    launchSingleTop = true
+                                                }
+                                            },
+                                            onFavoriteToggle = { filePath, fileName, serverAddress, shareName, isFavorite ->
+                                                viewModel.toggleFavoriteEntry(
+                                                    filePath = filePath,
+                                                    fileName = fileName,
+                                                    serverAddress = serverAddress,
+                                                    shareName = shareName,
+                                                    currentIsFavorite = isFavorite,
+                                                )
+                                            },
+                                            onPreviewFocused = { preview ->
+                                                libraryPreviewItem = preview
+                                            },
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .fillMaxHeight(),
+                                        )
+                                    } else {
+                                        FileBrowserPanel(
                                         files = files,
                                         favoritePaths = favoritePaths,
                                         currentPath = uiState.currentPath,
@@ -4261,89 +4365,32 @@ fun MainDashboardScreen(
                                         modifier = Modifier
                                             .weight(1f)
                                             .fillMaxHeight(),
+                                        )
+                                    }
+
+                                    ConnectedPaneResizeHandle(
+                                        onDragDeltaPx = { deltaPx ->
+                                            val deltaDp =
+                                                with(previewDensity) { deltaPx.toDp().value }
+                                            val currentWidth =
+                                                connectedPreviewWidthOverrideDp
+                                                    ?: defaultPreviewWidth.value
+                                            connectedPreviewWidthOverrideDp = (
+                                                currentWidth - deltaDp
+                                                ).coerceIn(
+                                                minPreviewWidth.value,
+                                                maxPreviewWidth.value,
+                                            )
+                                        },
+                                        modifier = Modifier.fillMaxHeight(),
                                     )
 
-                                    if (secondaryPaneMode == SecondaryPaneMode.Preview) {
-                                        ConnectedPaneResizeHandle(
-                                            onDragDeltaPx = { deltaPx ->
-                                                val deltaDp =
-                                                    with(previewDensity) { deltaPx.toDp().value }
-                                                val currentWidth =
-                                                    connectedPreviewWidthOverrideDp
-                                                        ?: defaultPreviewWidth.value
-                                                connectedPreviewWidthOverrideDp = (
-                                                        currentWidth - deltaDp
-                                                        ).coerceIn(
-                                                        minPreviewWidth.value,
-                                                        maxPreviewWidth.value,
-                                                    )
-                                            },
-                                            modifier = Modifier.fillMaxHeight(),
-                                        )
-                                    } else {
-                                        Spacer(modifier = Modifier.width(12.dp))
-                                    }
-
-                                    if (secondaryPaneMode == SecondaryPaneMode.Preview) {
-                                        DashboardPreviewPanel(
-                                            previewItem = browserPreviewItem,
-                                            modifier = Modifier
-                                                .width(previewWidth)
-                                                .fillMaxHeight(),
-                                        )
-                                    } else {
-                                        FavoritesPanel(
-                                            favorites = favorites,
-                                            recentVideos = recentVideos,
-                                            viewModel = viewModel,
-                                            metadataRefreshToken = uiState.fileMetadataRefreshToken,
-                                            isConnected = true,
-                                            stateKey = uiState.selectedServer?.id,
-                                            currentPreviewKey = libraryPreviewItem?.key,
-                                            onFavoriteClick = { video ->
-                                                libraryPreviewItem = null
-                                                navController.navigate(
-                                                    Screen.VideoPlayer.createRoute(
-                                                        video.filePath,
-                                                        video.fileName
-                                                    )
-                                                ) {
-                                                    launchSingleTop = true
-                                                }
-                                            },
-                                            onRecentClick = { video ->
-                                                libraryPreviewItem = null
-                                                navController.navigate(
-                                                    Screen.VideoPlayer.createRoute(
-                                                        video.filePath,
-                                                        video.fileName
-                                                    )
-                                                ) {
-                                                    launchSingleTop = true
-                                                }
-                                            },
-                                            onFavoriteToggle = { filePath, fileName, serverAddress, shareName, isFavorite ->
-                                                viewModel.toggleFavoriteEntry(
-                                                    filePath = filePath,
-                                                    fileName = fileName,
-                                                    serverAddress = serverAddress,
-                                                    shareName = shareName,
-                                                    currentIsFavorite = isFavorite,
-                                                )
-                                            },
-                                            onRecentRemove = { video ->
-                                                dashboardScope.launch {
-                                                    viewModel.removeFromRecent(video)
-                                                }
-                                            },
-                                            onPreviewFocused = { preview ->
-                                                libraryPreviewItem = preview
-                                            },
-                                            modifier = Modifier
-                                                .width(previewWidth)
-                                                .fillMaxHeight(),
-                                        )
-                                    }
+                                    DashboardPreviewPanel(
+                                        previewItem = activePreviewItem,
+                                        modifier = Modifier
+                                            .width(previewWidth)
+                                            .fillMaxHeight(),
+                                    )
                                 }
                             }
                         }
@@ -4462,8 +4509,51 @@ fun MainDashboardScreen(
                                         maxPreviewWidth.value,
                                     ).dp
 
+                                val activePreviewItem = if (
+                                    fileWorkspaceMode == FileWorkspaceMode.Library
+                                ) {
+                                    libraryPreviewItem
+                                } else {
+                                    browserPreviewItem
+                                }
+
                                 Row(modifier = Modifier.fillMaxSize()) {
-                                    FileBrowserPanel(
+                                    if (fileWorkspaceMode == FileWorkspaceMode.Library) {
+                                        FavoritesPanel(
+                                            favorites = favorites,
+                                            viewModel = viewModel,
+                                            metadataRefreshToken = uiState.fileMetadataRefreshToken,
+                                            isConnected = true,
+                                            currentPreviewKey = libraryPreviewItem?.key,
+                                            onFavoriteClick = { video ->
+                                                libraryPreviewItem = null
+                                                navController.navigate(
+                                                    Screen.VideoPlayer.createRoute(
+                                                        video.filePath,
+                                                        video.fileName
+                                                    )
+                                                ) {
+                                                    launchSingleTop = true
+                                                }
+                                            },
+                                            onFavoriteToggle = { filePath, fileName, serverAddress, shareName, isFavorite ->
+                                                viewModel.toggleFavoriteEntry(
+                                                    filePath = filePath,
+                                                    fileName = fileName,
+                                                    serverAddress = serverAddress,
+                                                    shareName = shareName,
+                                                    currentIsFavorite = isFavorite,
+                                                )
+                                            },
+                                            onPreviewFocused = { preview ->
+                                                libraryPreviewItem = preview
+                                            },
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .fillMaxHeight(),
+                                        )
+                                    } else {
+                                        FileBrowserPanel(
                                         files = files,
                                         favoritePaths = favoritePaths,
                                         currentPath = uiState.currentPath,
@@ -4540,89 +4630,32 @@ fun MainDashboardScreen(
                                         modifier = Modifier
                                             .weight(1f)
                                             .fillMaxHeight(),
+                                        )
+                                    }
+
+                                    ConnectedPaneResizeHandle(
+                                        onDragDeltaPx = { deltaPx ->
+                                            val deltaDp =
+                                                with(previewDensity) { deltaPx.toDp().value }
+                                            val currentWidth =
+                                                connectedPreviewWidthOverrideDp
+                                                    ?: defaultPreviewWidth.value
+                                            connectedPreviewWidthOverrideDp = (
+                                                currentWidth - deltaDp
+                                                ).coerceIn(
+                                                minPreviewWidth.value,
+                                                maxPreviewWidth.value,
+                                            )
+                                        },
+                                        modifier = Modifier.fillMaxHeight(),
                                     )
 
-                                    if (secondaryPaneMode == SecondaryPaneMode.Preview) {
-                                        ConnectedPaneResizeHandle(
-                                            onDragDeltaPx = { deltaPx ->
-                                                val deltaDp =
-                                                    with(previewDensity) { deltaPx.toDp().value }
-                                                val currentWidth =
-                                                    connectedPreviewWidthOverrideDp
-                                                        ?: defaultPreviewWidth.value
-                                                connectedPreviewWidthOverrideDp = (
-                                                        currentWidth - deltaDp
-                                                        ).coerceIn(
-                                                        minPreviewWidth.value,
-                                                        maxPreviewWidth.value,
-                                                    )
-                                            },
-                                            modifier = Modifier.fillMaxHeight(),
-                                        )
-                                    } else {
-                                        Spacer(modifier = Modifier.width(12.dp))
-                                    }
-
-                                    if (secondaryPaneMode == SecondaryPaneMode.Preview) {
-                                        DashboardPreviewPanel(
-                                            previewItem = browserPreviewItem,
-                                            modifier = Modifier
-                                                .width(previewWidth)
-                                                .fillMaxHeight(),
-                                        )
-                                    } else {
-                                        FavoritesPanel(
-                                            favorites = favorites,
-                                            recentVideos = recentVideos,
-                                            viewModel = viewModel,
-                                            metadataRefreshToken = uiState.fileMetadataRefreshToken,
-                                            isConnected = true,
-                                            stateKey = uiState.selectedServer?.id,
-                                            currentPreviewKey = libraryPreviewItem?.key,
-                                            onFavoriteClick = { video ->
-                                                libraryPreviewItem = null
-                                                navController.navigate(
-                                                    Screen.VideoPlayer.createRoute(
-                                                        video.filePath,
-                                                        video.fileName
-                                                    )
-                                                ) {
-                                                    launchSingleTop = true
-                                                }
-                                            },
-                                            onRecentClick = { video ->
-                                                libraryPreviewItem = null
-                                                navController.navigate(
-                                                    Screen.VideoPlayer.createRoute(
-                                                        video.filePath,
-                                                        video.fileName
-                                                    )
-                                                ) {
-                                                    launchSingleTop = true
-                                                }
-                                            },
-                                            onFavoriteToggle = { filePath, fileName, serverAddress, shareName, isFavorite ->
-                                                viewModel.toggleFavoriteEntry(
-                                                    filePath = filePath,
-                                                    fileName = fileName,
-                                                    serverAddress = serverAddress,
-                                                    shareName = shareName,
-                                                    currentIsFavorite = isFavorite,
-                                                )
-                                            },
-                                            onRecentRemove = { video ->
-                                                dashboardScope.launch {
-                                                    viewModel.removeFromRecent(video)
-                                                }
-                                            },
-                                            onPreviewFocused = { preview ->
-                                                libraryPreviewItem = preview
-                                            },
-                                            modifier = Modifier
-                                                .width(previewWidth)
-                                                .fillMaxHeight(),
-                                        )
-                                    }
+                                    DashboardPreviewPanel(
+                                        previewItem = activePreviewItem,
+                                        modifier = Modifier
+                                            .width(previewWidth)
+                                            .fillMaxHeight(),
+                                    )
                                 }
                             }
                         }
@@ -4657,13 +4690,14 @@ fun MainDashboardScreen(
                         shouldRenderInNonSpatial = true,
                     ) {
                         LibraryOrbiterRail(
-                            isSelected = secondaryPaneMode == SecondaryPaneMode.Library,
+                            isSelected = fileWorkspaceMode == FileWorkspaceMode.Library,
                             onClick = {
-                                secondaryPaneMode =
-                                    if (secondaryPaneMode == SecondaryPaneMode.Library) {
-                                        SecondaryPaneMode.Preview
+                                clearAllPreviewItems()
+                                fileWorkspaceMode =
+                                    if (fileWorkspaceMode == FileWorkspaceMode.Library) {
+                                        FileWorkspaceMode.Browser
                                     } else {
-                                        SecondaryPaneMode.Library
+                                        FileWorkspaceMode.Library
                                     }
                             },
                         )
@@ -4694,13 +4728,14 @@ fun MainDashboardScreen(
                         shouldRenderInNonSpatial = true,
                     ) {
                         LibraryOrbiterBar(
-                            isSelected = secondaryPaneMode == SecondaryPaneMode.Library,
+                            isSelected = fileWorkspaceMode == FileWorkspaceMode.Library,
                             onClick = {
-                                secondaryPaneMode =
-                                    if (secondaryPaneMode == SecondaryPaneMode.Library) {
-                                        SecondaryPaneMode.Preview
+                                clearAllPreviewItems()
+                                fileWorkspaceMode =
+                                    if (fileWorkspaceMode == FileWorkspaceMode.Library) {
+                                        FileWorkspaceMode.Browser
                                     } else {
-                                        SecondaryPaneMode.Library
+                                        FileWorkspaceMode.Library
                                     }
                             },
                         )
@@ -7576,63 +7611,20 @@ private fun FileThumbnailCard(
     )
 }
 
-/**
- * RIGHT PANEL: Favorites + Recent
- */
-private enum class LibraryTab {
-    Favorites,
-    Recent,
-}
-
-@Composable
-private fun LibraryTabChip(
-    text: String,
-    selected: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Surface(
-        modifier = modifier.clickable(onClick = onClick),
-        color = if (selected) NetflixRed.copy(alpha = 0.18f) else CardBackground,
-        shape = RoundedCornerShape(999.dp),
-        border = BorderStroke(1.dp, if (selected) NetflixRed else DividerGray),
-    ) {
-        Text(
-            text = text,
-            style = MaterialTheme.typography.labelLarge,
-            color = if (selected) TextPrimary else TextSecondary,
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
-        )
-    }
-}
-
 @Composable
 private fun FavoritesPanel(
     favorites: List<FavoriteVideo>,
-    recentVideos: List<RecentVideo>,
     viewModel: MainDashboardViewModel,
     metadataRefreshToken: Long,
     isConnected: Boolean,
-    stateKey: Long?,
     currentPreviewKey: String?,
     onFavoriteClick: (FavoriteVideo) -> Unit,
-    onRecentClick: (RecentVideo) -> Unit,
     onFavoriteToggle: (String, String, String, String, Boolean) -> Unit,
-    onRecentRemove: (RecentVideo) -> Unit,
     onPreviewFocused: (DashboardPreviewItem?) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var selectedTab by rememberSaveable(stateKey) { mutableStateOf(LibraryTab.Favorites) }
-    val favoritePaths = remember(favorites) { favorites.mapTo(linkedSetOf()) { it.filePath } }
-    val recentItems = remember(recentVideos) {
-        recentVideos.sortedByDescending { it.lastPlayed }
-    }
-
-    LaunchedEffect(isConnected, selectedTab, favorites, recentItems) {
-        val shouldClearPreview = !isConnected ||
-                (selectedTab == LibraryTab.Favorites && favorites.isEmpty()) ||
-                (selectedTab == LibraryTab.Recent && recentItems.isEmpty())
-        if (shouldClearPreview) {
+    LaunchedEffect(isConnected, favorites) {
+        if (!isConnected || favorites.isEmpty()) {
             onPreviewFocused(null)
         }
     }
@@ -7660,38 +7652,10 @@ private fun FavoritesPanel(
                     color = TextPrimary,
                 )
                 Icon(
-                    imageVector = Icons.Filled.Movie,
+                    imageVector = Icons.Filled.Favorite,
                     contentDescription = null,
                     tint = NetflixRed,
                     modifier = Modifier.size(24.dp),
-                )
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                LibraryTabChip(
-                    text = stringResource(R.string.favorites),
-                    selected = selectedTab == LibraryTab.Favorites,
-                    onClick = {
-                        if (selectedTab != LibraryTab.Favorites) {
-                            onPreviewFocused(null)
-                        }
-                        selectedTab = LibraryTab.Favorites
-                    },
-                )
-                LibraryTabChip(
-                    text = stringResource(R.string.recent),
-                    selected = selectedTab == LibraryTab.Recent,
-                    onClick = {
-                        if (selectedTab != LibraryTab.Recent) {
-                            onPreviewFocused(null)
-                        }
-                        selectedTab = LibraryTab.Recent
-                    },
                 )
             }
 
@@ -7707,7 +7671,7 @@ private fun FavoritesPanel(
                     )
                 }
 
-                selectedTab == LibraryTab.Favorites && favorites.isEmpty() -> {
+                favorites.isEmpty() -> {
                     EmptyState(
                         icon = Icons.Outlined.FavoriteBorder,
                         message = stringResource(R.string.no_favorites_yet),
@@ -7717,17 +7681,7 @@ private fun FavoritesPanel(
                     )
                 }
 
-                selectedTab == LibraryTab.Recent && recentItems.isEmpty() -> {
-                    EmptyState(
-                        icon = Icons.Filled.Movie,
-                        message = stringResource(R.string.no_recent_videos_yet),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .weight(1f),
-                    )
-                }
-
-                selectedTab == LibraryTab.Favorites -> {
+                else -> {
                     LazyColumn(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -7757,41 +7711,6 @@ private fun FavoritesPanel(
                         }
                     }
                 }
-
-                else -> {
-                    LazyColumn(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .weight(1f),
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
-                        contentPadding = PaddingValues(bottom = 4.dp),
-                    ) {
-                        items(recentItems) { video ->
-                            val isFavorite = favoritePaths.contains(video.filePath)
-                            LibraryMovieEntry(
-                                video = video,
-                                isFavorite = isFavorite,
-                                viewModel = viewModel,
-                                metadataRefreshToken = metadataRefreshToken,
-                                currentPreviewKey = currentPreviewKey,
-                                onOpen = { onRecentClick(video) },
-                                onFavoriteToggle = {
-                                    onFavoriteToggle(
-                                        video.filePath,
-                                        video.fileName,
-                                        video.serverAddress,
-                                        video.shareName,
-                                        isFavorite,
-                                    )
-                                },
-                                secondaryActionIcon = Icons.Filled.Delete,
-                                secondaryActionContentDescription = stringResource(R.string.remove_from_recent),
-                                onSecondaryActionClick = { onRecentRemove(video) },
-                                onPreviewFocused = onPreviewFocused,
-                            )
-                        }
-                    }
-                }
             }
         }
     }
@@ -7807,9 +7726,6 @@ private fun LibraryMovieEntry(
     onOpen: () -> Unit,
     onFavoriteToggle: () -> Unit,
     onPreviewFocused: (DashboardPreviewItem?) -> Unit,
-    secondaryActionIcon: ImageVector? = null,
-    secondaryActionContentDescription: String? = null,
-    onSecondaryActionClick: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val file = remember(video.filePath, video.fileName) {
@@ -7940,9 +7856,6 @@ private fun LibraryMovieEntry(
         },
         onClick = onOpen,
         onFavoriteToggle = onFavoriteToggle,
-        secondaryActionIcon = secondaryActionIcon,
-        secondaryActionContentDescription = secondaryActionContentDescription,
-        onSecondaryActionClick = onSecondaryActionClick,
         isPreviewFocused = isPreviewFocused,
         onRequestPreview = { onPreviewFocused(previewItem) },
         onHoverFocusChanged = { isFocused ->

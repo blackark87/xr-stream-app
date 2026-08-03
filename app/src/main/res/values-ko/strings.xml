@@ -125,6 +125,8 @@
     <string name="recent">최근 항목</string>
     <string name="remove_from_favorites">즐겨찾기에서 제거</string>
     <string name="remove_from_recent">최근 항목에서 제거</string>
+    <string name="scroll_next_items">다음 항목으로 스크롤</string>
+    <string name="scroll_previous_items">이전 항목으로 스크롤</string>
     <string name="select_files_to_delete">삭제할 파일 선택</string>
     <string name="selected">선택됨</string>
     <string name="selected_for_deletion">삭제 대상으로 선택됨</string>
