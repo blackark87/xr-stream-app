@@ -1,6 +1,12 @@
 <resources>
     <string name="app_name">XR Stream</string>
     <string name="home">Home</string>
+    <string name="home_tagline">Continue watching or jump back into your library.</string>
+    <string name="home_item_count">%1$d videos</string>
+    <string name="home_empty_title">Choose something to watch</string>
+    <string name="home_empty_message">Open local storage or connect to an SMB source. Your recent videos and favorites will appear here.</string>
+    <string name="home_local_source_description">Browse videos on this device</string>
+    <string name="home_smb_source_count">%1$d saved servers</string>
     <string name="continue_watching">Continue watching</string>
     <string name="quick_access">Quick access</string>
     <string name="no_quick_access_folders">Add a folder from the SMB browser for quick access.</string>

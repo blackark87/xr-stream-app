@@ -19,6 +19,8 @@ import android.widget.TextView
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -50,6 +52,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -94,6 +97,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationRail
 import androidx.compose.material3.NavigationRailItem
@@ -121,6 +125,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
@@ -257,12 +262,12 @@ private enum class DashboardPaneDestination(val label: String) {
     Library("Library"),
 }
 
-private enum class PrimaryDestination(val label: String) {
-    Home("Home"),
-    LocalFiles("Local Files"),
-    SmbFiles("SMB Files"),
-    YouTube("YouTube"),
-    Settings("Settings"),
+private enum class PrimaryDestination {
+    Home,
+    LocalFiles,
+    SmbFiles,
+    YouTube,
+    Settings,
 }
 
 private fun logMetadataTrace(tag: String, message: String) {
@@ -340,6 +345,15 @@ private fun PrimaryDestination.icon(): ImageVector = when (this) {
     PrimaryDestination.SmbFiles -> Icons.Filled.Cloud
     PrimaryDestination.YouTube -> Icons.Filled.Movie
     PrimaryDestination.Settings -> Icons.Filled.Settings
+}
+
+@Composable
+private fun PrimaryDestination.localizedLabel(): String = when (this) {
+    PrimaryDestination.Home -> stringResource(R.string.home)
+    PrimaryDestination.LocalFiles -> stringResource(R.string.local_files)
+    PrimaryDestination.SmbFiles -> stringResource(R.string.smb_files)
+    PrimaryDestination.YouTube -> stringResource(R.string.youtube)
+    PrimaryDestination.Settings -> stringResource(R.string.settings)
 }
 
 private fun resolveLocalFolderDisplayName(treeUri: String?): String? {
@@ -700,40 +714,48 @@ private fun DashboardSourceRail(
     onModeSelected: (PrimaryDestination) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val selectedLabel = selectedMode.localizedLabel()
     Surface(
         modifier = modifier
-            .width(108.dp)
+            .width(180.dp)
             .clip(RoundedCornerShape(22.dp)),
-        color = CardBackground.copy(alpha = 0.92f),
+        color = CardBackground.copy(alpha = 0.96f),
         shape = RoundedCornerShape(22.dp),
-        tonalElevation = 10.dp,
-        shadowElevation = 18.dp,
+        tonalElevation = 6.dp,
+        shadowElevation = 12.dp,
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 10.dp, vertical = 12.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+                .padding(10.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             Text(
-                text = selectedMode.label,
+                text = stringResource(R.string.app_name),
                 modifier = Modifier.fillMaxWidth(),
-                style = MaterialTheme.typography.labelMedium,
+                style = MaterialTheme.typography.titleMedium,
                 color = TextPrimary,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                textAlign = TextAlign.Center,
+            )
+
+            Text(
+                text = selectedLabel,
+                style = MaterialTheme.typography.labelMedium,
+                color = TextTertiary,
+                maxLines = 1,
             )
 
             HorizontalDivider(
-                modifier = Modifier.width(40.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 2.dp),
                 color = DividerGray.copy(alpha = 0.72f),
             )
 
             PrimaryDestination.entries.forEach { mode ->
                 OrbiterRailButton(
-                    label = mode.label,
+                    label = mode.localizedLabel(),
                     icon = mode.icon(),
                     selected = selectedMode == mode,
                     onClick = { onModeSelected(mode) },
@@ -750,29 +772,15 @@ private fun LibraryOrbiterRail(
     modifier: Modifier = Modifier,
 ) {
     Surface(
-        modifier = modifier.clip(RoundedCornerShape(22.dp)),
+        modifier = modifier
+            .width(156.dp)
+            .clip(RoundedCornerShape(22.dp)),
         color = CardBackground.copy(alpha = 0.92f),
         shape = RoundedCornerShape(22.dp),
-        tonalElevation = 10.dp,
-        shadowElevation = 18.dp,
+        tonalElevation = 6.dp,
+        shadowElevation = 12.dp,
     ) {
-        Column(
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 12.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Text(
-                text = stringResource(R.string.library),
-                style = MaterialTheme.typography.labelMedium,
-                color = if (isSelected) TextPrimary else TextSecondary,
-                maxLines = 1,
-            )
-
-            HorizontalDivider(
-                modifier = Modifier.width(40.dp),
-                color = DividerGray.copy(alpha = 0.72f),
-            )
-
+        Box(modifier = Modifier.padding(10.dp)) {
             OrbiterRailButton(
                 label = stringResource(R.string.library),
                 icon = Icons.Filled.Favorite,
@@ -791,29 +799,54 @@ private fun OrbiterRailButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isHovered by interactionSource.collectIsHoveredAsState()
+    val isFocused by interactionSource.collectIsFocusedAsState()
+    val isActive = selected || isHovered || isFocused
+
     Surface(
         modifier = modifier
-            .size(56.dp)
+            .fillMaxWidth()
+            .height(50.dp)
             .clip(RoundedCornerShape(18.dp))
-            .clickable(onClick = onClick),
-        color = if (selected) {
-            NetflixRed.copy(alpha = 0.18f)
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = onClick,
+            ),
+        color = if (isActive) {
+            MaterialTheme.colorScheme.primary.copy(alpha = if (selected) 0.18f else 0.1f)
         } else {
             CardBackgroundHover.copy(alpha = 0.92f)
         },
         shape = RoundedCornerShape(18.dp),
-        tonalElevation = if (selected) 4.dp else 2.dp,
+        tonalElevation = if (isActive) 4.dp else 2.dp,
         border = BorderStroke(
             1.dp,
-            if (selected) NetflixRed.copy(alpha = 0.42f) else DividerGray.copy(alpha = 0.76f),
+            if (isActive) {
+                MaterialTheme.colorScheme.primary.copy(alpha = if (selected) 0.62f else 0.38f)
+            } else {
+                DividerGray.copy(alpha = 0.76f)
+            },
         ),
     ) {
-        Box(contentAlignment = Alignment.Center) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Icon(
                 imageVector = icon,
                 contentDescription = label,
-                tint = if (selected) TextPrimary else TextSecondary,
-                modifier = Modifier.size(24.dp),
+                tint = if (selected) MaterialTheme.colorScheme.primary else TextSecondary,
+                modifier = Modifier.size(22.dp),
+            )
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelLarge,
+                color = if (isActive) TextPrimary else TextSecondary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
         }
     }
@@ -1125,6 +1158,9 @@ private fun HomePanel(
     quickAccessFolders: List<QuickAccessFolder>,
     favorites: List<FavoriteVideo>,
     servers: List<SavedServer>,
+    selectedSource: SavedServer?,
+    viewModel: MainDashboardViewModel,
+    metadataRefreshToken: Long,
     onRecentClick: (RecentVideo) -> Unit,
     onFavoriteClick: (FavoriteVideo) -> Unit,
     onQuickAccessClick: (QuickAccessFolder) -> Unit,
@@ -1133,85 +1169,194 @@ private fun HomePanel(
     onSmbSourceClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val continueWatching = recentVideos.filter { it.lastPosition > 0L }.take(8)
-    Card(
+    val sortedRecentVideos = remember(recentVideos, servers) {
+        recentVideos
+            .filter { it.hasAvailableHomeSource(servers) }
+            .sortedByDescending { it.lastPlayed }
+            .distinctBy { it.filePath }
+    }
+    val continueWatching = remember(sortedRecentVideos) {
+        sortedRecentVideos.filter { video ->
+            video.lastPosition > 0L &&
+                    (video.duration <= 0L || video.lastPosition < video.duration * 95L / 100L)
+        }.take(8)
+    }
+    val continueWatchingPaths = remember(continueWatching) {
+        continueWatching.mapTo(hashSetOf()) { it.filePath }
+    }
+    val recentShelf = remember(sortedRecentVideos, continueWatchingPaths) {
+        sortedRecentVideos.filterNot { it.filePath in continueWatchingPaths }.take(12)
+    }
+    val availableFavorites = remember(favorites, servers) {
+        favorites.filter { it.hasAvailableHomeSource(servers) }.distinctBy { it.filePath }
+    }
+    val favoriteShelf = remember(availableFavorites) { availableFavorites.take(12) }
+    val favoritePaths = remember(favoriteShelf) {
+        favoriteShelf.mapTo(hashSetOf()) { it.filePath }
+    }
+    val libraryItemCount = remember(sortedRecentVideos, availableFavorites) {
+        buildSet {
+            sortedRecentVideos.forEach { add(it.filePath) }
+            availableFavorites.forEach { add(it.filePath) }
+        }.size
+    }
+    val serverNamesById = remember(servers) { servers.associate { it.id to it.serverName } }
+    val hasLibraryContent = continueWatching.isNotEmpty() ||
+            recentShelf.isNotEmpty() || favoriteShelf.isNotEmpty()
+
+    LazyColumn(
         modifier = modifier,
-        colors = CardDefaults.cardColors(containerColor = CardBackground),
-        shape = RoundedCornerShape(16.dp),
+        contentPadding = PaddingValues(start = 24.dp, top = 20.dp, end = 24.dp, bottom = 36.dp),
+        verticalArrangement = Arrangement.spacedBy(26.dp),
     ) {
-        LazyColumn(
-            modifier = Modifier.fillMaxSize().padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
+        item {
+            HomeHeader(
+                libraryItemCount = libraryItemCount,
+            )
+        }
+
+        if (!hasLibraryContent) {
             item {
+                HomeEmptyLibraryPanel(
+                    serverCount = servers.size,
+                    onLocalSourceClick = onLocalSourceClick,
+                    onSmbSourceClick = onSmbSourceClick,
+                )
+            }
+        }
+
+        if (continueWatching.isNotEmpty()) {
+            item {
+                HomeVideoShelf(
+                    title = stringResource(R.string.continue_watching),
+                    videos = continueWatching,
+                    viewModel = viewModel,
+                    metadataRefreshToken = metadataRefreshToken,
+                    selectedSource = selectedSource,
+                    favoritePaths = favoritePaths,
+                    showProgress = true,
+                    onVideoClick = onRecentClick,
+                )
+            }
+        }
+
+        if (quickAccessFolders.isNotEmpty()) {
+            item {
+                HomeQuickAccessShelf(
+                    folders = quickAccessFolders,
+                    serverNamesById = serverNamesById,
+                    onFolderClick = onQuickAccessClick,
+                    onFolderDelete = onQuickAccessDelete,
+                )
+            }
+        }
+
+        if (favoriteShelf.isNotEmpty()) {
+            item {
+                HomeVideoShelf(
+                    title = stringResource(R.string.favorites),
+                    videos = favoriteShelf,
+                    viewModel = viewModel,
+                    metadataRefreshToken = metadataRefreshToken,
+                    selectedSource = selectedSource,
+                    favoritePaths = favoritePaths,
+                    showProgress = false,
+                    onVideoClick = onFavoriteClick,
+                )
+            }
+        }
+
+        if (recentShelf.isNotEmpty()) {
+            item {
+                HomeVideoShelf(
+                    title = stringResource(R.string.recent),
+                    videos = recentShelf,
+                    viewModel = viewModel,
+                    metadataRefreshToken = metadataRefreshToken,
+                    selectedSource = selectedSource,
+                    favoritePaths = favoritePaths,
+                    showProgress = false,
+                    onVideoClick = onRecentClick,
+                )
+            }
+        }
+
+        if (hasLibraryContent) {
+            item {
+                HomeSourcesSection(
+                    serverCount = servers.size,
+                    onLocalSourceClick = onLocalSourceClick,
+                    onSmbSourceClick = onSmbSourceClick,
+                )
+            }
+        }
+    }
+}
+
+private fun LibraryVideoItem.hasAvailableHomeSource(servers: List<SavedServer>): Boolean {
+    if (!filePath.startsWith("smb://", ignoreCase = true)) return true
+    return servers.any { server ->
+        server.serverAddress.equals(serverAddress, ignoreCase = true) &&
+                server.shareName.equals(shareName, ignoreCase = true)
+    }
+}
+
+@Composable
+private fun HomeHeader(
+    libraryItemCount: Int,
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.34f),
+        shape = RoundedCornerShape(24.dp),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 24.dp, vertical = 20.dp),
+            horizontalArrangement = Arrangement.spacedBy(18.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(52.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.MovieCreation,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(28.dp),
+                )
+            }
+
+            Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = stringResource(R.string.home),
-                    style = MaterialTheme.typography.headlineSmall,
+                    style = MaterialTheme.typography.headlineMedium,
                     color = TextPrimary,
                 )
+                Spacer(modifier = Modifier.height(3.dp))
+                Text(
+                    text = stringResource(R.string.home_tagline),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = TextSecondary,
+                    maxLines = 2,
+                )
             }
-            item { HomeSectionTitle(stringResource(R.string.continue_watching)) }
-            if (continueWatching.isEmpty()) {
-                item { HomeEmptyRow(stringResource(R.string.no_recent_videos_yet)) }
-            } else {
-                items(continueWatching, key = { "continue:${it.id}" }) { video ->
-                    HomeEntryRow(
-                        title = video.resolvedTitle ?: video.fileName,
-                        onClick = { onRecentClick(video) },
+
+            if (libraryItemCount > 0) {
+                Surface(
+                    color = CardBackground.copy(alpha = 0.74f),
+                    shape = RoundedCornerShape(999.dp),
+                ) {
+                    Text(
+                        text = stringResource(R.string.home_item_count, libraryItemCount),
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = TextSecondary,
                     )
-                }
-            }
-
-            item { HomeSectionTitle(stringResource(R.string.quick_access)) }
-            if (quickAccessFolders.isEmpty()) {
-                item { HomeEmptyRow(stringResource(R.string.no_quick_access_folders)) }
-            } else {
-                items(quickAccessFolders, key = { "quick:${it.id}" }) { folder ->
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        HomeEntryRow(
-                            title = folder.displayName,
-                            onClick = { onQuickAccessClick(folder) },
-                            modifier = Modifier.weight(1f),
-                        )
-                        IconButton(onClick = { onQuickAccessDelete(folder) }) {
-                            Icon(Icons.Filled.Delete, contentDescription = stringResource(R.string.delete))
-                        }
-                    }
-                }
-            }
-
-            item { HomeSectionTitle(stringResource(R.string.favorites)) }
-            items(favorites.take(8), key = { "favorite:${it.filePath}" }) { video ->
-                HomeEntryRow(
-                    title = video.resolvedTitle ?: video.fileName,
-                    onClick = { onFavoriteClick(video) },
-                )
-            }
-
-            item { HomeSectionTitle(stringResource(R.string.recent)) }
-            items(recentVideos.take(8), key = { "recent:${it.id}" }) { video ->
-                HomeEntryRow(
-                    title = video.resolvedTitle ?: video.fileName,
-                    onClick = { onRecentClick(video) },
-                )
-            }
-
-            item { HomeSectionTitle(stringResource(R.string.sources)) }
-            item {
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Button(onClick = onLocalSourceClick, modifier = Modifier.weight(1f)) {
-                        Icon(Icons.Filled.FolderOpen, contentDescription = null)
-                        Spacer(Modifier.width(8.dp))
-                        Text(stringResource(R.string.local_storage))
-                    }
-                    Button(onClick = onSmbSourceClick, modifier = Modifier.weight(1f)) {
-                        Icon(Icons.Filled.Cloud, contentDescription = null)
-                        Spacer(Modifier.width(8.dp))
-                        Text("SMB (${servers.size})")
-                    }
                 }
             }
         }
@@ -1219,42 +1364,538 @@ private fun HomePanel(
 }
 
 @Composable
-private fun HomeSectionTitle(text: String) {
-    Text(
-        text = text,
-        style = MaterialTheme.typography.titleLarge,
-        color = TextPrimary,
-        modifier = Modifier.padding(top = 10.dp),
-    )
+private fun HomeEmptyLibraryPanel(
+    serverCount: Int,
+    onLocalSourceClick: () -> Unit,
+    onSmbSourceClick: () -> Unit,
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = CardBackground.copy(alpha = 0.9f),
+        shape = RoundedCornerShape(24.dp),
+        border = BorderStroke(1.dp, DividerGray.copy(alpha = 0.7f)),
+    ) {
+        Column(
+            modifier = Modifier.padding(24.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text(
+                text = stringResource(R.string.home_empty_title),
+                style = MaterialTheme.typography.titleLarge,
+                color = TextPrimary,
+            )
+            Text(
+                text = stringResource(R.string.home_empty_message),
+                style = MaterialTheme.typography.bodyMedium,
+                color = TextSecondary,
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            HomeSourceActions(
+                serverCount = serverCount,
+                onLocalSourceClick = onLocalSourceClick,
+                onSmbSourceClick = onSmbSourceClick,
+            )
+        }
+    }
 }
 
 @Composable
-private fun HomeEmptyRow(text: String) {
-    Text(text, color = TextTertiary, style = MaterialTheme.typography.bodySmall)
-}
-
-@Composable
-private fun HomeEntryRow(
+private fun <T : LibraryVideoItem> HomeVideoShelf(
     title: String,
+    videos: List<T>,
+    viewModel: MainDashboardViewModel,
+    metadataRefreshToken: Long,
+    selectedSource: SavedServer?,
+    favoritePaths: Set<String>,
+    showProgress: Boolean,
+    onVideoClick: (T) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        HomeSectionHeader(title = title, itemCount = videos.size)
+        LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            contentPadding = PaddingValues(end = 8.dp),
+        ) {
+            items(videos, key = { it.filePath }) { video ->
+                HomeVideoCard(
+                    video = video,
+                    isFavorite = video.filePath in favoritePaths,
+                    showProgress = showProgress,
+                    viewModel = viewModel,
+                    metadataRefreshToken = metadataRefreshToken,
+                    selectedSource = selectedSource,
+                    onClick = { onVideoClick(video) },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun HomeSectionHeader(
+    title: String,
+    itemCount: Int,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleLarge,
+            color = TextPrimary,
+        )
+        Text(
+            text = itemCount.toString(),
+            style = MaterialTheme.typography.labelLarge,
+            color = TextTertiary,
+        )
+    }
+}
+
+@Composable
+private fun HomeVideoCard(
+    video: LibraryVideoItem,
+    isFavorite: Boolean,
+    showProgress: Boolean,
+    viewModel: MainDashboardViewModel,
+    metadataRefreshToken: Long,
+    selectedSource: SavedServer?,
+    onClick: () -> Unit,
+) {
+    val context = LocalContext.current
+    val file = remember(video.filePath, video.fileName) {
+        SMBFileItem(
+            name = video.fileName,
+            path = video.filePath,
+            isDirectory = false,
+            size = 0L,
+            lastModified = 0L,
+        )
+    }
+    val isSmbVideo = video.filePath.startsWith("smb://", ignoreCase = true)
+    val sourceMatches = selectedSource?.let { source ->
+        if (isSmbVideo) {
+            !source.isLocalStorage &&
+                    source.serverAddress.equals(video.serverAddress, ignoreCase = true) &&
+                    source.shareName.equals(video.shareName, ignoreCase = true)
+        } else {
+            source.isLocalStorage
+        }
+    } == true
+    val metadataState = if (sourceMatches) {
+        rememberVideoFileMetadata(
+            viewModel = viewModel,
+            file = file,
+            isVideoFile = true,
+            refreshToken = metadataRefreshToken,
+        )
+    } else {
+        ArtworkState.Missing
+    }
+    val metadata = metadataState.resolvedValueOrNull()
+    var posterFailureCount by remember(
+        video.filePath,
+        metadata?.posterUrl,
+        metadata?.posterFallbackUrls,
+    ) { mutableStateOf(0) }
+    val artworkSelection = selectVideoArtwork(
+        metadataState = metadataState,
+        posterFailureCount = posterFailureCount,
+        videoPath = video.filePath,
+    )
+    val posterUrl = (artworkSelection as? VideoArtworkSelection.Poster)?.url
+    val validGeneratedFramePath = if (
+        artworkSelection is VideoArtworkSelection.GeneratedFrame &&
+        VideoThumbnailFetcher.isCurrentGeneratedFramePath(
+            context = context,
+            videoPath = video.filePath,
+            thumbnailPath = video.thumbnailPath,
+        )
+    ) {
+        video.thumbnailPath
+    } else {
+        null
+    }
+    val thumbnailModel = when (artworkSelection) {
+        is VideoArtworkSelection.Poster -> artworkSelection.url
+        is VideoArtworkSelection.GeneratedFrame -> {
+            validGeneratedFramePath ?: if (sourceMatches) {
+                VideoThumbnailFetcher.Model(artworkSelection.videoPath)
+            } else {
+                null
+            }
+        }
+
+        VideoArtworkSelection.Placeholder -> null
+    }
+    val thumbnailDiskCacheKey = when (artworkSelection) {
+        is VideoArtworkSelection.Poster -> buildFilePosterCacheKey(video.fileName, artworkSelection.url)
+        is VideoArtworkSelection.GeneratedFrame -> {
+            validGeneratedFramePath ?: VideoThumbnailFetcher.diskCacheKey(artworkSelection.videoPath)
+        }
+
+        VideoArtworkSelection.Placeholder -> null
+    }
+    val displayTitle = metadata?.title?.takeIf { it.isNotBlank() }
+        ?: video.resolvedTitle?.takeIf { it.isNotBlank() }
+        ?: video.fileName.substringBeforeLast('.', video.fileName)
+    val sourceLabel = metadata?.studio?.takeIf { it.isNotBlank() }
+        ?: if (video.filePath.startsWith("smb://", ignoreCase = true)) {
+            video.shareName.takeIf { it.isNotBlank() } ?: video.serverAddress
+        } else {
+            stringResource(R.string.local_storage)
+        }
+    val progress = if (showProgress && video.duration > 0L && video.lastPosition > 0L) {
+        (video.lastPosition.toFloat() / video.duration.toFloat()).coerceIn(0f, 1f)
+    } else {
+        null
+    }
+    val interactionSource = remember { MutableInteractionSource() }
+    val isHovered by interactionSource.collectIsHoveredAsState()
+    val isFocused by interactionSource.collectIsFocusedAsState()
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val isActive = isHovered || isFocused || isPressed
+    val cardScale by animateFloatAsState(
+        targetValue = if (isActive) 1.025f else 1f,
+        animationSpec = tween(durationMillis = 160),
+        label = "home-video-card-scale",
+    )
+
+    Card(
+        modifier = Modifier
+            .width(276.dp)
+            .scale(cardScale)
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = onClick,
+            ),
+        colors = CardDefaults.cardColors(
+            containerColor = if (isActive) CardBackgroundHover else CardBackground,
+        ),
+        shape = RoundedCornerShape(18.dp),
+        border = BorderStroke(
+            width = if (isActive) 2.dp else 1.dp,
+            color = if (isActive) {
+                MaterialTheme.colorScheme.primary.copy(alpha = 0.86f)
+            } else {
+                DividerGray.copy(alpha = 0.64f)
+            },
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = if (isActive) 8.dp else 2.dp),
+    ) {
+        Column {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(16f / 9f)
+                    .background(
+                        Brush.linearGradient(
+                            listOf(
+                                MaterialTheme.colorScheme.surfaceVariant,
+                                MaterialTheme.colorScheme.surface,
+                            )
+                        )
+                    ),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Movie,
+                    contentDescription = null,
+                    tint = TextTertiary,
+                    modifier = Modifier.size(42.dp),
+                )
+
+                if (thumbnailModel != null) {
+                    AsyncImage(
+                        model = ImageRequest.Builder(context)
+                            .data(thumbnailModel)
+                            .diskCacheKey(thumbnailDiskCacheKey)
+                            .diskCachePolicy(CachePolicy.ENABLED)
+                            .memoryCachePolicy(CachePolicy.ENABLED)
+                            .listener(
+                                onError = { _, _ ->
+                                    if (posterUrl != null) posterFailureCount += 1
+                                },
+                            )
+                            .build(),
+                        imageLoader = ThumbnailImageLoaderProvider.get(context),
+                        contentDescription = stringResource(R.string.video_thumbnail),
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = if (artworkSelection is VideoArtworkSelection.Poster) {
+                            ContentScale.Fit
+                        } else {
+                            ContentScale.Crop
+                        },
+                    )
+                }
+
+                if (isFavorite) {
+                    Surface(
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(10.dp),
+                        color = MaterialTheme.colorScheme.scrim.copy(alpha = 0.68f),
+                        shape = RoundedCornerShape(999.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Favorite,
+                            contentDescription = stringResource(R.string.favorites),
+                            tint = NetflixRed,
+                            modifier = Modifier.padding(8.dp).size(18.dp),
+                        )
+                    }
+                }
+
+                progress?.let { watchedProgress ->
+                    LinearProgressIndicator(
+                        progress = { watchedProgress },
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .fillMaxWidth()
+                            .height(5.dp),
+                        color = MaterialTheme.colorScheme.primary,
+                        trackColor = MaterialTheme.colorScheme.scrim.copy(alpha = 0.52f),
+                    )
+                }
+            }
+
+            Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
+                Text(
+                    text = displayTitle,
+                    style = MaterialTheme.typography.titleSmall,
+                    color = TextPrimary,
+                    minLines = 2,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Spacer(modifier = Modifier.height(5.dp))
+                Text(
+                    text = sourceLabel,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = TextTertiary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun HomeQuickAccessShelf(
+    folders: List<QuickAccessFolder>,
+    serverNamesById: Map<Long, String>,
+    onFolderClick: (QuickAccessFolder) -> Unit,
+    onFolderDelete: (QuickAccessFolder) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        HomeSectionHeader(
+            title = stringResource(R.string.quick_access),
+            itemCount = folders.size,
+        )
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            items(folders, key = { it.id }) { folder ->
+                HomeQuickAccessCard(
+                    folder = folder,
+                    serverName = serverNamesById[folder.serverId]?.takeIf { it.isNotBlank() },
+                    onClick = { onFolderClick(folder) },
+                    onDelete = { onFolderDelete(folder) },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun HomeQuickAccessCard(
+    folder: QuickAccessFolder,
+    serverName: String?,
+    onClick: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isHovered by interactionSource.collectIsHoveredAsState()
+    val isFocused by interactionSource.collectIsFocusedAsState()
+    val isActive = isHovered || isFocused
+    val cardScale by animateFloatAsState(
+        targetValue = if (isActive) 1.025f else 1f,
+        animationSpec = tween(durationMillis = 160),
+        label = "home-folder-card-scale",
+    )
+
+    Surface(
+        modifier = Modifier
+            .width(252.dp)
+            .scale(cardScale)
+            .clip(RoundedCornerShape(18.dp))
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = onClick,
+            ),
+        color = if (isActive) CardBackgroundHover else CardBackground,
+        shape = RoundedCornerShape(18.dp),
+        border = BorderStroke(
+            1.dp,
+            if (isActive) AccentGold.copy(alpha = 0.8f) else DividerGray.copy(alpha = 0.68f),
+        ),
+        tonalElevation = if (isActive) 6.dp else 2.dp,
+    ) {
+        Row(
+            modifier = Modifier.padding(start = 14.dp, top = 12.dp, bottom = 12.dp, end = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(44.dp)
+                    .clip(RoundedCornerShape(13.dp))
+                    .background(AccentGold.copy(alpha = 0.14f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.FolderOpen,
+                    contentDescription = null,
+                    tint = AccentGold,
+                    modifier = Modifier.size(24.dp),
+                )
+            }
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = folder.displayName,
+                    style = MaterialTheme.typography.titleSmall,
+                    color = TextPrimary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = serverName ?: stringResource(R.string.smb_files),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = TextTertiary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            IconButton(onClick = onDelete) {
+                Icon(
+                    imageVector = Icons.Filled.Close,
+                    contentDescription = stringResource(R.string.delete),
+                    tint = TextTertiary,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun HomeSourcesSection(
+    serverCount: Int,
+    onLocalSourceClick: () -> Unit,
+    onSmbSourceClick: () -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        HomeSectionHeader(title = stringResource(R.string.sources), itemCount = serverCount + 1)
+        HomeSourceActions(
+            serverCount = serverCount,
+            onLocalSourceClick = onLocalSourceClick,
+            onSmbSourceClick = onSmbSourceClick,
+        )
+    }
+}
+
+@Composable
+private fun HomeSourceActions(
+    serverCount: Int,
+    onLocalSourceClick: () -> Unit,
+    onSmbSourceClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        HomeSourceCard(
+            title = stringResource(R.string.local_storage),
+            supportingText = stringResource(R.string.home_local_source_description),
+            icon = Icons.Filled.FolderOpen,
+            onClick = onLocalSourceClick,
+            modifier = Modifier.weight(1f),
+        )
+        HomeSourceCard(
+            title = stringResource(R.string.smb_files),
+            supportingText = stringResource(R.string.home_smb_source_count, serverCount),
+            icon = Icons.Filled.Cloud,
+            onClick = onSmbSourceClick,
+            modifier = Modifier.weight(1f),
+        )
+    }
+}
+
+@Composable
+private fun HomeSourceCard(
+    title: String,
+    supportingText: String,
+    icon: ImageVector,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isHovered by interactionSource.collectIsHoveredAsState()
+    val isFocused by interactionSource.collectIsFocusedAsState()
+    val isActive = isHovered || isFocused
+
     Surface(
-        modifier = modifier.fillMaxWidth().clickable(onClick = onClick),
-        color = MaterialTheme.colorScheme.surfaceVariant,
-        shape = RoundedCornerShape(12.dp),
+        modifier = modifier
+            .heightIn(min = 82.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = onClick,
+            ),
+        color = if (isActive) CardBackgroundHover else CardBackground,
+        shape = RoundedCornerShape(18.dp),
+        border = BorderStroke(
+            1.dp,
+            if (isActive) {
+                MaterialTheme.colorScheme.primary.copy(alpha = 0.74f)
+            } else {
+                DividerGray.copy(alpha = 0.68f)
+            },
+        ),
+        tonalElevation = if (isActive) 6.dp else 2.dp,
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+            modifier = Modifier.padding(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(Icons.Filled.Movie, contentDescription = null, tint = NetflixRed)
-            Spacer(Modifier.width(10.dp))
-            Text(
-                title,
-                color = TextPrimary,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(28.dp),
+            )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleSmall,
+                    color = TextPrimary,
+                )
+                Text(
+                    text = supportingText,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = TextTertiary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Icon(
+                imageVector = Icons.Filled.ChevronRight,
+                contentDescription = null,
+                tint = TextTertiary,
             )
         }
     }
@@ -3321,6 +3962,9 @@ fun MainDashboardScreen(
                                 quickAccessFolders = quickAccessFolders,
                                 favorites = allFavorites,
                                 servers = availableSmbSources,
+                                selectedSource = uiState.selectedServer,
+                                viewModel = viewModel,
+                                metadataRefreshToken = uiState.fileMetadataRefreshToken,
                                 onRecentClick = { video ->
                                     openHomeVideo(video)
                                 },
@@ -3912,7 +4556,7 @@ fun MainDashboardScreen(
 
         Orbiter(
             position = ContentEdge.Start,
-            offset = 96.dp,
+            offset = 24.dp,
             offsetType = OrbiterOffsetType.OuterEdge,
             alignment = Alignment.CenterVertically,
             elevation = 20.dp,
@@ -3927,7 +4571,7 @@ fun MainDashboardScreen(
         if (showLibraryOrbiter) {
             Orbiter(
                 position = ContentEdge.End,
-                offset = 72.dp,
+                offset = 24.dp,
                 offsetType = OrbiterOffsetType.OuterEdge,
                 alignment = Alignment.CenterVertically,
                 elevation = 20.dp,
