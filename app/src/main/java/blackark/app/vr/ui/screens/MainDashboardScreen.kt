@@ -117,6 +117,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -720,6 +721,7 @@ private fun DashboardSourceRail(
     Surface(
         modifier = modifier
             .width(112.dp)
+            .height(420.dp)
             .clip(RoundedCornerShape(28.dp)),
         color = CardBackground.copy(alpha = 0.96f),
         shape = RoundedCornerShape(28.dp),
@@ -4618,78 +4620,80 @@ fun MainDashboardScreen(
             }
         }
 
-        if (useSideOrbiters) {
-            Orbiter(
-                position = ContentEdge.Start,
-                offset = 20.dp,
-                offsetType = OrbiterOffsetType.InnerEdge,
-                alignment = Alignment.CenterVertically,
-                elevation = 16.dp,
-                shouldRenderInNonSpatial = true,
-            ) {
-                DashboardSourceRail(
-                    selectedMode = primaryDestination,
-                    onModeSelected = ::selectPrimaryDestination,
-                )
-            }
-
-            if (showLibraryOrbiter) {
+        key(useSideOrbiters) {
+            if (useSideOrbiters) {
                 Orbiter(
-                    position = ContentEdge.End,
+                    position = ContentEdge.Start,
                     offset = 20.dp,
                     offsetType = OrbiterOffsetType.InnerEdge,
                     alignment = Alignment.CenterVertically,
                     elevation = 16.dp,
                     shouldRenderInNonSpatial = true,
                 ) {
-                    LibraryOrbiterRail(
-                        isSelected = secondaryPaneMode == SecondaryPaneMode.Library,
-                        onClick = {
-                            secondaryPaneMode =
-                                if (secondaryPaneMode == SecondaryPaneMode.Library) {
-                                    SecondaryPaneMode.Preview
-                                } else {
-                                    SecondaryPaneMode.Library
-                                }
-                        },
+                    DashboardSourceRail(
+                        selectedMode = primaryDestination,
+                        onModeSelected = ::selectPrimaryDestination,
                     )
                 }
-            }
-        } else {
-            Orbiter(
-                position = ContentEdge.Bottom,
-                offset = 20.dp,
-                offsetType = OrbiterOffsetType.InnerEdge,
-                alignment = Alignment.CenterHorizontally,
-                elevation = 16.dp,
-                shouldRenderInNonSpatial = true,
-            ) {
-                DashboardSourceBar(
-                    selectedMode = primaryDestination,
-                    onModeSelected = ::selectPrimaryDestination,
-                )
-            }
 
-            if (showLibraryOrbiter) {
+                if (showLibraryOrbiter) {
+                    Orbiter(
+                        position = ContentEdge.End,
+                        offset = 20.dp,
+                        offsetType = OrbiterOffsetType.InnerEdge,
+                        alignment = Alignment.CenterVertically,
+                        elevation = 16.dp,
+                        shouldRenderInNonSpatial = true,
+                    ) {
+                        LibraryOrbiterRail(
+                            isSelected = secondaryPaneMode == SecondaryPaneMode.Library,
+                            onClick = {
+                                secondaryPaneMode =
+                                    if (secondaryPaneMode == SecondaryPaneMode.Library) {
+                                        SecondaryPaneMode.Preview
+                                    } else {
+                                        SecondaryPaneMode.Library
+                                    }
+                            },
+                        )
+                    }
+                }
+            } else {
                 Orbiter(
-                    position = ContentEdge.Top,
+                    position = ContentEdge.Bottom,
                     offset = 20.dp,
                     offsetType = OrbiterOffsetType.InnerEdge,
                     alignment = Alignment.CenterHorizontally,
                     elevation = 16.dp,
                     shouldRenderInNonSpatial = true,
                 ) {
-                    LibraryOrbiterBar(
-                        isSelected = secondaryPaneMode == SecondaryPaneMode.Library,
-                        onClick = {
-                            secondaryPaneMode =
-                                if (secondaryPaneMode == SecondaryPaneMode.Library) {
-                                    SecondaryPaneMode.Preview
-                                } else {
-                                    SecondaryPaneMode.Library
-                                }
-                        },
+                    DashboardSourceBar(
+                        selectedMode = primaryDestination,
+                        onModeSelected = ::selectPrimaryDestination,
                     )
+                }
+
+                if (showLibraryOrbiter) {
+                    Orbiter(
+                        position = ContentEdge.Top,
+                        offset = 20.dp,
+                        offsetType = OrbiterOffsetType.InnerEdge,
+                        alignment = Alignment.CenterHorizontally,
+                        elevation = 16.dp,
+                        shouldRenderInNonSpatial = true,
+                    ) {
+                        LibraryOrbiterBar(
+                            isSelected = secondaryPaneMode == SecondaryPaneMode.Library,
+                            onClick = {
+                                secondaryPaneMode =
+                                    if (secondaryPaneMode == SecondaryPaneMode.Library) {
+                                        SecondaryPaneMode.Preview
+                                    } else {
+                                        SecondaryPaneMode.Library
+                                    }
+                            },
+                        )
+                    }
                 }
             }
         }
