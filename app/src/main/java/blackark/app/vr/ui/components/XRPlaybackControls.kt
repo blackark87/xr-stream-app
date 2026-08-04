@@ -288,8 +288,7 @@ fun XRPlaybackControls(
 
         if (
             content != XRPlaybackControlsContent.MenuOnly &&
-                playerState.seekPreviewActive &&
-                playerState.videoFormat == VideoFormat.Format2D
+                playerState.seekPreviewActive
         ) {
             PlaybackSeekPreviewCard(
                 targetPositionMs = playerState.seekPreviewTargetPositionMs,
@@ -1236,7 +1235,7 @@ private fun PlaybackSeekPreviewCard(
                     imageLoader = imageLoader,
                     contentDescription = null,
                     modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop,
+                    contentScale = ContentScale.Fit,
                 )
             } else {
                 Text(

@@ -9,10 +9,10 @@ import org.junit.Test
 class PlaybackControlsVisibilityPolicyTest {
 
     @Test
-    fun `seek thumbnail preview is generated only for 2D video`() {
-        assertTrue(shouldGenerateSeekThumbnailPreview(VideoFormat.Format2D))
-        assertFalse(shouldGenerateSeekThumbnailPreview(VideoFormat.Format180))
-        assertFalse(shouldGenerateSeekThumbnailPreview(VideoFormat.Format360))
+    fun `VR seek thumbnail preserves the full projection frame`() {
+        assertFalse(shouldPreserveFullSeekPreviewFrame(VideoFormat.Format2D))
+        assertTrue(shouldPreserveFullSeekPreviewFrame(VideoFormat.Format180))
+        assertTrue(shouldPreserveFullSeekPreviewFrame(VideoFormat.Format360))
     }
 
     @Test

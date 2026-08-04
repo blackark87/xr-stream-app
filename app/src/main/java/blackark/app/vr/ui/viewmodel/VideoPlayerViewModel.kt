@@ -99,8 +99,8 @@ internal fun resolveControlsVisibilityBlockReason(
     }
 }
 
-internal fun shouldGenerateSeekThumbnailPreview(videoFormat: VideoFormat): Boolean =
-    videoFormat == VideoFormat.Format2D
+internal fun shouldPreserveFullSeekPreviewFrame(videoFormat: VideoFormat): Boolean =
+    videoFormat != VideoFormat.Format2D
 
 private fun describeCueColors(cues: List<Cue>): String {
     val colors = cues
@@ -735,9 +735,9 @@ class VideoPlayerViewModel(
     }
 
     private fun enqueueThumbnailPreview(targetPositionMs: Long) {
-        if (!shouldGenerateSeekThumbnailPreview(_state.value.videoFormat)) return
         val context = appContext ?: return
         val videoPath = _state.value.videoFile?.path ?: return
+        val preserveFullFrame = shouldPreserveFullSeekPreviewFrame(_state.value.videoFormat)
         val normalizedTargetPositionMs = normalizeThumbnailPreviewPosition(targetPositionMs)
 
         if (
@@ -770,6 +770,7 @@ class VideoPlayerViewModel(
                         context = context,
                         videoPath = videoPath,
                         targetPositionMs = nextTarget,
+                        preserveFullFrame = preserveFullFrame,
                     )
 
                 if (!isActive) {
@@ -1525,13 +1526,11 @@ class VideoPlayerViewModel(
                     audioTracks = emptyList(),
                     textTracks = emptyList(),
                 )
-                if (shouldGenerateSeekThumbnailPreview(initialVideoFormat)) {
-                    viewModelScope.launch {
-                        VideoFramePreviewExtractor.prepareVideo(
-                            context = context.applicationContext,
-                            videoPath = videoFile.path,
-                        )
-                    }
+                viewModelScope.launch {
+                    VideoFramePreviewExtractor.prepareVideo(
+                        context = context.applicationContext,
+                        videoPath = videoFile.path,
+                    )
                 }
 
                 // Save to recent videos immediately to ensure we have an ID for updates.
