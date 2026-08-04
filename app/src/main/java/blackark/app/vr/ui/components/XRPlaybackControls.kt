@@ -142,14 +142,14 @@ fun XRPlaybackControls(
     val onAccent = colors.onPrimary
     val textStrong = colors.onSurface
     val textMuted = colors.onSurface.copy(alpha = 0.72f)
-    val panelTop = colors.background.copy(alpha = 0.58f)
-    val panelBottom = colors.surface.copy(alpha = 0.5f)
-    val sectionSurface = colors.surfaceVariant.copy(alpha = 0.4f)
+    val panelTop = colors.background
+    val panelBottom = colors.surface
+    val sectionSurface = colors.surfaceVariant
     val sectionBorder = colors.outline.copy(alpha = 0.28f)
-    val menuSurface = colors.surface.copy(alpha = 0.84f)
+    val menuSurface = colors.surface
     val displayMenuSurface = colors.surface
     val chipActive = colors.primary.copy(alpha = 0.18f)
-    val chipIdle = colors.surfaceVariant.copy(alpha = 0.5f)
+    val chipIdle = colors.surfaceVariant
     val controlsCardInteractionSource = remember { MutableInteractionSource() }
     val panelBackgroundInteractionSource = remember { MutableInteractionSource() }
 
