@@ -124,9 +124,6 @@ fun XRPlaybackControls(
     var controlsRootLeftPx by remember { mutableFloatStateOf(0f) }
     var controlsRootTopPx by remember { mutableFloatStateOf(0f) }
     var controlsRootWidthPx by remember { mutableIntStateOf(0) }
-    var progressSectionLeftPx by remember { mutableIntStateOf(0) }
-    var progressSectionTopPx by remember { mutableIntStateOf(0) }
-    var progressSectionWidthPx by remember { mutableIntStateOf(0) }
     var speedAnchorCenterXPx by remember { mutableIntStateOf(0) }
     var speedAnchorTopPx by remember { mutableIntStateOf(0) }
     var displayAnchorCenterXPx by remember { mutableIntStateOf(0) }
@@ -134,7 +131,6 @@ fun XRPlaybackControls(
     var volumeAnchorCenterXPx by remember { mutableIntStateOf(0) }
     var volumeAnchorTopPx by remember { mutableIntStateOf(0) }
 
-    val context = LocalContext.current
     val density = LocalDensity.current
     val colors = MaterialTheme.colorScheme
     val accentStrong = colors.primary
@@ -222,30 +218,6 @@ fun XRPlaybackControls(
                 controlsRootWidthPx = coordinates.size.width
             },
     ) {
-        val previewCardWidthPx = with(density) { SeekPreviewOverlayWidth.roundToPx() }
-        val previewCardHeightPx = with(density) { SeekPreviewOverlayEstimatedHeight.roundToPx() }
-        val previewCardGapPx = with(density) { SeekPreviewOverlayGap.roundToPx() }
-        val previewTrackInsetPx = with(density) { 12.dp.roundToPx() }
-        val previewFraction =
-            if (playerState.duration > 0L) {
-                (playerState.seekPreviewTargetPositionMs.toFloat() / playerState.duration.toFloat())
-                    .coerceIn(0f, 1f)
-            } else {
-                0f
-            }
-        val previewTrackWidthPx =
-            (progressSectionWidthPx - (previewTrackInsetPx * 2)).coerceAtLeast(0)
-        val previewThumbCenterPx =
-            progressSectionLeftPx + previewTrackInsetPx +
-                    (previewTrackWidthPx * previewFraction).roundToInt()
-        val previewMinX = progressSectionLeftPx
-        val previewMaxX = (progressSectionLeftPx + progressSectionWidthPx - previewCardWidthPx)
-            .coerceAtLeast(previewMinX)
-        val previewOffsetX =
-            (previewThumbCenterPx - (previewCardWidthPx / 2)).coerceIn(previewMinX, previewMaxX)
-        val previewOffsetY =
-            (progressSectionTopPx - previewCardHeightPx - previewCardGapPx).coerceAtLeast(0)
-
         val activeMenu =
             if (content == XRPlaybackControlsContent.ControlsOnly) {
                 PlaybackMenu.None
@@ -285,21 +257,6 @@ fun XRPlaybackControls(
             } else {
                 null
             }
-
-        if (
-            content != XRPlaybackControlsContent.MenuOnly &&
-                playerState.seekPreviewActive
-        ) {
-            PlaybackSeekPreviewCard(
-                targetPositionMs = playerState.seekPreviewTargetPositionMs,
-                previewPath = playerState.seekPreviewThumbnailPath,
-                context = context,
-                modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .zIndex(3f)
-                    .offset { IntOffset(previewOffsetX, previewOffsetY) },
-            )
-        }
 
         if (
             activeMenu != PlaybackMenu.None &&
@@ -909,13 +866,7 @@ fun XRPlaybackControls(
 
             Box(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .onGloballyPositioned { coordinates ->
-                        val position = coordinates.positionInRoot()
-                        progressSectionLeftPx = (position.x - controlsRootLeftPx).roundToInt()
-                        progressSectionTopPx = (position.y - controlsRootTopPx).roundToInt()
-                        progressSectionWidthPx = coordinates.size.width
-                    },
+                    .fillMaxWidth(),
             ) {
                 Column(
                     modifier = Modifier
@@ -1191,12 +1142,12 @@ private fun PlaybackFloatingMenuCard(
 }
 
 @Composable
-private fun PlaybackSeekPreviewCard(
+internal fun PlaybackSeekPreviewCard(
     targetPositionMs: Long,
     previewPath: String?,
-    context: android.content.Context,
     modifier: Modifier = Modifier,
 ) {
+    val context = LocalContext.current
     val imageLoader = remember(context) { ThumbnailImageLoaderProvider.get(context) }
     val previewRequest = remember(previewPath, targetPositionMs, context) {
         previewPath?.let { path ->
@@ -1210,22 +1161,20 @@ private fun PlaybackSeekPreviewCard(
 
     Box(
         modifier = modifier
-            .width(SeekPreviewOverlayWidth)
             .shadow(
                 elevation = 20.dp,
-                shape = RoundedCornerShape(16.dp),
+                shape = RoundedCornerShape(24.dp),
                 clip = false,
             )
-            .clip(RoundedCornerShape(16.dp))
+            .clip(RoundedCornerShape(24.dp))
             .background(Color.Black.copy(alpha = 0.84f))
-            .border(1.dp, Color.White.copy(alpha = 0.14f), RoundedCornerShape(16.dp))
-            .padding(8.dp),
+            .border(1.dp, Color.White.copy(alpha = 0.14f), RoundedCornerShape(24.dp))
+            .padding(12.dp),
     ) {
         Box(
             modifier = Modifier
-                .fillMaxWidth()
-                .height(SeekPreviewOverlayThumbnailHeight)
-                .clip(RoundedCornerShape(12.dp))
+                .fillMaxSize()
+                .clip(RoundedCornerShape(18.dp))
                 .background(Color.Black.copy(alpha = 0.42f)),
             contentAlignment = Alignment.Center,
         ) {
@@ -1241,7 +1190,7 @@ private fun PlaybackSeekPreviewCard(
                 Text(
                     text = "Preview",
                     color = Color.White.copy(alpha = 0.74f),
-                    style = MaterialTheme.typography.bodySmall,
+                    style = MaterialTheme.typography.titleMedium,
                 )
             }
         }
@@ -1249,25 +1198,20 @@ private fun PlaybackSeekPreviewCard(
         Box(
             modifier = Modifier
                 .align(Alignment.BottomEnd)
-                .offset(x = (-8).dp, y = (-8).dp)
+                .offset(x = (-12).dp, y = (-12).dp)
                 .clip(RoundedCornerShape(999.dp))
                 .background(Color.Black.copy(alpha = 0.78f))
-                .padding(horizontal = 10.dp, vertical = 5.dp),
+                .padding(horizontal = 14.dp, vertical = 7.dp),
         ) {
             Text(
                 text = formatTime(targetPositionMs),
-                style = MaterialTheme.typography.labelMedium,
+                style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
                 color = Color.White.copy(alpha = 0.96f),
             )
         }
     }
 }
-
-private val SeekPreviewOverlayWidth = 216.dp
-private val SeekPreviewOverlayThumbnailHeight = 122.dp
-private val SeekPreviewOverlayEstimatedHeight = 146.dp
-private val SeekPreviewOverlayGap = 12.dp
 
 @Composable
 private fun PlaybackOptionButton(

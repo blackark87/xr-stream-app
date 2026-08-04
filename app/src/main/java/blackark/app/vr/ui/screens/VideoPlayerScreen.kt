@@ -27,6 +27,7 @@ import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.rememberScrollableState
 import androidx.compose.foundation.gestures.scrollable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
@@ -108,6 +109,7 @@ import androidx.xr.scenecore.scene
 import blackark.app.vr.XRStreamApplication
 import blackark.app.vr.player.PlaybackSource
 import blackark.app.vr.ui.ApplyHandTrackingPreference
+import blackark.app.vr.ui.components.PlaybackSeekPreviewCard
 import blackark.app.vr.ui.components.XRPlaybackControls
 import blackark.app.vr.ui.components.XRPlaybackControlsContent
 import blackark.app.vr.ui.components.playbackMenuEstimatedHeight
@@ -138,6 +140,10 @@ private val IMMERSIVE_CONTROLS_FOLLOW_DISTANCE = 900.dp
 private const val IMMERSIVE_CONTROLS_FRONT_FACTOR = 0.84f
 // Subspace uses positive Y upward, so a negative offset places controls lower.
 private val IMMERSIVE_CONTROLS_DOWN_OFFSET = (-320).dp
+private val IMMERSIVE_SEEK_PREVIEW_PANEL_WIDTH = 960.dp
+private val IMMERSIVE_SEEK_PREVIEW_PANEL_HEIGHT = 540.dp
+private val IMMERSIVE_SEEK_PREVIEW_CONTROLS_GAP = 28.dp
+private val IMMERSIVE_SEEK_PREVIEW_FRONT_OFFSET = 24.dp
 private val IMMERSIVE_MENU_PANEL_PADDING = 96.dp
 private val IMMERSIVE_MENU_CONTROLS_GAP = 20.dp
 private val IMMERSIVE_DISPLAY_PANEL_HEIGHT = 620.dp
@@ -812,6 +818,23 @@ fun SpatialVideoPlayerContent(
                 }
             }
 
+            if (playerState.seekPreviewActive) {
+                SpatialPanel(
+                    modifier = buildImmersiveSeekPreviewModifier(
+                        dashboardPanelPose = dashboardPanelPose,
+                        headFollowPose = headFollowPose,
+                        density = density,
+                        horizontalOffsetMeters = playerState.immersiveUiHorizontalOffsetMeters,
+                    ),
+                ) {
+                    PlaybackSeekPreviewCard(
+                        targetPositionMs = playerState.seekPreviewTargetPositionMs,
+                        previewPath = playerState.seekPreviewThumbnailPath,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
+            }
+
             if (
                 playbackLayerPolicy.showControlsLayer &&
                     playerState.activePlaybackMenu != PlaybackMenu.None
@@ -1024,6 +1047,19 @@ private fun Standard2DPlayer(
                                     videoPlayerViewModel = videoPlayerViewModel,
                                     playerState = playerState,
                                     onNavigateBack = { videoPlayerViewModel.requestNavigateBack() },
+                                )
+                            }
+
+                            if (playerState.seekPreviewActive) {
+                                PlaybackSeekPreviewCard(
+                                    targetPositionMs = playerState.seekPreviewTargetPositionMs,
+                                    previewPath = playerState.seekPreviewThumbnailPath,
+                                    modifier = Modifier
+                                        .align(Alignment.TopCenter)
+                                        .padding(top = 36.dp)
+                                        .fillMaxWidth(0.54f)
+                                        .widthIn(max = 720.dp)
+                                        .aspectRatio(16f / 9f),
                                 )
                             }
                         }
@@ -1278,6 +1314,84 @@ private fun buildImmersiveControlsModifier(
             x = anchoredX + horizontalOffsetDp.x.dp,
             y = anchoredY + horizontalOffsetDp.y.dp,
             z = anchoredZ + horizontalOffsetDp.z.dp,
+        )
+        .rotate(rotation)
+}
+
+private fun buildImmersiveSeekPreviewModifier(
+    dashboardPanelPose: Pose?,
+    headFollowPose: HeadFollowPose?,
+    density: Density,
+    horizontalOffsetMeters: Float,
+): SubspaceModifier {
+    val baseModifier =
+        SubspaceModifier
+            .width(IMMERSIVE_SEEK_PREVIEW_PANEL_WIDTH)
+            .height(IMMERSIVE_SEEK_PREVIEW_PANEL_HEIGHT)
+    val rotation = headFollowPose?.rotation ?: dashboardPanelPose?.rotation ?: Quaternion.Identity
+    val horizontalOffsetDp =
+        resolveImmersiveUiHorizontalOffsetDp(
+            worldRight = rotation * Vector3.Right,
+            horizontalOffsetMeters = horizontalOffsetMeters,
+            dpPerMeter = 1.meters.toDp().value,
+        )
+    val previewUpOffset =
+        (IMMERSIVE_CONTROLS_PANEL_HEIGHT + IMMERSIVE_SEEK_PREVIEW_PANEL_HEIGHT) / 2f +
+            IMMERSIVE_SEEK_PREVIEW_CONTROLS_GAP
+    val worldUp = rotation * Vector3.Up
+    val worldForward = rotation * Vector3.Forward
+    val previewUpX = (worldUp.x * previewUpOffset.value).dp
+    val previewUpY = (worldUp.y * previewUpOffset.value).dp
+    val previewUpZ = (worldUp.z * previewUpOffset.value).dp
+    val previewFrontX = (-worldForward.x * IMMERSIVE_SEEK_PREVIEW_FRONT_OFFSET.value).dp
+    val previewFrontY = (-worldForward.y * IMMERSIVE_SEEK_PREVIEW_FRONT_OFFSET.value).dp
+    val previewFrontZ = (-worldForward.z * IMMERSIVE_SEEK_PREVIEW_FRONT_OFFSET.value).dp
+
+    if (headFollowPose != null) {
+        val controlsX =
+            (headFollowPose.forward.x * IMMERSIVE_CONTROLS_FOLLOW_DISTANCE.value).dp +
+                (worldUp.x * IMMERSIVE_CONTROLS_DOWN_OFFSET.value).dp
+        val controlsY =
+            (headFollowPose.forward.y * IMMERSIVE_CONTROLS_FOLLOW_DISTANCE.value).dp +
+                (worldUp.y * IMMERSIVE_CONTROLS_DOWN_OFFSET.value).dp
+        val controlsZ =
+            (headFollowPose.forward.z * IMMERSIVE_CONTROLS_FOLLOW_DISTANCE.value).dp +
+                (worldUp.z * IMMERSIVE_CONTROLS_DOWN_OFFSET.value).dp
+        return baseModifier
+            .offset(
+                x = controlsX + horizontalOffsetDp.x.dp + previewUpX + previewFrontX,
+                y = controlsY + horizontalOffsetDp.y.dp + previewUpY + previewFrontY,
+                z = controlsZ + horizontalOffsetDp.z.dp + previewUpZ + previewFrontZ,
+            )
+            .rotate(rotation)
+    }
+
+    if (dashboardPanelPose == null) {
+        return baseModifier
+            .offset(
+                x = horizontalOffsetDp.x.dp + previewUpX + previewFrontX,
+                y = IMMERSIVE_CONTROLS_DOWN_OFFSET + horizontalOffsetDp.y.dp +
+                    previewUpY + previewFrontY,
+                z = horizontalOffsetDp.z.dp + previewUpZ + previewFrontZ,
+            )
+            .rotate(rotation)
+    }
+
+    val anchoredX =
+        with(density) { dashboardPanelPose.translation.x.toDp() } *
+            IMMERSIVE_CONTROLS_FRONT_FACTOR
+    val anchoredY =
+        with(density) { dashboardPanelPose.translation.y.toDp() } +
+            IMMERSIVE_CONTROLS_DOWN_OFFSET
+    val anchoredZ =
+        with(density) { dashboardPanelPose.translation.z.toDp() } *
+            IMMERSIVE_CONTROLS_FRONT_FACTOR
+
+    return baseModifier
+        .offset(
+            x = anchoredX + horizontalOffsetDp.x.dp + previewUpX + previewFrontX,
+            y = anchoredY + horizontalOffsetDp.y.dp + previewUpY + previewFrontY,
+            z = anchoredZ + horizontalOffsetDp.z.dp + previewUpZ + previewFrontZ,
         )
         .rotate(rotation)
 }
