@@ -79,6 +79,7 @@ private const val SUBTITLE_LOG_PREFIX = "[SubtitleDebug]"
 private const val PLAYBACK_CONTROL_LOG_PREFIX = "[PlaybackControlDebug]"
 
 internal enum class ControlsVisibilityBlockReason(val logValue: String) {
+    NavigationExit("navigation-exit"),
     InputLock("input-lock"),
     SeekPreview("seek-preview"),
     RecentInput("recent-input"),
@@ -89,7 +90,9 @@ internal fun resolveControlsVisibilityBlockReason(
     controlsInputLocked: Boolean,
     seekPreviewActive: Boolean,
     recentInputSuppressed: Boolean,
+    navigationExitPending: Boolean = false,
 ): ControlsVisibilityBlockReason? {
+    if (navigationExitPending) return ControlsVisibilityBlockReason.NavigationExit
     if (targetVisible) return null
     return when {
         controlsInputLocked -> ControlsVisibilityBlockReason.InputLock
@@ -660,6 +663,7 @@ class VideoPlayerViewModel(
             controlsInputLocked = currentState.controlsInputLocked,
             seekPreviewActive = currentState.seekPreviewActive,
             recentInputSuppressed = recentInputSuppressed,
+            navigationExitPending = currentState.navigationExitPending,
         )
         Log.i(
             PLAYER_LOG_TAG,
@@ -965,8 +969,12 @@ class VideoPlayerViewModel(
         )
     }
 
-    fun requestNavigateBack() {
+    fun requestNavigateBack(source: String = "direct") {
         if (hasDispatchedNavigateBack) {
+            Log.d(
+                PLAYER_LOG_TAG,
+                "$PLAYBACK_CONTROL_LOG_PREFIX navigation duplicate ignored source=$source",
+            )
             return
         }
         finishSeekPreviewSession(commit = false, restorePlayback = false)
@@ -980,7 +988,8 @@ class VideoPlayerViewModel(
         hasDispatchedNavigateBack = true
         Log.d(
             PLAYER_LOG_TAG,
-            "$PLAYBACK_CONTROL_LOG_PREFIX navigation requested; spatial input disabled",
+            "$PLAYBACK_CONTROL_LOG_PREFIX navigation requested source=$source; " +
+                "spatial input disabled",
         )
         viewModelScope.launch {
             _playerEvents.send(PlayerEvent.NavigateBack)
@@ -1398,7 +1407,7 @@ class VideoPlayerViewModel(
 
             android.view.KeyEvent.KEYCODE_BUTTON_B,
             android.view.KeyEvent.KEYCODE_BACK -> {
-                requestNavigateBack()
+                requestNavigateBack(source = "key-${event.keyCode}")
                 true
             }
 

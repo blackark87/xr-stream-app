@@ -48,4 +48,20 @@ class PlaybackControlsVisibilityPolicyTest {
             )
         )
     }
+
+    @Test
+    fun `navigation exit rejects both show and hide requests`() {
+        listOf(false, true).forEach { targetVisible ->
+            assertEquals(
+                ControlsVisibilityBlockReason.NavigationExit,
+                resolveControlsVisibilityBlockReason(
+                    targetVisible = targetVisible,
+                    controlsInputLocked = false,
+                    seekPreviewActive = false,
+                    recentInputSuppressed = false,
+                    navigationExitPending = true,
+                ),
+            )
+        }
+    }
 }

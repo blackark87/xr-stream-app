@@ -360,7 +360,9 @@ fun VideoPlayerScreen(
     val playerState by videoPlayerViewModel.state.collectAsState()
     val dashboardPanelPose by blackark.app.vr.AppState.dashboardPanelPose.collectAsState()
     val requestNavigateBackState =
-        rememberUpdatedState { videoPlayerViewModel.requestNavigateBack() }
+        rememberUpdatedState {
+            videoPlayerViewModel.requestNavigateBack(source = "system-on-back-invoked")
+        }
 
     DisposableEffect(Unit) {
         blackark.app.vr.AppState.setConsumePlaybackBackKeyEvents(true)
@@ -437,7 +439,6 @@ fun VideoPlayerScreen(
             isPlaybackUiHeadFollowEnabled = isPlaybackUiHeadFollowEnabled,
             hasHandTrackingPermission = hasHandTrackingPermission,
             dashboardPanelPose = dashboardPanelPose,
-            onNavigateBack = { videoPlayerViewModel.requestNavigateBack() },
         )
     }
 }
@@ -451,7 +452,6 @@ fun SpatialVideoPlayerContent(
     isPlaybackUiHeadFollowEnabled: Boolean,
     hasHandTrackingPermission: Boolean,
     dashboardPanelPose: Pose?,
-    onNavigateBack: () -> Unit,
 ) {
     val exoPlayer by videoPlayerViewModel.playerFlow.collectAsState()
     val showControls = playerState.showControls
@@ -476,7 +476,7 @@ fun SpatialVideoPlayerContent(
         }
 
     BackHandler {
-        onNavigateBack()
+        videoPlayerViewModel.requestNavigateBack(source = "compose-back-handler")
     }
     val spatialCapabilities = LocalSpatialCapabilities.current
 
@@ -812,7 +812,11 @@ fun SpatialVideoPlayerContent(
                         XRPlaybackControls(
                             videoPlayerViewModel = videoPlayerViewModel,
                             playerState = playerState,
-                            onNavigateBack = { videoPlayerViewModel.requestNavigateBack() },
+                            onNavigateBack = {
+                                videoPlayerViewModel.requestNavigateBack(
+                                    source = "immersive-controls-button",
+                                )
+                            },
                             content = XRPlaybackControlsContent.ControlsOnly,
                             onPanelBackgroundClick = {
                                 videoPlayerViewModel.setControlsVisibility(
@@ -868,7 +872,11 @@ fun SpatialVideoPlayerContent(
                         XRPlaybackControls(
                             videoPlayerViewModel = videoPlayerViewModel,
                             playerState = playerState,
-                            onNavigateBack = { videoPlayerViewModel.requestNavigateBack() },
+                            onNavigateBack = {
+                                videoPlayerViewModel.requestNavigateBack(
+                                    source = "immersive-menu-button",
+                                )
+                            },
                             content = XRPlaybackControlsContent.MenuOnly,
                             menuContentMaxHeight =
                                 if (playerState.activePlaybackMenu == PlaybackMenu.Display) {
@@ -1057,7 +1065,11 @@ private fun Standard2DPlayer(
                                 XRPlaybackControls(
                                     videoPlayerViewModel = videoPlayerViewModel,
                                     playerState = playerState,
-                                    onNavigateBack = { videoPlayerViewModel.requestNavigateBack() },
+                                    onNavigateBack = {
+                                        videoPlayerViewModel.requestNavigateBack(
+                                            source = "flat-controls-button",
+                                        )
+                                    },
                                 )
                             }
 
