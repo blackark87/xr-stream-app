@@ -182,6 +182,7 @@ private fun clickInteractionPolicy(
         override val isEnabled: Boolean = isEnabled
 
         override fun onInputEvent(event: SpatialInputEvent) {
+            if (!isEnabled) return
             if (!isSpatialInputSourceAllowed(isHandTrackingEnabled, event.source)) {
                 return
             }
@@ -644,7 +645,12 @@ fun SpatialVideoPlayerContent(
         )
 
         if (isSurfaceReady) {
-            if (shouldShowImmersiveSubtitlePanel(subtitlesPresent, showControls)) {
+            val showImmersiveSubtitleContent =
+                shouldShowImmersiveSubtitlePanel(subtitlesPresent, showControls)
+            // Keep the SceneCore entity parented while its input component is disabled. XR Compose
+            // can deliver a queued event after the visibility state changes; removing the clicked
+            // entity immediately makes InteractionPolicy localize that event against a null parent.
+            if (shouldRetainImmersiveSubtitlePanel(subtitlesPresent)) {
                 SpatialPanel(
                     modifier = buildImmersiveSubtitleModifier(
                         dashboardPanelPose = dashboardPanelPose,
@@ -655,6 +661,7 @@ fun SpatialVideoPlayerContent(
                             playerState.immersiveSubtitleVerticalOffsetMeters,
                     ),
                     interactionPolicy = clickInteractionPolicy(
+                        isEnabled = showImmersiveSubtitleContent,
                         isHandTrackingEnabled = isHandTrackingEnabled,
                     ) {
                         videoPlayerViewModel.setControlsVisibility(
@@ -663,16 +670,20 @@ fun SpatialVideoPlayerContent(
                         )
                     },
                 ) {
-                    SubtitleCueOverlay(
-                        cues = playerState.subtitleCues,
-                        bottomPaddingFraction = SUBTITLE_DEFAULT_BOTTOM_PADDING_FRACTION,
-                        fontId = playerState.subtitleFontId,
-                        textSize = playerState.subtitleTextSize,
-                    )
+                    if (showImmersiveSubtitleContent) {
+                        SubtitleCueOverlay(
+                            cues = playerState.subtitleCues,
+                            bottomPaddingFraction = SUBTITLE_DEFAULT_BOTTOM_PADDING_FRACTION,
+                            fontId = playerState.subtitleFontId,
+                            textSize = playerState.subtitleTextSize,
+                        )
+                    }
                 }
             }
 
-            if (playbackLayerPolicy.showFallbackRevealLayer) {
+            // Retain the transparent reveal entity for the same queued-input lifetime. Its
+            // interaction component and Compose input content are disabled while controls show.
+            if (playbackLayerPolicy.retainFallbackRevealLayer) {
                 SpatialPanel(
                     modifier = buildImmersiveRevealInputModifier(
                         dashboardPanelPose = dashboardPanelPose,
@@ -680,6 +691,7 @@ fun SpatialVideoPlayerContent(
                         density = density,
                     ),
                     interactionPolicy = clickInteractionPolicy(
+                        isEnabled = playbackLayerPolicy.showFallbackRevealLayer,
                         isHandTrackingEnabled = isHandTrackingEnabled,
                     ) {
                         videoPlayerViewModel.setControlsVisibility(
@@ -688,28 +700,30 @@ fun SpatialVideoPlayerContent(
                         )
                     },
                 ) {
-                    PlaybackScrollInputOverlay(
-                        showControls = false,
-                        inputEnabled = true,
-                        backgroundToggleEnabled = false,
-                        onKeyUp = { event ->
-                            videoPlayerViewModel.dispatchPlaybackKeyEvent(event)
-                        },
-                        onToggleControls = {
-                            videoPlayerViewModel.setControlsVisibility(
-                                visible = targetControlsVisible,
-                                source = "immersive-fallback-overlay",
-                            )
-                        },
-                        controlsInputLocked = playerState.controlsInputLocked,
-                        seekPreviewActive = playerState.seekPreviewActive,
-                        onHorizontalScrollDelta = { delta ->
-                            videoPlayerViewModel.handlePlaybackHorizontalScroll(delta)
-                        },
-                        onVerticalScrollDelta = { delta ->
-                            videoPlayerViewModel.handlePlaybackVerticalScroll(delta)
-                        },
-                    )
+                    if (playbackLayerPolicy.showFallbackRevealLayer) {
+                        PlaybackScrollInputOverlay(
+                            showControls = false,
+                            inputEnabled = true,
+                            backgroundToggleEnabled = false,
+                            onKeyUp = { event ->
+                                videoPlayerViewModel.dispatchPlaybackKeyEvent(event)
+                            },
+                            onToggleControls = {
+                                videoPlayerViewModel.setControlsVisibility(
+                                    visible = targetControlsVisible,
+                                    source = "immersive-fallback-overlay",
+                                )
+                            },
+                            controlsInputLocked = playerState.controlsInputLocked,
+                            seekPreviewActive = playerState.seekPreviewActive,
+                            onHorizontalScrollDelta = { delta ->
+                                videoPlayerViewModel.handlePlaybackHorizontalScroll(delta)
+                            },
+                            onVerticalScrollDelta = { delta ->
+                                videoPlayerViewModel.handlePlaybackVerticalScroll(delta)
+                            },
+                        )
+                    }
                 }
             }
 

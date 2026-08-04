@@ -26,6 +26,7 @@ class PlaybackLayerPolicyTest {
             seekPreviewActive = false,
         )
 
+        assertTrue(policy.retainFallbackRevealLayer)
         assertTrue(policy.showFallbackRevealLayer)
         assertTrue(policy.enableSurfaceToggleInput)
         assertFalse(policy.showControlsLayer)
@@ -42,6 +43,7 @@ class PlaybackLayerPolicyTest {
             seekPreviewActive = false,
         )
 
+        assertTrue(policy.retainFallbackRevealLayer)
         assertFalse(policy.showFallbackRevealLayer)
         assertTrue(policy.enableSurfaceToggleInput)
         assertTrue(policy.showControlsLayer)
@@ -80,9 +82,11 @@ class PlaybackLayerPolicyTest {
         )
 
         assertFalse(lockedPolicy.showFallbackRevealLayer)
+        assertTrue(lockedPolicy.retainFallbackRevealLayer)
         assertFalse(lockedPolicy.enableSurfaceToggleInput)
         assertFalse(lockedVisiblePolicy.enableSurfaceToggleInput)
         assertFalse(unreadyPolicy.showFallbackRevealLayer)
+        assertFalse(unreadyPolicy.retainFallbackRevealLayer)
         assertFalse(unreadyPolicy.enableSurfaceToggleInput)
         assertFalse(seekPreviewPolicy.showFallbackRevealLayer)
         assertFalse(seekPreviewPolicy.enableSurfaceToggleInput)
@@ -107,13 +111,15 @@ class PlaybackLayerPolicyTest {
         )
 
         assertFalse(hiddenPolicy.showFallbackRevealLayer)
+        assertFalse(hiddenPolicy.retainFallbackRevealLayer)
         assertFalse(hiddenPolicy.enableSurfaceToggleInput)
         assertFalse(visiblePolicy.enableSurfaceToggleInput)
         assertTrue(visiblePolicy.showControlsLayer)
     }
 
     @Test
-    fun `immersive subtitle panel yields input while controls are visible`() {
+    fun `immersive subtitle entity is retained while controls take input`() {
+        assertTrue(shouldRetainImmersiveSubtitlePanel(subtitlesPresent = true))
         assertTrue(
             shouldShowImmersiveSubtitlePanel(
                 subtitlesPresent = true,
@@ -126,6 +132,7 @@ class PlaybackLayerPolicyTest {
                 showControls = true,
             )
         )
+        assertFalse(shouldRetainImmersiveSubtitlePanel(subtitlesPresent = false))
     }
 
     @Test
