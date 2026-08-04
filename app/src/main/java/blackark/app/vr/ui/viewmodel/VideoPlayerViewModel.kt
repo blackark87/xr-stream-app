@@ -99,6 +99,9 @@ internal fun resolveControlsVisibilityBlockReason(
     }
 }
 
+internal fun shouldGenerateSeekThumbnailPreview(videoFormat: VideoFormat): Boolean =
+    videoFormat == VideoFormat.Format2D
+
 private fun describeCueColors(cues: List<Cue>): String {
     val colors = cues
         .asSequence()
@@ -732,6 +735,7 @@ class VideoPlayerViewModel(
     }
 
     private fun enqueueThumbnailPreview(targetPositionMs: Long) {
+        if (!shouldGenerateSeekThumbnailPreview(_state.value.videoFormat)) return
         val context = appContext ?: return
         val videoPath = _state.value.videoFile?.path ?: return
         val normalizedTargetPositionMs = normalizeThumbnailPreviewPosition(targetPositionMs)
@@ -766,7 +770,6 @@ class VideoPlayerViewModel(
                         context = context,
                         videoPath = videoPath,
                         targetPositionMs = nextTarget,
-                        preserveVrProjection = _state.value.videoFormat != VideoFormat.Format2D,
                     )
 
                 if (!isActive) {
@@ -1522,11 +1525,13 @@ class VideoPlayerViewModel(
                     audioTracks = emptyList(),
                     textTracks = emptyList(),
                 )
-                viewModelScope.launch {
-                    VideoFramePreviewExtractor.prepareVideo(
-                        context = context.applicationContext,
-                        videoPath = videoFile.path,
-                    )
+                if (shouldGenerateSeekThumbnailPreview(initialVideoFormat)) {
+                    viewModelScope.launch {
+                        VideoFramePreviewExtractor.prepareVideo(
+                            context = context.applicationContext,
+                            videoPath = videoFile.path,
+                        )
+                    }
                 }
 
                 // Save to recent videos immediately to ensure we have an ID for updates.

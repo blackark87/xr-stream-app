@@ -7,7 +7,6 @@ package blackark.app.vr.ui.screens
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
-import android.graphics.Bitmap
 import android.graphics.Color as AndroidColor
 import android.os.Build
 import android.os.Handler
@@ -20,7 +19,6 @@ import android.window.OnBackInvokedCallback
 import android.window.OnBackInvokedDispatcher
 import androidx.activity.compose.BackHandler
 import androidx.annotation.OptIn
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -58,11 +56,9 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextAlign
@@ -126,16 +122,10 @@ import blackark.app.vr.ui.viewmodel.VideoPlayerViewModel
 import blackark.app.vr.ui.viewmodel.VideoPlayerViewModelFactory
 import blackark.app.vr.utils.AppSettingsStore
 import blackark.app.vr.utils.SubtitleFontCatalog
-import blackark.app.vr.utils.VrSeekPreviewRenderer
 import blackark.app.vr.utils.resolveImmersiveSubtitlePanelOffsetDp
 import blackark.app.vr.utils.resolveImmersiveSubtitlePlacement
 import blackark.app.vr.utils.resolveImmersiveUiHorizontalOffsetDp
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
-import kotlin.math.PI
-import kotlin.math.asin
-import kotlin.math.atan2
 import kotlin.time.Duration.Companion.milliseconds
 
 private const val TAG = "VideoPlayerScreen"
@@ -163,9 +153,6 @@ private val IMMERSIVE_SUBTITLE_PANEL_HEIGHT = 720.dp
 // Keep the subtitle baseline low enough that the minimum user offset can sit near
 // the bottom of the immersive field of view without changing saved preferences.
 private val IMMERSIVE_SUBTITLE_BASE_UP_OFFSET = 180.dp
-private val IMMERSIVE_SEEK_PREVIEW_WIDTH = 520.dp
-private val IMMERSIVE_SEEK_PREVIEW_HEIGHT = 292.dp
-private val IMMERSIVE_SEEK_PREVIEW_UP_OFFSET = 330.dp
 private const val SUBTITLE_DEFAULT_BOTTOM_PADDING_FRACTION = 0.08f
 private const val SUBTITLE_CONTROLS_VISIBLE_BOTTOM_PADDING_FRACTION = 0.44f
 
@@ -770,17 +757,6 @@ fun SpatialVideoPlayerContent(
                 }
             }
 
-            if (playerState.seekPreviewActive) {
-                VrSeekPreviewSurface(
-                    previewPath = playerState.seekPreviewThumbnailPath,
-                    videoFormat = playerState.videoFormat,
-                    stereoMode = playerState.stereoMode,
-                    headPose = headFollowPose,
-                    dashboardPanelPose = dashboardPanelPose,
-                    density = density,
-                )
-            }
-
             if (playbackLayerPolicy.showControlsLayer) {
                 SpatialPanel(
                     modifier = buildImmersiveControlsModifier(
@@ -926,99 +902,6 @@ private fun PlayerLoadingPanel(
             }
         }
     }
-}
-
-@Composable
-private fun VrSeekPreviewSurface(
-    previewPath: String?,
-    videoFormat: VideoFormat,
-    stereoMode: blackark.app.vr.ui.viewmodel.StereoMode,
-    headPose: HeadFollowPose?,
-    dashboardPanelPose: Pose?,
-    density: Density,
-) {
-    var previewBitmap by remember { mutableStateOf<Bitmap?>(null) }
-    var activationForward by remember { mutableStateOf<Vector3?>(null) }
-
-    LaunchedEffect(headPose?.forward) {
-        if (activationForward == null && headPose != null) {
-            activationForward = headPose.forward
-        }
-    }
-
-    LaunchedEffect(
-        previewPath,
-        headPose?.forward,
-        activationForward,
-        videoFormat,
-        stereoMode,
-    ) {
-        val path = previewPath
-        if (path == null) {
-            previewBitmap = null
-            return@LaunchedEffect
-        }
-        val anchor = activationForward ?: headPose?.forward ?: Vector3.Forward
-        val current = headPose?.forward ?: anchor
-        val yaw = normalizeRadians(viewYaw(current) - viewYaw(anchor))
-        val pitch = (viewPitch(current) - viewPitch(anchor)).coerceIn(-0.75f, 0.75f)
-        previewBitmap = withContext(Dispatchers.Default) {
-            VrSeekPreviewRenderer.render(
-                sourcePath = path,
-                videoFormat = videoFormat,
-                stereoMode = stereoMode,
-                relativeYawRadians = yaw,
-                relativePitchRadians = pitch,
-            )
-        }
-    }
-
-    DisposableEffect(Unit) {
-        onDispose {
-            previewBitmap = null
-            VrSeekPreviewRenderer.clear()
-        }
-    }
-
-    SpatialPanel(
-        modifier = buildImmersiveSeekPreviewModifier(
-            dashboardPanelPose = dashboardPanelPose,
-            headFollowPose = headPose,
-            density = density,
-        ),
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Color.Black),
-            contentAlignment = Alignment.Center,
-        ) {
-            val bitmap = previewBitmap
-            if (bitmap == null) {
-                CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
-            } else {
-                Image(
-                    bitmap = bitmap.asImageBitmap(),
-                    contentDescription = "VR seek preview",
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Fit,
-                )
-            }
-        }
-    }
-}
-
-private fun viewYaw(forward: Vector3): Float = atan2(forward.x, -forward.z)
-
-private fun viewPitch(forward: Vector3): Float =
-    asin(forward.y.coerceIn(-1f, 1f))
-
-private fun normalizeRadians(value: Float): Float {
-    val period = (2.0 * PI).toFloat()
-    var normalized = value
-    while (normalized > PI.toFloat()) normalized -= period
-    while (normalized < -PI.toFloat()) normalized += period
-    return normalized
 }
 
 @OptIn(UnstableApi::class)
@@ -1370,42 +1253,6 @@ private fun buildImmersiveControlsModifier(
             x = anchoredX + horizontalOffsetDp.x.dp,
             y = anchoredY + horizontalOffsetDp.y.dp,
             z = anchoredZ + horizontalOffsetDp.z.dp,
-        )
-        .rotate(rotation)
-}
-
-private fun buildImmersiveSeekPreviewModifier(
-    dashboardPanelPose: Pose?,
-    headFollowPose: HeadFollowPose?,
-    density: Density,
-): SubspaceModifier {
-    val base = SubspaceModifier
-        .width(IMMERSIVE_SEEK_PREVIEW_WIDTH)
-        .height(IMMERSIVE_SEEK_PREVIEW_HEIGHT)
-    val rotation = headFollowPose?.rotation ?: dashboardPanelPose?.rotation ?: Quaternion.Identity
-    val worldUp = rotation * Vector3.Up
-    val upX = (worldUp.x * IMMERSIVE_SEEK_PREVIEW_UP_OFFSET.value).dp
-    val upY = (worldUp.y * IMMERSIVE_SEEK_PREVIEW_UP_OFFSET.value).dp
-    val upZ = (worldUp.z * IMMERSIVE_SEEK_PREVIEW_UP_OFFSET.value).dp
-
-    if (headFollowPose != null) {
-        return base
-            .offset(
-                x = (headFollowPose.forward.x * IMMERSIVE_CONTROLS_FOLLOW_DISTANCE.value).dp + upX,
-                y = (headFollowPose.forward.y * IMMERSIVE_CONTROLS_FOLLOW_DISTANCE.value).dp + upY,
-                z = (headFollowPose.forward.z * IMMERSIVE_CONTROLS_FOLLOW_DISTANCE.value).dp + upZ,
-            )
-            .rotate(rotation)
-    }
-
-    if (dashboardPanelPose == null) {
-        return base.offset(x = upX, y = upY, z = upZ)
-    }
-    return base
-        .offset(
-            x = with(density) { dashboardPanelPose.translation.x.toDp() } + upX,
-            y = with(density) { dashboardPanelPose.translation.y.toDp() } + upY,
-            z = with(density) { dashboardPanelPose.translation.z.toDp() } + upZ,
         )
         .rotate(rotation)
 }

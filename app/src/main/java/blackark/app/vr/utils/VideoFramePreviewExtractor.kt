@@ -54,7 +54,6 @@ object VideoFramePreviewExtractor {
         context: Context,
         videoPath: String,
         targetPositionMs: Long,
-        preserveVrProjection: Boolean = false,
     ): String? = withContext(Dispatchers.IO) {
         val previewDir = File(context.cacheDir, "seek_previews").apply { mkdirs() }
         val cacheKey = videoPath.toByteArray()
@@ -63,14 +62,13 @@ object VideoFramePreviewExtractor {
                 .digest(cacheKey)
                 .joinToString("") { "%02x".format(it) }
         val safeTargetPositionMs = targetPositionMs.coerceAtLeast(0L)
-        val projectionSuffix = if (preserveVrProjection) "_vr" else ""
         val previewFile = File(
             previewDir,
-            "seek_preview_${CACHE_VERSION}_${fileHash}_${safeTargetPositionMs}$projectionSuffix.jpg",
+            "seek_preview_${CACHE_VERSION}_${fileHash}_${safeTargetPositionMs}.jpg",
         )
         val tempFile = File(
             previewDir,
-            "seek_preview_${CACHE_VERSION}_${fileHash}_${safeTargetPositionMs}$projectionSuffix.tmp",
+            "seek_preview_${CACHE_VERSION}_${fileHash}_${safeTargetPositionMs}.tmp",
         )
 
         if (previewFile.exists() && previewFile.length() > 0L) {
@@ -93,7 +91,6 @@ object VideoFramePreviewExtractor {
                         retriever = session.retriever,
                         durationMs = session.durationMs,
                         targetPositionMs = clampedTargetMs,
-                        preserveVrProjection = preserveVrProjection,
                     ) ?: return@withContext null
 
                 tempFile.outputStream().use { output ->
@@ -201,7 +198,6 @@ object VideoFramePreviewExtractor {
         retriever: MediaMetadataRetriever,
         durationMs: Long,
         targetPositionMs: Long,
-        preserveVrProjection: Boolean,
     ): Bitmap? {
         val candidateTimesUs = buildCandidateTimesUs(durationMs, targetPositionMs)
         val extractionOptions =
@@ -220,12 +216,11 @@ object VideoFramePreviewExtractor {
                         retriever.getScaledFrameAtTime(
                             candidateTimeUs,
                             option,
-                            if (preserveVrProjection) PREVIEW_FRAME_WIDTH * 2 else PREVIEW_FRAME_WIDTH,
-                            if (preserveVrProjection) PREVIEW_FRAME_HEIGHT * 2 else PREVIEW_FRAME_HEIGHT,
+                            PREVIEW_FRAME_WIDTH,
+                            PREVIEW_FRAME_HEIGHT,
                         ) ?: retriever.getFrameAtTime(candidateTimeUs, option)
                     if (bitmap != null) {
-                        val normalized =
-                            if (preserveVrProjection) bitmap else normalizePreviewFrame(bitmap)
+                        val normalized = normalizePreviewFrame(bitmap)
                         if (!isLikelyBlankFrame(normalized)) {
                             blankFallback?.takeUnless(Bitmap::isRecycled)?.recycle()
                             return normalized
