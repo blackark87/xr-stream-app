@@ -65,6 +65,23 @@ class PlaybackLayerPolicyTest {
     }
 
     @Test
+    fun `pending navigation keeps layers but disables new surface input`() {
+        val policy = resolvePlaybackLayerPolicy(
+            isSurfaceReady = true,
+            isImmersive = true,
+            showControls = true,
+            controlsInputLocked = false,
+            seekPreviewActive = false,
+            navigationExitPending = true,
+        )
+
+        assertTrue(policy.retainFallbackRevealLayer)
+        assertFalse(policy.showFallbackRevealLayer)
+        assertFalse(policy.enableSurfaceToggleInput)
+        assertTrue(policy.showControlsLayer)
+    }
+
+    @Test
     fun `locked or unready playback does not expose reveal input`() {
         val lockedPolicy = resolvePlaybackLayerPolicy(
             isSurfaceReady = true,

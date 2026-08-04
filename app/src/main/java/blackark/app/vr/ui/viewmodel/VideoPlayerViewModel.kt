@@ -143,6 +143,7 @@ data class VideoPlayerState(
     val canPlayNext: Boolean = false,
     val showControls: Boolean = false,
     val controlsInputLocked: Boolean = false,
+    val navigationExitPending: Boolean = false,
     val seekPreviewActive: Boolean = false,
     val seekPreviewTargetPositionMs: Long = 0,
     val seekPreviewThumbnailPath: String? = null,
@@ -969,7 +970,18 @@ class VideoPlayerViewModel(
             return
         }
         finishSeekPreviewSession(commit = false, restorePlayback = false)
+        val currentState = _state.value
+        _state.value = currentState.copy(
+            navigationExitPending = true,
+            activePlaybackMenu = PlaybackMenu.None,
+            showControls = true,
+        )
+        cancelControlsAutoHide()
         hasDispatchedNavigateBack = true
+        Log.d(
+            PLAYER_LOG_TAG,
+            "$PLAYBACK_CONTROL_LOG_PREFIX navigation requested; spatial input disabled",
+        )
         viewModelScope.launch {
             _playerEvents.send(PlayerEvent.NavigateBack)
         }

@@ -4,17 +4,19 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.media.MediaDataSource
 import android.media.MediaMetadataRetriever
+import android.os.SystemClock
 import android.util.Log
 import androidx.core.net.toUri
 import jcifs.smb.SmbFile
 import jcifs.smb.SmbRandomAccessFile
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.security.MessageDigest
+import java.util.concurrent.Executors
 
 object VideoFramePreviewExtractor {
 
@@ -23,6 +25,18 @@ object VideoFramePreviewExtractor {
     private const val PREVIEW_FRAME_WIDTH = 480
     private const val PREVIEW_FRAME_HEIGHT = 270
     private val sessionMutex = Mutex()
+    private val previewDispatcher =
+        Executors.newSingleThreadExecutor { task ->
+            Thread(
+                {
+                    android.os.Process.setThreadPriority(
+                        android.os.Process.THREAD_PRIORITY_BACKGROUND,
+                    )
+                    task.run()
+                },
+                "SeekPreviewDecoder",
+            ).apply { isDaemon = true }
+        }.asCoroutineDispatcher()
     private var preparedSession: PreparedSession? = null
 
     private data class PreparedSession(
@@ -35,13 +49,13 @@ object VideoFramePreviewExtractor {
     suspend fun prepareVideo(
         context: Context,
         videoPath: String,
-    ): Unit = withContext(Dispatchers.IO) {
+    ): Unit = withContext(previewDispatcher) {
         sessionMutex.withLock {
             obtainPreparedSessionLocked(context, videoPath)
         }
     }
 
-    suspend fun clearPreparedVideo(videoPath: String? = null) = withContext(Dispatchers.IO) {
+    suspend fun clearPreparedVideo(videoPath: String? = null) = withContext(previewDispatcher) {
         sessionMutex.withLock {
             val currentSession = preparedSession ?: return@withLock
             if (videoPath == null || currentSession.videoPath == videoPath) {
@@ -55,7 +69,8 @@ object VideoFramePreviewExtractor {
         videoPath: String,
         targetPositionMs: Long,
         preserveFullFrame: Boolean = false,
-    ): String? = withContext(Dispatchers.IO) {
+    ): String? = withContext(previewDispatcher) {
+        val extractionStartedAtMs = SystemClock.elapsedRealtime()
         val previewDir = File(context.cacheDir, "seek_previews").apply { mkdirs() }
         val cacheKey = videoPath.toByteArray()
         val fileHash =
@@ -112,6 +127,14 @@ object VideoFramePreviewExtractor {
             }
 
             previewFile.absolutePath
+                .also {
+                    Log.d(
+                        TAG,
+                        "Seek preview ready targetMs=$safeTargetPositionMs " +
+                            "elapsedMs=${SystemClock.elapsedRealtime() - extractionStartedAtMs} " +
+                            "fullFrame=$preserveFullFrame",
+                    )
+                }
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (error: Exception) {

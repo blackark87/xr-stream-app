@@ -18,11 +18,13 @@ internal fun resolvePlaybackLayerPolicy(
     showControls: Boolean,
     controlsInputLocked: Boolean,
     seekPreviewActive: Boolean,
+    navigationExitPending: Boolean = false,
 ): PlaybackLayerPolicy {
     val canHandleBackgroundToggle =
         isSurfaceReady &&
                 !controlsInputLocked &&
-                !seekPreviewActive
+                !seekPreviewActive &&
+                !navigationExitPending
     return PlaybackLayerPolicy(
         retainFallbackRevealLayer = isSurfaceReady && isImmersive,
         showFallbackRevealLayer = isImmersive && canHandleBackgroundToggle && !showControls,

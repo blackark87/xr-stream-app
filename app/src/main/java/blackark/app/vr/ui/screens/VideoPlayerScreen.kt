@@ -131,6 +131,7 @@ import kotlinx.coroutines.delay
 import kotlin.time.Duration.Companion.milliseconds
 
 private const val TAG = "VideoPlayerScreen"
+private const val SPATIAL_INPUT_DRAIN_BEFORE_NAVIGATION_MS = 650L
 private val HIDDEN_MAIN_PANEL_OFFSET = 4000.dp
 private val HIDDEN_MAIN_PANEL_ANCHOR_SIZE = 2.dp
 private val IMMERSIVE_CONTROLS_PANEL_HEIGHT = 360.dp
@@ -396,6 +397,16 @@ fun VideoPlayerScreen(
         videoPlayerViewModel.playerEvents.collect { event ->
             when (event) {
                 PlayerEvent.NavigateBack -> {
+                    // Keep every spatial input entity parented until SceneCore has finished
+                    // localizing any event already queued for the current frame. Removing the
+                    // Subspace immediately can crash InteractableNode with a null parent.
+                    Log.d(
+                        TAG,
+                        "[PlaybackControlDebug] navigation input drain begin " +
+                            "delayMs=$SPATIAL_INPUT_DRAIN_BEFORE_NAVIGATION_MS",
+                    )
+                    delay(SPATIAL_INPUT_DRAIN_BEFORE_NAVIGATION_MS)
+                    Log.d(TAG, "[PlaybackControlDebug] navigation input drain complete")
                     onNavigateBack()
                     videoPlayerViewModel.releasePlayerAsync()
                 }
@@ -463,6 +474,7 @@ fun SpatialVideoPlayerContent(
         showControls = showControls,
         controlsInputLocked = playerState.controlsInputLocked,
         seekPreviewActive = playerState.seekPreviewActive,
+        navigationExitPending = playerState.navigationExitPending,
     )
     val subtitlesPresent =
         playerState.subtitlesEnabled &&
@@ -656,8 +668,11 @@ fun SpatialVideoPlayerContent(
     val targetControlsVisible = !showControls
     val surfaceControlsInteractionPolicy =
         when {
-            playbackLayerPolicy.enableSurfaceToggleInput ->
-                clickInteractionPolicy(isHandTrackingEnabled = isHandTrackingEnabled) {
+            shouldUseImmersiveDome && isSurfaceReady ->
+                clickInteractionPolicy(
+                    isEnabled = playbackLayerPolicy.enableSurfaceToggleInput,
+                    isHandTrackingEnabled = isHandTrackingEnabled,
+                ) {
                     videoPlayerViewModel.setControlsVisibility(
                         visible = targetControlsVisible,
                         source = "video-surface",
@@ -818,21 +833,28 @@ fun SpatialVideoPlayerContent(
                 }
             }
 
-            if (playerState.seekPreviewActive) {
-                SpatialPanel(
-                    modifier = buildImmersiveSeekPreviewModifier(
-                        dashboardPanelPose = dashboardPanelPose,
-                        headFollowPose = headFollowPose,
-                        density = density,
-                        horizontalOffsetMeters = playerState.immersiveUiHorizontalOffsetMeters,
-                    ),
-                ) {
-                    PlaybackSeekPreviewCard(
-                        targetPositionMs = playerState.seekPreviewTargetPositionMs,
-                        previewPath = playerState.seekPreviewThumbnailPath,
-                        modifier = Modifier.fillMaxSize(),
-                    )
-                }
+            // Keep this SpatialPanel alive between seek sessions. Creating and destroying its
+            // Android surface during every drag causes a visible XR frame hitch and leaves a
+            // short window where queued input can target a detached entity.
+            SpatialPanel(
+                modifier =
+                    if (playerState.seekPreviewActive) {
+                        buildImmersiveSeekPreviewModifier(
+                            dashboardPanelPose = dashboardPanelPose,
+                            headFollowPose = headFollowPose,
+                            density = density,
+                            horizontalOffsetMeters =
+                                playerState.immersiveUiHorizontalOffsetMeters,
+                        )
+                    } else {
+                        buildHiddenSpatialPanelAnchorModifier()
+                    },
+            ) {
+                PlaybackSeekPreviewCard(
+                    targetPositionMs = playerState.seekPreviewTargetPositionMs,
+                    previewPath = playerState.seekPreviewThumbnailPath,
+                    modifier = Modifier.fillMaxSize(),
+                )
             }
 
             if (
