@@ -483,6 +483,22 @@ fun SpatialVideoPlayerContent(
     val enableImmersiveHeadFollow = enableImmersiveRevealHeadFollow
     // Disabled for 180 stereo because the custom lock-rotation path can blank hemisphere rendering.
     val enableHeadFollowIn180Stereo = false
+    val playbackUiInteractionLocked =
+        playerState.controlsInputLocked ||
+            playerState.seekPreviewActive ||
+            playerState.activePlaybackMenu != PlaybackMenu.None
+    val currentPlaybackUiInteractionLocked by
+        rememberUpdatedState(playbackUiInteractionLocked)
+
+    LaunchedEffect(enablePlaybackUiHeadFollow, playbackUiInteractionLocked) {
+        if (enablePlaybackUiHeadFollow) {
+            Log.d(
+                TAG,
+                "[PlaybackControlDebug] head-follow interactionLocked=" +
+                    playbackUiInteractionLocked,
+            )
+        }
+    }
 
     val needsDeviceTracking = enablePlaybackUiHeadFollow || enableImmersiveHeadFollow
     var deviceTrackingReady by remember(session) {
@@ -545,6 +561,15 @@ fun SpatialVideoPlayerContent(
             if (horizontalForward.lengthSquared < 1e-6f) return@collect
 
             val normalizedForward = horizontalForward.toNormalized()
+            if (
+                !shouldUpdatePlaybackUiHeadFollow(
+                    currentForward = smoothedForward,
+                    targetForward = normalizedForward,
+                    interactionLocked = currentPlaybackUiInteractionLocked,
+                )
+            ) {
+                return@collect
+            }
             val blendedForward =
                 if (smoothedForward == null) {
                     normalizedForward

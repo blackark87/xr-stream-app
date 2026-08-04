@@ -209,4 +209,31 @@ class PlaybackLayerPolicyTest {
             )
         )
     }
+
+    @Test
+    fun `head follow stays still in dead zone and throughout interaction`() {
+        val forward = Vector3.Forward
+
+        assertFalse(
+            shouldUpdatePlaybackUiHeadFollow(
+                currentForward = forward,
+                targetForward = Vector3(x = 0.1f, y = 0f, z = -0.995f),
+                interactionLocked = false,
+            )
+        )
+        assertTrue(
+            shouldUpdatePlaybackUiHeadFollow(
+                currentForward = forward,
+                targetForward = Vector3.Right,
+                interactionLocked = false,
+            )
+        )
+        assertFalse(
+            shouldUpdatePlaybackUiHeadFollow(
+                currentForward = forward,
+                targetForward = Vector3.Right,
+                interactionLocked = true,
+            )
+        )
+    }
 }

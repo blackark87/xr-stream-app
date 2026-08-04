@@ -83,7 +83,7 @@
     <string name="hand_tracking">핸드 트래킹</string>
     <string name="hand_tracking_description">앱 전체에서 손 입력을 허용합니다. 컨트롤러만으로 XR 입력을 사용하려는 경우에만 이 옵션을 끄세요. 기본값은 켜짐입니다.</string>
     <string name="playback_ui_head_follow">재생 컨트롤 시야 추적</string>
-    <string name="playback_ui_head_follow_description">2D와 VR에서 재생 컨트롤과 설정 메뉴를 현재 시야 중앙에 맞춥니다. 끄면 패널 위치가 고정됩니다.</string>
+    <string name="playback_ui_head_follow_description">2D와 VR에서 시야가 크게 바뀌면 재생 컨트롤을 다시 맞추고, 버튼이나 슬라이더를 조작하는 동안에는 위치를 고정합니다. 끄면 패널 위치가 계속 고정됩니다.</string>
     <string name="ip_address">IP 주소</string>
     <string name="ip_address_example">예: 192.168.1.100</string>
     <string name="smb_address">SMB 주소</string>

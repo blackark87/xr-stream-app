@@ -1,5 +1,9 @@
 package blackark.app.vr.ui.screens
 
+import androidx.xr.runtime.math.Vector3
+
+private const val PLAYBACK_UI_HEAD_FOLLOW_DEAD_ZONE_COSINE = 0.9781476f // 12 degrees
+
 internal data class PlaybackLayerPolicy(
     val retainFallbackRevealLayer: Boolean,
     val showFallbackRevealLayer: Boolean,
@@ -43,3 +47,16 @@ internal fun shouldEnablePlaybackUiHeadFollow(
     showControlsLayer: Boolean,
 ): Boolean =
     isEnabledBySetting && (isTwoDimensional || (isImmersive && showControlsLayer))
+
+internal fun shouldUpdatePlaybackUiHeadFollow(
+    currentForward: Vector3?,
+    targetForward: Vector3,
+    interactionLocked: Boolean,
+): Boolean {
+    if (currentForward == null) return true
+    if (interactionLocked) return false
+    if (currentForward.lengthSquared < 1e-6f || targetForward.lengthSquared < 1e-6f) return false
+
+    val similarity = currentForward.toNormalized() dot targetForward.toNormalized()
+    return similarity < PLAYBACK_UI_HEAD_FOLLOW_DEAD_ZONE_COSINE
+}

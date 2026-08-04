@@ -83,7 +83,7 @@
     <string name="hand_tracking">Hand tracking</string>
     <string name="hand_tracking_description">Allows hand input throughout the app. Turn this off only if you want controller-only XR input. On by default.</string>
     <string name="playback_ui_head_follow">Playback controls head-follow</string>
-    <string name="playback_ui_head_follow_description">Keeps playback controls and their menus centered on your current view in 2D and VR. Turn this off to keep them anchored in place.</string>
+    <string name="playback_ui_head_follow_description">Repositions playback controls when your view shifts in 2D and VR, while keeping them still during button and slider interaction. Turn this off to keep them anchored in place.</string>
     <string name="ip_address">IP Address</string>
     <string name="ip_address_example">e.g., 192.168.1.100</string>
     <string name="smb_address">SMB address</string>
