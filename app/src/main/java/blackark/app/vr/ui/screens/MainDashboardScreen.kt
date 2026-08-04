@@ -2223,7 +2223,7 @@ private fun ExtraFanartSlideshow(
             imageLoader = ThumbnailImageLoaderProvider.get(context),
             contentDescription = "Extra fanart preview",
             modifier = Modifier.fillMaxSize(),
-            contentScale = ContentScale.Crop,
+            contentScale = ContentScale.Fit,
         )
     }
 }
@@ -2734,6 +2734,9 @@ private fun SettingsPanel(
     var smbHoverPreviewEnabled by remember {
         mutableStateOf(AppSettingsStore.isSmbHoverPreviewEnabled(context))
     }
+    var playbackUiHeadFollowEnabled by remember {
+        mutableStateOf(AppSettingsStore.isPlaybackUiHeadFollowEnabled(context))
+    }
 
     Card(
         modifier = modifier,
@@ -2762,6 +2765,15 @@ private fun SettingsPanel(
                 description = stringResource(R.string.hand_tracking_description),
                 checked = isHandTrackingEnabled,
                 onCheckedChange = onHandTrackingChange,
+            )
+            SettingsToggleRow(
+                title = stringResource(R.string.playback_ui_head_follow),
+                description = stringResource(R.string.playback_ui_head_follow_description),
+                checked = playbackUiHeadFollowEnabled,
+                onCheckedChange = { enabled ->
+                    playbackUiHeadFollowEnabled = enabled
+                    AppSettingsStore.setPlaybackUiHeadFollowEnabled(context, enabled)
+                },
             )
             SettingsToggleRow(
                 title = stringResource(R.string.av_background_indexing),

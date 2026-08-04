@@ -10,7 +10,7 @@ import blackark.app.vr.ui.viewmodel.VideoFormat
 import kotlin.math.PI
 import kotlin.math.roundToInt
 
-/** Produces an SBS pair for a small XR surface without touching the paused player surface. */
+/** Produces a mono 16:9 view from a VR frame without touching the paused player surface. */
 object VrSeekPreviewRenderer {
     private const val OUTPUT_EYE_WIDTH = 320
     private const val OUTPUT_HEIGHT = 180
@@ -40,7 +40,7 @@ object VrSeekPreviewRenderer {
         val source = BitmapFactory.decodeFile(sourcePath) ?: return null
         return try {
             val output = Bitmap.createBitmap(
-                OUTPUT_EYE_WIDTH * 2,
+                OUTPUT_EYE_WIDTH,
                 OUTPUT_HEIGHT,
                 Bitmap.Config.ARGB_8888,
             )
@@ -50,15 +50,6 @@ object VrSeekPreviewRenderer {
                 source = source,
                 sourceEye = resolveSourceEye(source, stereoMode, leftEye = true),
                 destination = Rect(0, 0, OUTPUT_EYE_WIDTH, OUTPUT_HEIGHT),
-                videoFormat = videoFormat,
-                yaw = relativeYawRadians,
-                pitch = relativePitchRadians,
-            )
-            drawEye(
-                canvas = canvas,
-                source = source,
-                sourceEye = resolveSourceEye(source, stereoMode, leftEye = false),
-                destination = Rect(OUTPUT_EYE_WIDTH, 0, OUTPUT_EYE_WIDTH * 2, OUTPUT_HEIGHT),
                 videoFormat = videoFormat,
                 yaw = relativeYawRadians,
                 pitch = relativePitchRadians,

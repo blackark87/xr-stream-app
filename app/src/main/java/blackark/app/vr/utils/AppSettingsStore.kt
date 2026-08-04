@@ -7,6 +7,8 @@ object AppSettingsStore {
     private const val PREFS_NAME = "av_library_settings"
     private const val KEY_BACKGROUND_INDEXING_ENABLED = "background_indexing_enabled"
     private const val KEY_HAND_TRACKING_ENABLED = "hand_tracking_enabled"
+    private const val KEY_PLAYBACK_UI_HEAD_FOLLOW_ENABLED =
+        "playback_ui_head_follow_enabled"
     private const val KEY_CONTROLLER_HAND_TRACKING_PROMPT_HANDLED =
         "controller_hand_tracking_prompt_handled"
     private const val KEY_LOCAL_STORAGE_TREE_URI = "local_storage_tree_uri"
@@ -67,6 +69,16 @@ object AppSettingsStore {
         prefs(context)
             .edit()
             .putBoolean(KEY_HAND_TRACKING_ENABLED, enabled)
+            .apply()
+    }
+
+    fun isPlaybackUiHeadFollowEnabled(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_PLAYBACK_UI_HEAD_FOLLOW_ENABLED, true)
+
+    fun setPlaybackUiHeadFollowEnabled(context: Context, enabled: Boolean) {
+        prefs(context)
+            .edit()
+            .putBoolean(KEY_PLAYBACK_UI_HEAD_FOLLOW_ENABLED, enabled)
             .apply()
     }
 

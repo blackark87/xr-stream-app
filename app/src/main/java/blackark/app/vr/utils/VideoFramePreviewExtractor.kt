@@ -19,6 +19,7 @@ import java.security.MessageDigest
 object VideoFramePreviewExtractor {
 
     private const val TAG = "VideoFramePreview"
+    private const val CACHE_VERSION = "v2"
     private const val PREVIEW_FRAME_WIDTH = 480
     private const val PREVIEW_FRAME_HEIGHT = 270
     private val sessionMutex = Mutex()
@@ -65,11 +66,11 @@ object VideoFramePreviewExtractor {
         val projectionSuffix = if (preserveVrProjection) "_vr" else ""
         val previewFile = File(
             previewDir,
-            "seek_preview_${fileHash}_${safeTargetPositionMs}$projectionSuffix.jpg",
+            "seek_preview_${CACHE_VERSION}_${fileHash}_${safeTargetPositionMs}$projectionSuffix.jpg",
         )
         val tempFile = File(
             previewDir,
-            "seek_preview_${fileHash}_${safeTargetPositionMs}$projectionSuffix.tmp",
+            "seek_preview_${CACHE_VERSION}_${fileHash}_${safeTargetPositionMs}$projectionSuffix.tmp",
         )
 
         if (previewFile.exists() && previewFile.length() > 0L) {
@@ -210,6 +211,7 @@ object VideoFramePreviewExtractor {
                 MediaMetadataRetriever.OPTION_NEXT_SYNC,
                 MediaMetadataRetriever.OPTION_CLOSEST,
             )
+        var blankFallback: Bitmap? = null
 
         for (candidateTimeUs in candidateTimesUs) {
             for (option in extractionOptions) {
@@ -222,7 +224,18 @@ object VideoFramePreviewExtractor {
                             if (preserveVrProjection) PREVIEW_FRAME_HEIGHT * 2 else PREVIEW_FRAME_HEIGHT,
                         ) ?: retriever.getFrameAtTime(candidateTimeUs, option)
                     if (bitmap != null) {
-                        return if (preserveVrProjection) bitmap else normalizePreviewFrame(bitmap)
+                        val normalized =
+                            if (preserveVrProjection) bitmap else normalizePreviewFrame(bitmap)
+                        if (!isLikelyBlankFrame(normalized)) {
+                            blankFallback?.takeUnless(Bitmap::isRecycled)?.recycle()
+                            return normalized
+                        }
+                        if (blankFallback == null) {
+                            blankFallback = normalized
+                        } else if (!normalized.isRecycled) {
+                            normalized.recycle()
+                        }
+                        break
                     }
                 } catch (error: Exception) {
                     Log.v(
@@ -233,7 +246,40 @@ object VideoFramePreviewExtractor {
             }
         }
 
-        return null
+        return blankFallback
+    }
+
+    private fun isLikelyBlankFrame(bitmap: Bitmap): Boolean {
+        if (bitmap.width <= 0 || bitmap.height <= 0) return true
+
+        var minimumLuma = 255
+        var maximumLuma = 0
+        var totalLuma = 0L
+        var sampleCount = 0
+        val columns = 10
+        val rows = 6
+        for (row in 0 until rows) {
+            val y = ((row + 0.5f) * bitmap.height / rows)
+                .toInt()
+                .coerceIn(0, bitmap.height - 1)
+            for (column in 0 until columns) {
+                val x = ((column + 0.5f) * bitmap.width / columns)
+                    .toInt()
+                    .coerceIn(0, bitmap.width - 1)
+                val color = bitmap.getPixel(x, y)
+                val red = color shr 16 and 0xff
+                val green = color shr 8 and 0xff
+                val blue = color and 0xff
+                val luma = (red * 54 + green * 183 + blue * 19) shr 8
+                minimumLuma = minOf(minimumLuma, luma)
+                maximumLuma = maxOf(maximumLuma, luma)
+                totalLuma += luma
+                sampleCount += 1
+            }
+        }
+
+        val averageLuma = if (sampleCount == 0) 0f else totalLuma.toFloat() / sampleCount
+        return averageLuma < 12f && maximumLuma - minimumLuma < 18
     }
 
     private fun buildCandidateTimesUs(

@@ -255,7 +255,7 @@ class VideoPlayerViewModel(
     private val playbackScrollSeekInitialRepeatMs = 260L
     private val playbackScrollSeekRepeatMs = 140L
     private val playbackScrollHoldTimeoutMs = 240L
-    private val thumbnailPreviewDebounceMs = 60L
+    private val thumbnailPreviewDebounceMs = 180L
     private val thumbnailPreviewFrameIntervalMs = 1_000L
     private var lastPlaybackHorizontalScrollAtMs = 0L
     private var lastPlaybackVerticalScrollAtMs = 0L
@@ -350,6 +350,8 @@ class VideoPlayerViewModel(
 
     fun recenterView() {
         blackark.app.vr.AppState.resetDashboardPanelPlacement()
+        val headFollowEnabled = appContext?.let(AppSettingsStore::isPlaybackUiHeadFollowEnabled)
+            ?: true
         _state.value = _state.value.copy(
             zoomLevel = 1.0f,
             immersiveUiHorizontalOffsetMeters = 0.0f,
@@ -359,7 +361,8 @@ class VideoPlayerViewModel(
         }
         Log.i(
             PLAYER_LOG_TAG,
-            "$PLAYBACK_CONTROL_LOG_PREFIX recenter headFollow=true horizontalOffset=0.0m",
+            "$PLAYBACK_CONTROL_LOG_PREFIX recenter headFollow=$headFollowEnabled " +
+                "horizontalOffset=0.0m",
         )
         scheduleControlsAutoHideIfNeeded()
     }
@@ -719,6 +722,11 @@ class VideoPlayerViewModel(
             seekPreviewTargetPositionMs = startPosition,
             seekPreviewThumbnailPath = null,
         )
+        Log.d(
+            PLAYER_LOG_TAG,
+            "$PLAYBACK_CONTROL_LOG_PREFIX seek-preview begin positionMs=$startPosition " +
+                "resume=$seekPreviewResumePlayback format=${currentState.videoFormat}",
+        )
         cancelControlsAutoHide()
         enqueueThumbnailPreview(startPosition)
     }
@@ -742,12 +750,16 @@ class VideoPlayerViewModel(
 
         thumbnailPreviewJob = viewModelScope.launch {
             while (isActive) {
-                val queuedTarget = pendingThumbnailPreviewPositionMs ?: break
+                var nextTarget = pendingThumbnailPreviewPositionMs ?: break
                 pendingThumbnailPreviewPositionMs = null
-                delay(thumbnailPreviewDebounceMs)
-
-                val nextTarget = pendingThumbnailPreviewPositionMs ?: queuedTarget
-                pendingThumbnailPreviewPositionMs = null
+                // Wait for the slider/controller to settle instead of decoding every intermediate
+                // SMB position. A single frame decode is slower than a typical input update.
+                while (isActive) {
+                    delay(thumbnailPreviewDebounceMs)
+                    val newerTarget = pendingThumbnailPreviewPositionMs ?: break
+                    pendingThumbnailPreviewPositionMs = null
+                    nextTarget = newerTarget
+                }
 
                 val previewPath =
                     VideoFramePreviewExtractor.extractPreviewFrame(
@@ -768,7 +780,13 @@ class VideoPlayerViewModel(
                     break
                 }
 
-                if (previewPath != null) {
+                val latestRequestedTarget =
+                    normalizeThumbnailPreviewPosition(latestState.seekPreviewTargetPositionMs)
+                if (
+                    previewPath != null &&
+                    pendingThumbnailPreviewPositionMs == null &&
+                    latestRequestedTarget == nextTarget
+                ) {
                     renderedThumbnailPreviewPositionMs = nextTarget
                     _state.value = latestState.copy(seekPreviewThumbnailPath = previewPath)
                 }
@@ -878,6 +896,12 @@ class VideoPlayerViewModel(
         )
         seekPreviewResumePlayback = false
         seekPreviewShowControls = false
+
+        Log.d(
+            PLAYER_LOG_TAG,
+            "$PLAYBACK_CONTROL_LOG_PREFIX seek-preview finish commit=$commit " +
+                "targetMs=$targetPosition resume=$resumePlayback",
+        )
 
         scheduleControlsAutoHideIfNeeded()
         return resumePlayback

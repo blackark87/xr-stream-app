@@ -7,8 +7,8 @@ package blackark.app.vr.ui.screens
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
+import android.graphics.Bitmap
 import android.graphics.Color as AndroidColor
-import android.graphics.Rect
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -16,11 +16,11 @@ import android.text.SpannableString
 import android.text.Spanned
 import android.text.style.TypefaceSpan
 import android.util.Log
-import android.view.Surface
 import android.window.OnBackInvokedCallback
 import android.window.OnBackInvokedDispatcher
 import androidx.activity.compose.BackHandler
 import androidx.annotation.OptIn
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -58,9 +58,11 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextAlign
@@ -335,6 +337,9 @@ fun VideoPlayerScreen(
     val isHandTrackingEnabled = remember(context) {
         AppSettingsStore.isHandTrackingEnabled(context.applicationContext)
     }
+    val isPlaybackUiHeadFollowEnabled = remember(context) {
+        AppSettingsStore.isPlaybackUiHeadFollowEnabled(context.applicationContext)
+    }
     val hasHandTrackingPermission = remember(context) {
         androidx.core.content.ContextCompat.checkSelfPermission(
             context.applicationContext,
@@ -409,6 +414,7 @@ fun VideoPlayerScreen(
             videoPlayerViewModel = videoPlayerViewModel,
             playerState = playerState,
             isHandTrackingEnabled = isHandTrackingEnabled,
+            isPlaybackUiHeadFollowEnabled = isPlaybackUiHeadFollowEnabled,
             hasHandTrackingPermission = hasHandTrackingPermission,
             dashboardPanelPose = dashboardPanelPose,
             onNavigateBack = { videoPlayerViewModel.requestNavigateBack() },
@@ -422,6 +428,7 @@ fun SpatialVideoPlayerContent(
     videoPlayerViewModel: VideoPlayerViewModel,
     playerState: VideoPlayerState,
     isHandTrackingEnabled: Boolean,
+    isPlaybackUiHeadFollowEnabled: Boolean,
     hasHandTrackingPermission: Boolean,
     dashboardPanelPose: Pose?,
     onNavigateBack: () -> Unit,
@@ -479,16 +486,14 @@ fun SpatialVideoPlayerContent(
 
     val enableHeadFollowIn2D = playerState.videoFormat == VideoFormat.Format2D
     val enablePlaybackUiHeadFollow = shouldEnablePlaybackUiHeadFollow(
+        isEnabledBySetting = isPlaybackUiHeadFollowEnabled,
         isTwoDimensional = enableHeadFollowIn2D,
         isImmersive = shouldUseImmersiveDome,
         showControlsLayer = playbackLayerPolicy.showControlsLayer,
     )
     val enableImmersiveRevealHeadFollow =
         shouldUseImmersiveDome && playbackLayerPolicy.showFallbackRevealLayer
-    val enableImmersiveSeekPreviewHeadFollow =
-        shouldUseImmersiveDome && playerState.seekPreviewActive
-    val enableImmersiveHeadFollow =
-        enableImmersiveRevealHeadFollow || enableImmersiveSeekPreviewHeadFollow
+    val enableImmersiveHeadFollow = enableImmersiveRevealHeadFollow
     // Disabled for 180 stereo because the custom lock-rotation path can blank hemisphere rendering.
     val enableHeadFollowIn180Stereo = false
 
@@ -770,7 +775,7 @@ fun SpatialVideoPlayerContent(
                     previewPath = playerState.seekPreviewThumbnailPath,
                     videoFormat = playerState.videoFormat,
                     stereoMode = playerState.stereoMode,
-                    headPose = immersiveRevealHeadPose,
+                    headPose = headFollowPose,
                     dashboardPanelPose = dashboardPanelPose,
                     density = density,
                 )
@@ -932,7 +937,7 @@ private fun VrSeekPreviewSurface(
     dashboardPanelPose: Pose?,
     density: Density,
 ) {
-    var surface by remember { mutableStateOf<Surface?>(null) }
+    var previewBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var activationForward by remember { mutableStateOf<Vector3?>(null) }
 
     LaunchedEffect(headPose?.forward) {
@@ -947,15 +952,17 @@ private fun VrSeekPreviewSurface(
         activationForward,
         videoFormat,
         stereoMode,
-        surface,
     ) {
-        val path = previewPath ?: return@LaunchedEffect
-        val targetSurface = surface ?: return@LaunchedEffect
+        val path = previewPath
+        if (path == null) {
+            previewBitmap = null
+            return@LaunchedEffect
+        }
         val anchor = activationForward ?: headPose?.forward ?: Vector3.Forward
         val current = headPose?.forward ?: anchor
         val yaw = normalizeRadians(viewYaw(current) - viewYaw(anchor))
         val pitch = (viewPitch(current) - viewPitch(anchor)).coerceIn(-0.75f, 0.75f)
-        val bitmap = withContext(Dispatchers.Default) {
+        previewBitmap = withContext(Dispatchers.Default) {
             VrSeekPreviewRenderer.render(
                 sourcePath = path,
                 videoFormat = videoFormat,
@@ -963,46 +970,40 @@ private fun VrSeekPreviewSurface(
                 relativeYawRadians = yaw,
                 relativePitchRadians = pitch,
             )
-        } ?: return@LaunchedEffect
-
-        runCatching {
-            val canvas = targetSurface.lockCanvas(null)
-            try {
-                canvas.drawColor(AndroidColor.BLACK)
-                canvas.drawBitmap(
-                    bitmap,
-                    null,
-                    Rect(0, 0, canvas.width, canvas.height),
-                    android.graphics.Paint(
-                        android.graphics.Paint.ANTI_ALIAS_FLAG or
-                            android.graphics.Paint.FILTER_BITMAP_FLAG
-                    ),
-                )
-            } finally {
-                targetSurface.unlockCanvasAndPost(canvas)
-            }
-        }.onFailure { error ->
-            Log.v(TAG, "Failed to draw VR seek preview: ${error.message}")
         }
     }
 
     DisposableEffect(Unit) {
         onDispose {
-            surface = null
+            previewBitmap = null
             VrSeekPreviewRenderer.clear()
         }
     }
 
-    SpatialExternalSurface(
+    SpatialPanel(
         modifier = buildImmersiveSeekPreviewModifier(
             dashboardPanelPose = dashboardPanelPose,
+            headFollowPose = headPose,
             density = density,
         ),
-        stereoMode = StereoMode.SideBySide,
     ) {
-        onSurfaceCreated { created -> surface = created }
-        onSurfaceDestroyed { destroyed ->
-            if (surface === destroyed) surface = null
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black),
+            contentAlignment = Alignment.Center,
+        ) {
+            val bitmap = previewBitmap
+            if (bitmap == null) {
+                CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+            } else {
+                Image(
+                    bitmap = bitmap.asImageBitmap(),
+                    contentDescription = "VR seek preview",
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Fit,
+                )
+            }
         }
     }
 }
@@ -1375,16 +1376,27 @@ private fun buildImmersiveControlsModifier(
 
 private fun buildImmersiveSeekPreviewModifier(
     dashboardPanelPose: Pose?,
+    headFollowPose: HeadFollowPose?,
     density: Density,
 ): SubspaceModifier {
     val base = SubspaceModifier
         .width(IMMERSIVE_SEEK_PREVIEW_WIDTH)
         .height(IMMERSIVE_SEEK_PREVIEW_HEIGHT)
-    val rotation = dashboardPanelPose?.rotation ?: Quaternion.Identity
+    val rotation = headFollowPose?.rotation ?: dashboardPanelPose?.rotation ?: Quaternion.Identity
     val worldUp = rotation * Vector3.Up
     val upX = (worldUp.x * IMMERSIVE_SEEK_PREVIEW_UP_OFFSET.value).dp
     val upY = (worldUp.y * IMMERSIVE_SEEK_PREVIEW_UP_OFFSET.value).dp
     val upZ = (worldUp.z * IMMERSIVE_SEEK_PREVIEW_UP_OFFSET.value).dp
+
+    if (headFollowPose != null) {
+        return base
+            .offset(
+                x = (headFollowPose.forward.x * IMMERSIVE_CONTROLS_FOLLOW_DISTANCE.value).dp + upX,
+                y = (headFollowPose.forward.y * IMMERSIVE_CONTROLS_FOLLOW_DISTANCE.value).dp + upY,
+                z = (headFollowPose.forward.z * IMMERSIVE_CONTROLS_FOLLOW_DISTANCE.value).dp + upZ,
+            )
+            .rotate(rotation)
+    }
 
     if (dashboardPanelPose == null) {
         return base.offset(x = upX, y = upY, z = upZ)

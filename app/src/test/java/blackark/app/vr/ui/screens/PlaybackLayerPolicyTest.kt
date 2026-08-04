@@ -200,5 +200,13 @@ class PlaybackLayerPolicyTest {
                 showControlsLayer = true,
             )
         )
+        assertFalse(
+            shouldEnablePlaybackUiHeadFollow(
+                isEnabledBySetting = false,
+                isTwoDimensional = true,
+                isImmersive = true,
+                showControlsLayer = true,
+            )
+        )
     }
 }

@@ -37,7 +37,9 @@ internal fun shouldRetainImmersiveSubtitlePanel(
 ): Boolean = subtitlesPresent
 
 internal fun shouldEnablePlaybackUiHeadFollow(
+    isEnabledBySetting: Boolean = true,
     isTwoDimensional: Boolean,
     isImmersive: Boolean,
     showControlsLayer: Boolean,
-): Boolean = isTwoDimensional || (isImmersive && showControlsLayer)
+): Boolean =
+    isEnabledBySetting && (isTwoDimensional || (isImmersive && showControlsLayer))
