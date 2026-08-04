@@ -106,6 +106,7 @@ import androidx.xr.runtime.math.Pose
 import androidx.xr.runtime.math.Quaternion
 import androidx.xr.runtime.math.Vector3
 import androidx.xr.scenecore.InputEvent
+import androidx.xr.scenecore.scene
 import blackark.app.vr.XRStreamApplication
 import blackark.app.vr.player.PlaybackSource
 import blackark.app.vr.ui.ApplyHandTrackingPreference
@@ -491,13 +492,47 @@ fun SpatialVideoPlayerContent(
     // Disabled for 180 stereo because the custom lock-rotation path can blank hemisphere rendering.
     val enableHeadFollowIn180Stereo = false
 
+    val needsDeviceTracking = enablePlaybackUiHeadFollow || enableImmersiveHeadFollow
+    var deviceTrackingReady by remember(session) {
+        mutableStateOf(
+            session?.config?.deviceTracking?.let { it != DeviceTrackingMode.DISABLED } ?: false
+        )
+    }
+    // ArDevice.getInstance() rejects a session while device tracking is disabled. Configure first,
+    // then start the collectors so a failed early lookup is retried after configuration succeeds.
+    LaunchedEffect(session, needsDeviceTracking) {
+        val activeSession = session ?: return@LaunchedEffect
+        if (!needsDeviceTracking) return@LaunchedEffect
+
+        if (activeSession.config.deviceTracking != DeviceTrackingMode.DISABLED) {
+            deviceTrackingReady = true
+            return@LaunchedEffect
+        }
+
+        val updatedConfig = Config.Builder(activeSession.config)
+            .setDeviceTracking(DeviceTrackingMode.SPATIAL)
+            .build()
+        val result = runCatching { activeSession.configure(updatedConfig) }
+            .onFailure { error ->
+                Log.w(TAG, "Failed to enable XR device tracking", error)
+            }
+            .getOrNull()
+        deviceTrackingReady = result is SessionConfigureSuccess
+        if (deviceTrackingReady) {
+            Log.i(TAG, "[PlaybackControlDebug] XR device tracking ready")
+        } else if (result != null) {
+            Log.w(TAG, "Failed to enable XR device tracking: ${result::class.java.simpleName}")
+        }
+    }
+
     val headFollowPose by produceState<HeadFollowPose?>(
         initialValue = null,
         session,
         enablePlaybackUiHeadFollow,
+        deviceTrackingReady,
     ) {
         value = null
-        if (!enablePlaybackUiHeadFollow) return@produceState
+        if (!enablePlaybackUiHeadFollow || !deviceTrackingReady) return@produceState
 
         val activeSession = session ?: return@produceState
         val arDevice = runCatching { ArDevice.getInstance(activeSession) }.getOrNull()
@@ -509,7 +544,11 @@ fun SpatialVideoPlayerContent(
         var smoothedRotation: Quaternion? = null
         var smoothedForward: Vector3? = null
         arDevice.state.collect { deviceState ->
-            val forward = deviceState.devicePose.forward
+            val activitySpaceDevicePose = activeSession.scene.perceptionSpace.transformPoseTo(
+                pose = deviceState.devicePose,
+                destination = activeSession.scene.activitySpace,
+            )
+            val forward = activitySpaceDevicePose.forward
             val horizontalForward = Vector3(forward.x, 0f, forward.z)
             if (horizontalForward.lengthSquared < 1e-6f) return@collect
 
@@ -539,9 +578,10 @@ fun SpatialVideoPlayerContent(
         initialValue = null,
         session,
         enableImmersiveHeadFollow,
+        deviceTrackingReady,
     ) {
         value = null
-        if (!enableImmersiveHeadFollow) return@produceState
+        if (!enableImmersiveHeadFollow || !deviceTrackingReady) return@produceState
 
         val activeSession = session ?: return@produceState
         val arDevice = runCatching { ArDevice.getInstance(activeSession) }.getOrNull()
@@ -553,7 +593,11 @@ fun SpatialVideoPlayerContent(
         var smoothedForward: Vector3? = null
         var smoothedRotation: Quaternion? = null
         arDevice.state.collect { deviceState ->
-            val forward = deviceState.devicePose.forward
+            val activitySpaceDevicePose = activeSession.scene.perceptionSpace.transformPoseTo(
+                pose = deviceState.devicePose,
+                destination = activeSession.scene.activitySpace,
+            )
+            val forward = activitySpaceDevicePose.forward
             if (forward.lengthSquared < 1e-6f) return@collect
 
             val normalizedForward = forward.toNormalized()
@@ -565,7 +609,7 @@ fun SpatialVideoPlayerContent(
                 }
             if (blendedForward.lengthSquared < 1e-6f) return@collect
             smoothedForward = blendedForward.toNormalized()
-            val targetRotation = deviceState.devicePose.rotation
+            val targetRotation = activitySpaceDevicePose.rotation
             smoothedRotation =
                 if (smoothedRotation == null) {
                     targetRotation
@@ -577,25 +621,6 @@ fun SpatialVideoPlayerContent(
                 rotation = smoothedRotation!!,
                 forward = smoothedForward!!,
             )
-        }
-    }
-
-    // Device tracking must be enabled for head-follow behavior.
-    LaunchedEffect(session, enablePlaybackUiHeadFollow, enableImmersiveHeadFollow) {
-        val activeSession = session ?: return@LaunchedEffect
-        if (!enablePlaybackUiHeadFollow && !enableImmersiveHeadFollow) return@LaunchedEffect
-
-        val currentConfig = activeSession.config
-        if (currentConfig.deviceTracking != DeviceTrackingMode.DISABLED) {
-            return@LaunchedEffect
-        }
-
-        val updatedConfig = Config.Builder(currentConfig)
-            .setDeviceTracking(DeviceTrackingMode.SPATIAL)
-            .build()
-        val result = activeSession.configure(updatedConfig)
-        if (result !is SessionConfigureSuccess) {
-            Log.w(TAG, "Failed to enable XR device tracking: ${result::class.java.simpleName}")
         }
     }
 
