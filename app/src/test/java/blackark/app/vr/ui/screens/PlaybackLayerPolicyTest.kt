@@ -25,13 +25,13 @@ class PlaybackLayerPolicyTest {
     }
 
     @Test
-    fun `spatial release reveals controls without requiring a hit position`() {
-        assertTrue(isSpatialRevealClick(InputEvent.Action.UP))
-        assertFalse(isSpatialRevealClick(InputEvent.Action.DOWN))
+    fun `spatial release toggles controls without requiring a hit position`() {
+        assertTrue(isSpatialToggleClick(InputEvent.Action.UP))
+        assertFalse(isSpatialToggleClick(InputEvent.Action.DOWN))
     }
 
     @Test
-    fun `hidden controls enable surface toggle and fallback reveal`() {
+    fun `hidden controls enable retained background input`() {
         val policy = resolvePlaybackLayerPolicy(
             isSurfaceReady = true,
             isImmersive = true,
@@ -40,15 +40,14 @@ class PlaybackLayerPolicyTest {
             seekPreviewActive = false,
         )
 
-        assertTrue(policy.retainFallbackRevealLayer)
-        assertTrue(policy.showFallbackRevealLayer)
-        assertTrue(policy.enableSurfaceToggleInput)
+        assertTrue(policy.retainBackgroundInputLayer)
+        assertTrue(policy.showHiddenControlsInputOverlay)
+        assertTrue(policy.enableBackgroundToggleInput)
         assertFalse(policy.showControlsLayer)
-        assertFalse(policy.subtitleAcceptsInput)
     }
 
     @Test
-    fun `visible controls keep surface toggle behind controls`() {
+    fun `visible controls keep background toggle behind controls`() {
         val policy = resolvePlaybackLayerPolicy(
             isSurfaceReady = true,
             isImmersive = true,
@@ -57,15 +56,14 @@ class PlaybackLayerPolicyTest {
             seekPreviewActive = false,
         )
 
-        assertTrue(policy.retainFallbackRevealLayer)
-        assertFalse(policy.showFallbackRevealLayer)
-        assertTrue(policy.enableSurfaceToggleInput)
+        assertTrue(policy.retainBackgroundInputLayer)
+        assertFalse(policy.showHiddenControlsInputOverlay)
+        assertTrue(policy.enableBackgroundToggleInput)
         assertTrue(policy.showControlsLayer)
-        assertFalse(policy.subtitleAcceptsInput)
     }
 
     @Test
-    fun `pending navigation keeps layers but disables new surface input`() {
+    fun `pending navigation keeps layers but disables new background input`() {
         val policy = resolvePlaybackLayerPolicy(
             isSurfaceReady = true,
             isImmersive = true,
@@ -75,14 +73,14 @@ class PlaybackLayerPolicyTest {
             navigationExitPending = true,
         )
 
-        assertTrue(policy.retainFallbackRevealLayer)
-        assertFalse(policy.showFallbackRevealLayer)
-        assertFalse(policy.enableSurfaceToggleInput)
+        assertTrue(policy.retainBackgroundInputLayer)
+        assertFalse(policy.showHiddenControlsInputOverlay)
+        assertFalse(policy.enableBackgroundToggleInput)
         assertTrue(policy.showControlsLayer)
     }
 
     @Test
-    fun `locked or unready playback does not expose reveal input`() {
+    fun `locked or unready playback retains layer without exposing background input`() {
         val lockedPolicy = resolvePlaybackLayerPolicy(
             isSurfaceReady = true,
             isImmersive = true,
@@ -112,15 +110,15 @@ class PlaybackLayerPolicyTest {
             seekPreviewActive = true,
         )
 
-        assertFalse(lockedPolicy.showFallbackRevealLayer)
-        assertTrue(lockedPolicy.retainFallbackRevealLayer)
-        assertFalse(lockedPolicy.enableSurfaceToggleInput)
-        assertFalse(lockedVisiblePolicy.enableSurfaceToggleInput)
-        assertFalse(unreadyPolicy.showFallbackRevealLayer)
-        assertFalse(unreadyPolicy.retainFallbackRevealLayer)
-        assertFalse(unreadyPolicy.enableSurfaceToggleInput)
-        assertFalse(seekPreviewPolicy.showFallbackRevealLayer)
-        assertFalse(seekPreviewPolicy.enableSurfaceToggleInput)
+        assertFalse(lockedPolicy.showHiddenControlsInputOverlay)
+        assertTrue(lockedPolicy.retainBackgroundInputLayer)
+        assertFalse(lockedPolicy.enableBackgroundToggleInput)
+        assertFalse(lockedVisiblePolicy.enableBackgroundToggleInput)
+        assertFalse(unreadyPolicy.showHiddenControlsInputOverlay)
+        assertTrue(unreadyPolicy.retainBackgroundInputLayer)
+        assertFalse(unreadyPolicy.enableBackgroundToggleInput)
+        assertFalse(seekPreviewPolicy.showHiddenControlsInputOverlay)
+        assertFalse(seekPreviewPolicy.enableBackgroundToggleInput)
         assertTrue(seekPreviewPolicy.showControlsLayer)
     }
 
@@ -141,10 +139,10 @@ class PlaybackLayerPolicyTest {
             seekPreviewActive = false,
         )
 
-        assertFalse(hiddenPolicy.showFallbackRevealLayer)
-        assertFalse(hiddenPolicy.retainFallbackRevealLayer)
-        assertFalse(hiddenPolicy.enableSurfaceToggleInput)
-        assertFalse(visiblePolicy.enableSurfaceToggleInput)
+        assertFalse(hiddenPolicy.showHiddenControlsInputOverlay)
+        assertFalse(hiddenPolicy.retainBackgroundInputLayer)
+        assertFalse(hiddenPolicy.enableBackgroundToggleInput)
+        assertFalse(visiblePolicy.enableBackgroundToggleInput)
         assertTrue(visiblePolicy.showControlsLayer)
     }
 

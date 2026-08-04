@@ -150,11 +150,12 @@ private val IMMERSIVE_MENU_CONTROLS_GAP = 20.dp
 private val IMMERSIVE_DISPLAY_PANEL_HEIGHT = 620.dp
 private val IMMERSIVE_DISPLAY_CONTENT_MAX_HEIGHT = 440.dp
 private val IMMERSIVE_MENU_FRONT_OFFSET = 16.dp
-private val IMMERSIVE_REVEAL_PANEL_WIDTH = 2400.dp
-private val IMMERSIVE_REVEAL_PANEL_HEIGHT = 1400.dp
-private val IMMERSIVE_REVEAL_FOLLOW_DISTANCE = 480.dp
-// Used only while controls are hidden; the panel follows the viewer's current field of view.
-private const val IMMERSIVE_REVEAL_FRONT_FACTOR = 0.86f
+private val IMMERSIVE_BACKGROUND_INPUT_PANEL_WIDTH = 2400.dp
+private val IMMERSIVE_BACKGROUND_INPUT_PANEL_HEIGHT = 1400.dp
+// Keep the retained background input plane behind the controls so it catches empty-space clicks
+// without taking the controller ray away from buttons, menus, or the seek slider.
+private val IMMERSIVE_BACKGROUND_INPUT_FOLLOW_DISTANCE = 980.dp
+private const val IMMERSIVE_BACKGROUND_INPUT_FACTOR = 0.90f
 private val IMMERSIVE_SUBTITLE_PANEL_WIDTH = 1280.dp
 private val IMMERSIVE_SUBTITLE_PANEL_HEIGHT = 720.dp
 // Keep the subtitle baseline low enough that the minimum user offset can sit near
@@ -170,28 +171,43 @@ private tailrec fun Context.findActivity(): Activity? =
         else -> null
     }
 
-private fun clickInteractionPolicy(
+@Composable
+private fun rememberClickInteractionPolicy(
     isEnabled: Boolean = true,
     isHandTrackingEnabled: Boolean = true,
     onClick: (() -> Unit)? = null,
-): InteractionPolicy =
-    object : InteractionPolicy {
-        override val isEnabled: Boolean = isEnabled
+): InteractionPolicy {
+    val currentIsEnabled = rememberUpdatedState(isEnabled)
+    val currentIsHandTrackingEnabled = rememberUpdatedState(isHandTrackingEnabled)
+    val currentOnClick = rememberUpdatedState(onClick)
 
-        override fun onInputEvent(event: SpatialInputEvent) {
-            if (!isEnabled) return
-            if (!isSpatialInputSourceAllowed(isHandTrackingEnabled, event.source)) {
-                return
-            }
-            if (onClick != null && isSpatialRevealClick(event.action)) {
-                // SceneCore continues transforming the hit entity after this callback returns.
-                // Defer state changes that can remove the clicked panel until input dispatch ends.
-                Handler(Looper.getMainLooper()).post { onClick() }
+    return remember {
+        object : InteractionPolicy {
+            override val isEnabled: Boolean
+                get() = currentIsEnabled.value
+
+            override fun onInputEvent(event: SpatialInputEvent) {
+                if (!currentIsEnabled.value) return
+                if (
+                    !isSpatialInputSourceAllowed(
+                        currentIsHandTrackingEnabled.value,
+                        event.source,
+                    )
+                ) {
+                    return
+                }
+                if (currentOnClick.value != null && isSpatialToggleClick(event.action)) {
+                    // SceneCore continues transforming the hit entity after this callback returns.
+                    // Defer state changes until input dispatch ends, but keep this policy instance
+                    // attached for the whole playback screen lifetime.
+                    Handler(Looper.getMainLooper()).post { currentOnClick.value?.invoke() }
+                }
             }
         }
     }
+}
 
-internal fun isSpatialRevealClick(action: InputEvent.Action): Boolean =
+internal fun isSpatialToggleClick(action: InputEvent.Action): Boolean =
     action == InputEvent.Action.UP
 
 @Composable
@@ -496,9 +512,9 @@ fun SpatialVideoPlayerContent(
         isImmersive = shouldUseImmersiveDome,
         showControlsLayer = playbackLayerPolicy.showControlsLayer,
     )
-    val enableImmersiveRevealHeadFollow =
-        shouldUseImmersiveDome && playbackLayerPolicy.showFallbackRevealLayer
-    val enableImmersiveHeadFollow = enableImmersiveRevealHeadFollow
+    val enableImmersiveBackgroundHeadFollow =
+        shouldUseImmersiveDome && playbackLayerPolicy.retainBackgroundInputLayer
+    val enableImmersiveHeadFollow = enableImmersiveBackgroundHeadFollow
     // Disabled for 180 stereo because the custom lock-rotation path can blank hemisphere rendering.
     val enableHeadFollowIn180Stereo = false
     val playbackUiInteractionLocked =
@@ -609,7 +625,7 @@ fun SpatialVideoPlayerContent(
         }
     }
 
-    val immersiveRevealHeadPose by produceState<HeadFollowPose?>(
+    val immersiveBackgroundHeadPose by produceState<HeadFollowPose?>(
         initialValue = null,
         session,
         enableImmersiveHeadFollow,
@@ -621,7 +637,7 @@ fun SpatialVideoPlayerContent(
         val activeSession = session ?: return@produceState
         val arDevice = runCatching { ArDevice.getInstance(activeSession) }.getOrNull()
         if (arDevice == null) {
-            Log.w(TAG, "ArDevice is unavailable; using the saved reveal input pose")
+            Log.w(TAG, "ArDevice is unavailable; using the saved background input pose")
             return@produceState
         }
 
@@ -636,6 +652,9 @@ fun SpatialVideoPlayerContent(
             if (forward.lengthSquared < 1e-6f) return@collect
 
             val normalizedForward = forward.toNormalized()
+            if (currentPlaybackUiInteractionLocked && smoothedForward != null) {
+                return@collect
+            }
             val blendedForward =
                 if (smoothedForward == null) {
                     normalizedForward
@@ -666,21 +685,55 @@ fun SpatialVideoPlayerContent(
     }
 
     val targetControlsVisible = !showControls
-    val surfaceControlsInteractionPolicy =
-        when {
-            shouldUseImmersiveDome && isSurfaceReady ->
-                clickInteractionPolicy(
-                    isEnabled = playbackLayerPolicy.enableSurfaceToggleInput,
-                    isHandTrackingEnabled = isHandTrackingEnabled,
-                ) {
-                    videoPlayerViewModel.setControlsVisibility(
-                        visible = targetControlsVisible,
-                        source = "video-surface",
-                    )
-                }
-
-            else -> null
+    val immersiveBackgroundInteractionPolicy =
+        rememberClickInteractionPolicy(
+            isEnabled =
+                shouldUseImmersiveDome && playbackLayerPolicy.enableBackgroundToggleInput,
+            isHandTrackingEnabled = isHandTrackingEnabled,
+        ) {
+            videoPlayerViewModel.setControlsVisibility(
+                visible = targetControlsVisible,
+                source = "immersive-background-panel",
+            )
         }
+
+    // Keep this sole spatial InteractionPolicy owner parented across ExoPlayer buffering and
+    // surface replacement. Its policy disables input while loading, seeking, or navigating.
+    if (shouldUseImmersiveDome && playbackLayerPolicy.retainBackgroundInputLayer) {
+        SpatialPanel(
+            modifier = buildImmersiveBackgroundInputModifier(
+                dashboardPanelPose = dashboardPanelPose,
+                headFollowPose = immersiveBackgroundHeadPose,
+                density = density,
+            ),
+            interactionPolicy = immersiveBackgroundInteractionPolicy,
+        ) {
+            if (playbackLayerPolicy.showHiddenControlsInputOverlay) {
+                PlaybackScrollInputOverlay(
+                    showControls = false,
+                    inputEnabled = true,
+                    backgroundToggleEnabled = false,
+                    onKeyUp = { event ->
+                        videoPlayerViewModel.dispatchPlaybackKeyEvent(event)
+                    },
+                    onToggleControls = {
+                        videoPlayerViewModel.setControlsVisibility(
+                            visible = targetControlsVisible,
+                            source = "immersive-background-overlay",
+                        )
+                    },
+                    controlsInputLocked = playerState.controlsInputLocked,
+                    seekPreviewActive = playerState.seekPreviewActive,
+                    onHorizontalScrollDelta = { delta ->
+                        videoPlayerViewModel.handlePlaybackHorizontalScroll(delta)
+                    },
+                    onVerticalScrollDelta = { delta ->
+                        videoPlayerViewModel.handlePlaybackVerticalScroll(delta)
+                    },
+                )
+            }
+        }
+    }
 
     if (exoPlayer == null) {
         // Avoid panel pop/flicker in immersive startup: keep black background until surface is ready.
@@ -702,7 +755,6 @@ fun SpatialVideoPlayerContent(
             exoPlayer = exoPlayer,
             videoFormat = playerState.videoFormat,
             stereoMode = xrStereoMode,
-            interactionPolicy = surfaceControlsInteractionPolicy,
             zoomLevel = playerState.zoomLevel,
             headLockedRotation180 =
                 when {
@@ -714,10 +766,9 @@ fun SpatialVideoPlayerContent(
         if (isSurfaceReady) {
             val showImmersiveSubtitleContent =
                 shouldShowImmersiveSubtitlePanel(subtitlesPresent, showControls)
-            // Keep the SceneCore entity parented while its input component is disabled. XR Compose
-            // can deliver a queued event after the visibility state changes; removing the clicked
-            // entity immediately makes InteractionPolicy localize that event against a null parent.
-            // Move its surface off-screen while inactive so it cannot cover the controls ray target.
+            // Keep the visual subtitle entity parented across controls visibility changes, but do
+            // not attach an InteractionPolicy. Background input belongs to the retained plane.
+            // Move the subtitle surface off-screen while inactive so it cannot cover controls.
             if (shouldRetainImmersiveSubtitlePanel(subtitlesPresent)) {
                 SpatialPanel(
                     modifier = if (showImmersiveSubtitleContent) {
@@ -732,15 +783,6 @@ fun SpatialVideoPlayerContent(
                     } else {
                         buildHiddenSpatialPanelAnchorModifier()
                     },
-                    interactionPolicy = clickInteractionPolicy(
-                        isEnabled = showImmersiveSubtitleContent,
-                        isHandTrackingEnabled = isHandTrackingEnabled,
-                    ) {
-                        videoPlayerViewModel.setControlsVisibility(
-                            visible = targetControlsVisible,
-                            source = "immersive-subtitle-panel",
-                        )
-                    },
                 ) {
                     if (showImmersiveSubtitleContent) {
                         SubtitleCueOverlay(
@@ -748,56 +790,6 @@ fun SpatialVideoPlayerContent(
                             bottomPaddingFraction = SUBTITLE_DEFAULT_BOTTOM_PADDING_FRACTION,
                             fontId = playerState.subtitleFontId,
                             textSize = playerState.subtitleTextSize,
-                        )
-                    }
-                }
-            }
-
-            // Retain the reveal entity for the same queued-input lifetime. Its interaction
-            // component is disabled and its surface is moved off-screen while controls show.
-            if (playbackLayerPolicy.retainFallbackRevealLayer) {
-                SpatialPanel(
-                    modifier = if (playbackLayerPolicy.showFallbackRevealLayer) {
-                        buildImmersiveRevealInputModifier(
-                            dashboardPanelPose = dashboardPanelPose,
-                            headFollowPose = immersiveRevealHeadPose,
-                            density = density,
-                        )
-                    } else {
-                        buildHiddenSpatialPanelAnchorModifier()
-                    },
-                    interactionPolicy = clickInteractionPolicy(
-                        isEnabled = playbackLayerPolicy.showFallbackRevealLayer,
-                        isHandTrackingEnabled = isHandTrackingEnabled,
-                    ) {
-                        videoPlayerViewModel.setControlsVisibility(
-                            visible = targetControlsVisible,
-                            source = "immersive-fallback-panel",
-                        )
-                    },
-                ) {
-                    if (playbackLayerPolicy.showFallbackRevealLayer) {
-                        PlaybackScrollInputOverlay(
-                            showControls = false,
-                            inputEnabled = true,
-                            backgroundToggleEnabled = false,
-                            onKeyUp = { event ->
-                                videoPlayerViewModel.dispatchPlaybackKeyEvent(event)
-                            },
-                            onToggleControls = {
-                                videoPlayerViewModel.setControlsVisibility(
-                                    visible = targetControlsVisible,
-                                    source = "immersive-fallback-overlay",
-                                )
-                            },
-                            controlsInputLocked = playerState.controlsInputLocked,
-                            seekPreviewActive = playerState.seekPreviewActive,
-                            onHorizontalScrollDelta = { delta ->
-                                videoPlayerViewModel.handlePlaybackHorizontalScroll(delta)
-                            },
-                            onVerticalScrollDelta = { delta ->
-                                videoPlayerViewModel.handlePlaybackVerticalScroll(delta)
-                            },
                         )
                     }
                 }
@@ -893,7 +885,6 @@ fun SpatialVideoPlayerContent(
         Standard2DPlayer(
             exoPlayer = exoPlayer,
             stereoMode = xrStereoMode,
-            interactionPolicy = surfaceControlsInteractionPolicy,
             showControls = showControls,
             isSurfaceReady = isSurfaceReady,
             videoPlayerViewModel = videoPlayerViewModel,
@@ -979,7 +970,6 @@ private fun PlayerLoadingPanel(
 private fun Standard2DPlayer(
     exoPlayer: ExoPlayer?,
     stereoMode: StereoMode,
-    interactionPolicy: InteractionPolicy?,
     showControls: Boolean,
     isSurfaceReady: Boolean,
     videoPlayerViewModel: VideoPlayerViewModel,
@@ -1011,7 +1001,6 @@ private fun Standard2DPlayer(
                         resizePolicy = resizePolicy,
                     ),
                 stereoMode = stereoMode,
-                interactionPolicy = interactionPolicy,
             ) {
                 bindExoPlayerSurface(exoPlayer)
 
@@ -1200,39 +1189,43 @@ private fun buildHiddenSpatialPanelAnchorModifier(
             y = HIDDEN_MAIN_PANEL_OFFSET,
         )
 
-private fun buildImmersiveRevealInputModifier(
+private fun buildImmersiveBackgroundInputModifier(
     dashboardPanelPose: Pose?,
     headFollowPose: HeadFollowPose?,
     density: Density,
 ): SubspaceModifier {
     val baseModifier =
         SubspaceModifier
-            .width(IMMERSIVE_REVEAL_PANEL_WIDTH)
-            .height(IMMERSIVE_REVEAL_PANEL_HEIGHT)
+            .width(IMMERSIVE_BACKGROUND_INPUT_PANEL_WIDTH)
+            .height(IMMERSIVE_BACKGROUND_INPUT_PANEL_HEIGHT)
 
     if (headFollowPose != null) {
         return baseModifier
             .offset(
-                x = IMMERSIVE_REVEAL_FOLLOW_DISTANCE * headFollowPose.forward.x,
-                y = IMMERSIVE_REVEAL_FOLLOW_DISTANCE * headFollowPose.forward.y,
-                z = IMMERSIVE_REVEAL_FOLLOW_DISTANCE * headFollowPose.forward.z,
+                x = IMMERSIVE_BACKGROUND_INPUT_FOLLOW_DISTANCE * headFollowPose.forward.x,
+                y = IMMERSIVE_BACKGROUND_INPUT_FOLLOW_DISTANCE * headFollowPose.forward.y,
+                z = IMMERSIVE_BACKGROUND_INPUT_FOLLOW_DISTANCE * headFollowPose.forward.z,
             )
             .rotate(headFollowPose.rotation)
     }
 
     if (dashboardPanelPose == null) {
-        return baseModifier
+        return baseModifier.offset(
+            x = IMMERSIVE_BACKGROUND_INPUT_FOLLOW_DISTANCE * Vector3.Forward.x,
+            y = IMMERSIVE_BACKGROUND_INPUT_FOLLOW_DISTANCE * Vector3.Forward.y,
+            z = IMMERSIVE_BACKGROUND_INPUT_FOLLOW_DISTANCE * Vector3.Forward.z,
+        )
     }
 
     return baseModifier
         .offset(
             x = with(density) {
                 dashboardPanelPose.translation.x.toDp()
-            } * IMMERSIVE_REVEAL_FRONT_FACTOR,
+            } * IMMERSIVE_BACKGROUND_INPUT_FACTOR,
             y = with(density) { dashboardPanelPose.translation.y.toDp() },
             z = with(density) {
                 dashboardPanelPose.translation.z.toDp()
-            } * IMMERSIVE_REVEAL_FRONT_FACTOR,
+            } * IMMERSIVE_BACKGROUND_INPUT_FACTOR,
         )
         .rotate(dashboardPanelPose.rotation)
 }
@@ -1571,7 +1564,6 @@ fun ImmersivePlayer(
     exoPlayer: ExoPlayer?,
     videoFormat: VideoFormat,
     stereoMode: StereoMode,
-    interactionPolicy: InteractionPolicy?,
     zoomLevel: Float = 1f,
     headLockedRotation180: Quaternion? = null,
 ) {
@@ -1587,7 +1579,6 @@ fun ImmersivePlayer(
                 SpatialExternalSurfaceHemisphere(
                     modifier = hemisphereModifier.scale(zoomLevel.coerceIn(0.5f, 3f)),
                     stereoMode = stereoMode,
-                    interactionPolicy = interactionPolicy,
                 ) {
                     bindExoPlayerSurface(exoPlayer)
                 }
@@ -1599,7 +1590,6 @@ fun ImmersivePlayer(
                 SpatialExternalSurfaceSphere(
                     modifier = SubspaceModifier.scale(zoomLevel.coerceIn(0.5f, 3f)),
                     stereoMode = stereoMode,
-                    interactionPolicy = interactionPolicy,
                 ) {
                     bindExoPlayerSurface(exoPlayer)
                 }

@@ -5,11 +5,10 @@ import androidx.xr.runtime.math.Vector3
 private const val PLAYBACK_UI_HEAD_FOLLOW_DEAD_ZONE_COSINE = 0.9781476f // 12 degrees
 
 internal data class PlaybackLayerPolicy(
-    val retainFallbackRevealLayer: Boolean,
-    val showFallbackRevealLayer: Boolean,
-    val enableSurfaceToggleInput: Boolean,
+    val retainBackgroundInputLayer: Boolean,
+    val showHiddenControlsInputOverlay: Boolean,
+    val enableBackgroundToggleInput: Boolean,
     val showControlsLayer: Boolean,
-    val subtitleAcceptsInput: Boolean = false,
 )
 
 internal fun resolvePlaybackLayerPolicy(
@@ -26,9 +25,12 @@ internal fun resolvePlaybackLayerPolicy(
                 !seekPreviewActive &&
                 !navigationExitPending
     return PlaybackLayerPolicy(
-        retainFallbackRevealLayer = isSurfaceReady && isImmersive,
-        showFallbackRevealLayer = isImmersive && canHandleBackgroundToggle && !showControls,
-        enableSurfaceToggleInput = isImmersive && canHandleBackgroundToggle,
+        // Keep the entity parented through ExoPlayer BUFFERING transitions. Input is disabled
+        // below while the surface is not ready, but queued XR events can still finish safely.
+        retainBackgroundInputLayer = isImmersive,
+        showHiddenControlsInputOverlay =
+            isImmersive && canHandleBackgroundToggle && !showControls,
+        enableBackgroundToggleInput = isImmersive && canHandleBackgroundToggle,
         showControlsLayer = isSurfaceReady && showControls,
     )
 }
