@@ -309,6 +309,10 @@ private data class HeadFollowPose(
     val forward: Vector3,
 )
 
+internal fun resolveHeadFollowPanelRotation(viewForward: Vector3): Quaternion =
+    // SpatialPanel renders its front face along local +Z, back toward the viewer.
+    Quaternion.fromLookTowards(-viewForward, Vector3.Up)
+
 @OptIn(UnstableApi::class)
 @Composable
 fun VideoPlayerScreen(
@@ -519,7 +523,7 @@ fun SpatialVideoPlayerContent(
             if (blendedForward.lengthSquared < 1e-6f) return@collect
             smoothedForward = blendedForward.toNormalized()
 
-            val targetRotation = Quaternion.fromLookTowards(smoothedForward!!, Vector3.Up)
+            val targetRotation = resolveHeadFollowPanelRotation(smoothedForward!!)
             smoothedRotation =
                 if (smoothedRotation == null) {
                     targetRotation

@@ -1,14 +1,28 @@
 package blackark.app.vr.ui.screens
 
 import androidx.compose.ui.unit.dp
+import androidx.xr.runtime.math.Vector3
 import androidx.xr.scenecore.InputEvent
 import blackark.app.vr.ui.viewmodel.PlaybackMenu
 import blackark.app.vr.ui.viewmodel.VideoFormat
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PlaybackLayerPolicyTest {
+
+    @Test
+    fun `head-follow panel front faces back toward the viewer`() {
+        val viewForward = Vector3(x = 0.6f, y = 0f, z = -0.8f)
+
+        val rotation = resolveHeadFollowPanelRotation(viewForward)
+        val panelFront = rotation * Vector3.Backward
+
+        assertEquals(-viewForward.x, panelFront.x, 0.0001f)
+        assertEquals(-viewForward.y, panelFront.y, 0.0001f)
+        assertEquals(-viewForward.z, panelFront.z, 0.0001f)
+    }
 
     @Test
     fun `spatial release reveals controls without requiring a hit position`() {
