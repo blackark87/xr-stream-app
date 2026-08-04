@@ -469,7 +469,7 @@ fun SpatialVideoPlayerContent(
     // Keep the Activity main panel alive while this screen is a pure Subspace composition.
     // The anchor stays off-screen so the dashboard panel does not cover video playback.
     SpatialMainPanel(
-        modifier = buildHiddenMainPanelAnchorModifier(),
+        modifier = buildHiddenSpatialPanelAnchorModifier(),
     )
 
     val enableHeadFollowIn2D = playerState.videoFormat == VideoFormat.Format2D
@@ -650,16 +650,21 @@ fun SpatialVideoPlayerContent(
             // Keep the SceneCore entity parented while its input component is disabled. XR Compose
             // can deliver a queued event after the visibility state changes; removing the clicked
             // entity immediately makes InteractionPolicy localize that event against a null parent.
+            // Move its surface off-screen while inactive so it cannot cover the controls ray target.
             if (shouldRetainImmersiveSubtitlePanel(subtitlesPresent)) {
                 SpatialPanel(
-                    modifier = buildImmersiveSubtitleModifier(
-                        dashboardPanelPose = dashboardPanelPose,
-                        density = density,
-                        distanceMeters = playerState.immersiveSubtitleDistanceMeters,
-                        horizontalOffsetMeters = playerState.immersiveUiHorizontalOffsetMeters,
-                        verticalOffsetMeters =
-                            playerState.immersiveSubtitleVerticalOffsetMeters,
-                    ),
+                    modifier = if (showImmersiveSubtitleContent) {
+                        buildImmersiveSubtitleModifier(
+                            dashboardPanelPose = dashboardPanelPose,
+                            density = density,
+                            distanceMeters = playerState.immersiveSubtitleDistanceMeters,
+                            horizontalOffsetMeters = playerState.immersiveUiHorizontalOffsetMeters,
+                            verticalOffsetMeters =
+                                playerState.immersiveSubtitleVerticalOffsetMeters,
+                        )
+                    } else {
+                        buildHiddenSpatialPanelAnchorModifier()
+                    },
                     interactionPolicy = clickInteractionPolicy(
                         isEnabled = showImmersiveSubtitleContent,
                         isHandTrackingEnabled = isHandTrackingEnabled,
@@ -681,15 +686,19 @@ fun SpatialVideoPlayerContent(
                 }
             }
 
-            // Retain the transparent reveal entity for the same queued-input lifetime. Its
-            // interaction component and Compose input content are disabled while controls show.
+            // Retain the reveal entity for the same queued-input lifetime. Its interaction
+            // component is disabled and its surface is moved off-screen while controls show.
             if (playbackLayerPolicy.retainFallbackRevealLayer) {
                 SpatialPanel(
-                    modifier = buildImmersiveRevealInputModifier(
-                        dashboardPanelPose = dashboardPanelPose,
-                        headFollowPose = immersiveRevealHeadPose,
-                        density = density,
-                    ),
+                    modifier = if (playbackLayerPolicy.showFallbackRevealLayer) {
+                        buildImmersiveRevealInputModifier(
+                            dashboardPanelPose = dashboardPanelPose,
+                            headFollowPose = immersiveRevealHeadPose,
+                            density = density,
+                        )
+                    } else {
+                        buildHiddenSpatialPanelAnchorModifier()
+                    },
                     interactionPolicy = clickInteractionPolicy(
                         isEnabled = playbackLayerPolicy.showFallbackRevealLayer,
                         isHandTrackingEnabled = isHandTrackingEnabled,
@@ -1185,7 +1194,7 @@ private fun buildFlatSurfaceModifier(
         .rotate(headFollowPose.rotation)
 }
 
-private fun buildHiddenMainPanelAnchorModifier(
+private fun buildHiddenSpatialPanelAnchorModifier(
 ): SubspaceModifier =
     SubspaceModifier
         .width(HIDDEN_MAIN_PANEL_ANCHOR_SIZE)
