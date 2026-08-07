@@ -159,13 +159,14 @@ import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupPositionProvider
 import androidx.compose.ui.window.PopupProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.navigation.NavController
+import androidx.media3.common.AudioAttributes
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
+import androidx.navigation.NavController
 import androidx.xr.compose.spatial.ContentEdge
 import androidx.xr.compose.spatial.Orbiter
 import androidx.xr.compose.spatial.OrbiterOffsetType
@@ -2066,7 +2067,8 @@ private fun MotionVideoPreview(
                 )
             }
             builder.build().apply {
-                volume = 0f
+                volume = 1f
+                setAudioAttributes(AudioAttributes.DEFAULT, true)
                 repeatMode = Player.REPEAT_MODE_OFF
                 setMediaItem(MediaItem.fromUri(videoPath))
                 addListener(object : Player.Listener {
@@ -2110,7 +2112,8 @@ private fun MotionVideoPreview(
             previewPlayer = player
             Log.d(
                 "MotionVideoPreview",
-                "Preparing source=$source path=$videoPath limitMs=$playbackLimitMs",
+                "Preparing source=$source path=$videoPath limitMs=$playbackLimitMs " +
+                    "volume=${player.volume}",
             )
             val isReady = withTimeoutOrNull(20_000L) { readySignal.await() } == true
             if (!isReady) {
@@ -4135,6 +4138,7 @@ fun MainDashboardScreen(
                                         files = files,
                                         favoritePaths = favoritePaths,
                                         currentPath = uiState.currentPath,
+                                        hasPathHistory = uiState.pathHistory.isNotEmpty(),
                                         sourceTitle = contentSourceTitle,
                                         breadcrumb = contentSourceBreadcrumb,
                                         metadataRefreshToken = uiState.fileMetadataRefreshToken,
@@ -4349,6 +4353,7 @@ fun MainDashboardScreen(
                                         files = files,
                                         favoritePaths = favoritePaths,
                                         currentPath = uiState.currentPath,
+                                        hasPathHistory = uiState.pathHistory.isNotEmpty(),
                                         sourceTitle = contentSourceTitle,
                                         breadcrumb = contentSourceBreadcrumb,
                                         metadataRefreshToken = uiState.fileMetadataRefreshToken,
@@ -5091,6 +5096,7 @@ private fun FileBrowserPanel(
     files: List<SMBFileItem>,
     favoritePaths: Set<String>,
     currentPath: String,
+    hasPathHistory: Boolean,
     sourceTitle: String,
     breadcrumb: String?,
     metadataRefreshToken: Long,
@@ -5152,8 +5158,10 @@ private fun FileBrowserPanel(
             }
         } ?: currentPath
     }
+    val canNavigateToParent =
+        hasPathHistory || (currentPath.isNotEmpty() && currentPath != "/")
     val canNavigateUp =
-        (activeVirtualGroup != null || (currentPath.isNotEmpty() && currentPath != "/")) && !isDeleteMode
+        (activeVirtualGroup != null || canNavigateToParent) && !isDeleteMode
     val navigateUpLabel =
         if (activeVirtualGroup != null) {
             stringResource(R.string.back_to_folder_list)
@@ -5249,7 +5257,7 @@ private fun FileBrowserPanel(
             return true
         }
 
-        if (activeVirtualGroupKey != null || (currentPath.isNotEmpty() && currentPath != "/")) {
+        if (activeVirtualGroupKey != null || canNavigateToParent) {
             handleBackAction()
             return true
         }
@@ -5262,7 +5270,7 @@ private fun FileBrowserPanel(
         showDeleteConfirmDialog ||
                 isDeleteMode ||
                 activeVirtualGroupKey != null ||
-                (currentPath.isNotEmpty() && currentPath != "/")
+                canNavigateToParent
 
     BackHandler(enabled = shouldHandleSystemBack) {
         backHandlerState.value.invoke()

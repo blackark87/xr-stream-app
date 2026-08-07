@@ -2,6 +2,7 @@ package blackark.app.vr.ui.viewmodel
 
 import android.content.Context
 import android.net.Uri
+import android.provider.DocumentsContract
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -106,6 +107,14 @@ enum class FileBrowserSortMode {
     FilenameDescending,
 }
 
+internal fun resolveRelativeBrowserParentPath(currentPath: String): String? {
+    val normalized = currentPath
+        .replace('\\', '/')
+        .trim('/')
+    if (normalized.isBlank()) return null
+    return normalized.substringBeforeLast('/', missingDelimiterValue = "")
+}
+
 class MainDashboardViewModel(
     private val context: Context,
     private val serverRepository: ServerRepository,
@@ -197,6 +206,7 @@ class MainDashboardViewModel(
 
     private var smbClient: SMBClient? = null
     private var localClient: LocalFileClient? = null
+    private var fileLoadJob: Job? = null
     private var avScanJob: Job? = null
     private var avVisibleSyncJob: Job? = null
     private var avCastRepairJob: Job? = null
@@ -544,6 +554,8 @@ class MainDashboardViewModel(
     }
 
     fun disconnect() {
+        fileLoadJob?.cancel()
+        fileLoadJob = null
         avScanJob?.cancel()
         avScanJob = null
         avVisibleSyncJob?.cancel()
@@ -577,7 +589,8 @@ class MainDashboardViewModel(
         path: String,
         fallbackToRootOnFailure: Boolean = false,
     ) {
-        viewModelScope.launch {
+        fileLoadJob?.cancel()
+        fileLoadJob = viewModelScope.launch {
             _uiState.value = _uiState.value.copy(
                 isLoadingFiles = true,
                 errorMessage = null
@@ -732,15 +745,46 @@ class MainDashboardViewModel(
         return AppSettingsStore.getLocalStorageTreeUri(context.applicationContext)
     }
 
-    fun navigateBack() {
+    fun navigateBack(): Boolean {
+        val currentState = _uiState.value
         val history = _uiState.value.pathHistory
-        if (history.isEmpty()) return
-
-        val previousPath = history.last()
-        val newHistory = history.dropLast(1)
+        val previousPath = history.lastOrNull() ?: resolveRestoredPathParent(
+            currentPath = currentState.currentPath,
+        ) ?: return false
+        val newHistory = if (history.isEmpty()) emptyList() else history.dropLast(1)
 
         _uiState.value = _uiState.value.copy(pathHistory = newHistory)
+        Log.d(
+            "FileBrowserBack",
+            "Navigate current=${currentState.currentPath} parent=$previousPath " +
+                "source=${if (history.isEmpty()) "derived" else "history"}",
+        )
         loadFiles(previousPath)
+        return true
+    }
+
+    private fun resolveRestoredPathParent(currentPath: String): String? {
+        if (currentPath.isBlank() || currentPath == "/") return null
+
+        if (localClient != null) {
+            val rootTreeUri = _uiState.value.selectedServer
+                ?.shareName
+                ?.takeIf { it.isNotBlank() }
+                ?: AppSettingsStore.getLocalStorageTreeUri(context.applicationContext)
+            if (rootTreeUri.isNullOrBlank()) return ""
+
+            val parentUri = LocalFileClient.resolveParentDirectoryUri(
+                rootTreeUri = rootTreeUri,
+                childDocumentUri = currentPath,
+            ) ?: ""
+            return runCatching {
+                val rootDocumentId = DocumentsContract.getTreeDocumentId(Uri.parse(rootTreeUri))
+                val parentDocumentId = DocumentsContract.getDocumentId(Uri.parse(parentUri))
+                if (parentDocumentId == rootDocumentId) "" else parentUri
+            }.getOrDefault(parentUri)
+        }
+
+        return resolveRelativeBrowserParentPath(currentPath)
     }
 
     fun toggleFavoriteForFile(file: SMBFileItem, currentIsFavorite: Boolean) {
