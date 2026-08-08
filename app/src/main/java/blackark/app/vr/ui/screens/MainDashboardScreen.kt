@@ -90,6 +90,8 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SortByAlpha
 import androidx.compose.material.icons.filled.South
 import androidx.compose.material.icons.filled.ViewModule
+import androidx.compose.material.icons.filled.VolumeOff
+import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -146,6 +148,7 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -186,6 +189,7 @@ import androidx.xr.runtime.math.Pose
 import blackark.app.vr.AppState
 import blackark.app.vr.BuildConfig
 import blackark.app.vr.R
+import blackark.app.vr.XRStreamApplication
 import blackark.app.vr.data.database.entity.FavoriteVideo
 import blackark.app.vr.data.database.entity.RecentVideo
 import blackark.app.vr.data.database.entity.SavedServer
@@ -198,6 +202,8 @@ import blackark.app.vr.network.SMBClient
 import blackark.app.vr.network.SMBFileItem
 import blackark.app.vr.network.SmbEndpointParser
 import blackark.app.vr.player.SMBDataSource
+import blackark.app.vr.remote.RemoteConfigStatus
+import blackark.app.vr.remote.UpdateState
 import blackark.app.vr.ui.ApplyHandTrackingPreference
 import blackark.app.vr.ui.components.EmptyState
 import blackark.app.vr.ui.components.FancyFileCard
@@ -241,12 +247,14 @@ import blackark.app.vr.utils.MIN_IMMERSIVE_UI_HORIZONTAL_OFFSET_METERS
 import blackark.app.vr.utils.ThumbnailImageLoaderProvider
 import blackark.app.vr.utils.VideoThumbnailFetcher
 import blackark.app.vr.utils.extractNormalizedCodeFromFileName
+import blackark.app.vr.utils.togglePreviewMute
 import blackark.app.vr.utils.extractVirtualGroupKey
 import blackark.app.vr.utils.groupMultipartVideoFiles
 import blackark.app.vr.utils.BrowserFolderArtworkKind
 import blackark.app.vr.utils.extractVirtualGroupPart
 import blackark.app.vr.utils.parseVideoIdentity
 import blackark.app.vr.utils.resolveParentFolderBaseName
+import blackark.app.vr.remote.RuntimeConfigRegistry
 import coil3.compose.AsyncImage
 import coil3.compose.rememberAsyncImagePainter
 import coil3.request.CachePolicy
@@ -263,6 +271,7 @@ import java.time.LocalDate
 import java.time.ZoneId
 import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
+import java.security.MessageDigest
 import kotlin.math.roundToInt
 import androidx.xr.compose.subspace.layout.onGloballyPositioned as onSubspaceGloballyPositioned
 
@@ -1852,9 +1861,16 @@ private fun DashboardPreviewPanel(
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
+    val appContext = context.applicationContext
     val previewScrollState = rememberScrollState()
     val previewMetadata = rememberPreviewMetadata(previewItem)
     val resolvedTitle = previewMetadata?.title?.takeIf { it.isNotBlank() } ?: previewItem?.title
+    var previewVolume by remember(appContext) {
+        mutableStateOf(AppSettingsStore.getPreviewVolume(appContext))
+    }
+    var lastAudiblePreviewVolume by remember(appContext) {
+        mutableStateOf(AppSettingsStore.getLastAudiblePreviewVolume(appContext))
+    }
 
     Card(
         modifier = modifier,
@@ -1960,6 +1976,7 @@ private fun DashboardPreviewPanel(
                                 MotionVideoPreview(
                                     videoPath = previewSpec.trailerPath,
                                     source = "trailer",
+                                    previewVolume = previewVolume,
                                     modifier = Modifier.fillMaxSize(),
                                 )
                             }
@@ -1977,10 +1994,49 @@ private fun DashboardPreviewPanel(
                                 MotionVideoPreview(
                                     videoPath = previewSpec.fallbackVideoPath,
                                     source = "main-fallback",
-                                    playbackLimitMs = MAIN_VIDEO_PREVIEW_DURATION_MS,
+                                    playbackLimitMs =
+                                        RuntimeConfigRegistry.current.preview.mainVideoDurationMs,
+                                    previewVolume = previewVolume,
                                     modifier = Modifier.fillMaxSize(),
                                 )
                             }
+                        }
+
+                        val showsMotionPreview =
+                            motionPreviewEnabled &&
+                                (
+                                    previewSpec.trailerPath != null ||
+                                        (
+                                            extraFanartPaths != null &&
+                                                extraFanartPaths.isNullOrEmpty() &&
+                                                previewSpec.fallbackVideoPath != null
+                                        )
+                                )
+                        if (showsMotionPreview) {
+                            PreviewVolumeControl(
+                                volume = previewVolume,
+                                onVolumeChange = { volume ->
+                                    previewVolume = volume.coerceIn(0f, 1f)
+                                    if (previewVolume > 0f) {
+                                        lastAudiblePreviewVolume = previewVolume
+                                    }
+                                },
+                                onVolumeChangeFinished = {
+                                    AppSettingsStore.setPreviewVolume(appContext, previewVolume)
+                                },
+                                onMuteToggle = {
+                                    val toggled = togglePreviewMute(
+                                        currentVolume = previewVolume,
+                                        lastAudibleVolume = lastAudiblePreviewVolume,
+                                    )
+                                    previewVolume = toggled.volume
+                                    lastAudiblePreviewVolume = toggled.lastAudibleVolume
+                                    AppSettingsStore.setPreviewVolume(appContext, previewVolume)
+                                },
+                                modifier = Modifier
+                                    .align(Alignment.BottomEnd)
+                                    .padding(12.dp),
+                            )
                         }
                     }
                 } else {
@@ -2029,19 +2085,19 @@ private fun DashboardPreviewPanel(
     }
 }
 
-private const val MAIN_VIDEO_PREVIEW_DURATION_MS = 60_000L
-
 @Composable
 private fun MotionVideoPreview(
     videoPath: String,
     source: String,
     playbackLimitMs: Long? = null,
+    previewVolume: Float,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
     val appContext = context.applicationContext
     if (videoPath.isBlank()) return
     val isSmb = videoPath.startsWith("smb://", ignoreCase = true)
+    val focusDelayMs = RuntimeConfigRegistry.current.preview.focusDelayMs
     val enabled = remember(videoPath) {
         isMotionPreviewEnabled(appContext, videoPath)
     }
@@ -2049,8 +2105,8 @@ private fun MotionVideoPreview(
 
     var previewPlayer by remember(videoPath, source) { mutableStateOf<ExoPlayer?>(null) }
     var hasRenderedFirstFrame by remember(videoPath, source) { mutableStateOf(false) }
-    LaunchedEffect(videoPath, source, playbackLimitMs) {
-        delay(800L)
+    LaunchedEffect(videoPath, source, playbackLimitMs, focusDelayMs) {
+        delay(focusDelayMs)
         val readySignal = CompletableDeferred<Boolean>()
         val firstFrameSignal = CompletableDeferred<Unit>()
         val endedSignal = CompletableDeferred<Unit>()
@@ -2067,7 +2123,7 @@ private fun MotionVideoPreview(
                 )
             }
             builder.build().apply {
-                volume = 1f
+                volume = previewVolume.coerceIn(0f, 1f)
                 setAudioAttributes(AudioAttributes.DEFAULT, true)
                 repeatMode = Player.REPEAT_MODE_OFF
                 setMediaItem(MediaItem.fromUri(videoPath))
@@ -2166,6 +2222,10 @@ private fun MotionVideoPreview(
         }
     }
 
+    LaunchedEffect(previewPlayer, previewVolume) {
+        previewPlayer?.volume = previewVolume.coerceIn(0f, 1f)
+    }
+
     previewPlayer?.let { player ->
         AndroidView(
             modifier = modifier
@@ -2182,11 +2242,58 @@ private fun MotionVideoPreview(
     }
 }
 
+@Composable
+private fun PreviewVolumeControl(
+    volume: Float,
+    onVolumeChange: (Float) -> Unit,
+    onVolumeChangeFinished: () -> Unit,
+    onMuteToggle: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier,
+        color = Color.Black.copy(alpha = 0.78f),
+        shape = RoundedCornerShape(999.dp),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(
+                onClick = onMuteToggle,
+                modifier = Modifier.size(40.dp),
+            ) {
+                Icon(
+                    imageVector = if (volume > 0f) Icons.Filled.VolumeUp else Icons.Filled.VolumeOff,
+                    contentDescription = stringResource(
+                        if (volume > 0f) R.string.preview_mute else R.string.preview_unmute,
+                    ),
+                    tint = Color.White,
+                )
+            }
+            Slider(
+                value = volume.coerceIn(0f, 1f),
+                onValueChange = onVolumeChange,
+                onValueChangeFinished = onVolumeChangeFinished,
+                modifier = Modifier.width(150.dp),
+            )
+            Text(
+                text = "${(volume * 100).toInt()}%",
+                color = Color.White,
+                style = MaterialTheme.typography.labelMedium,
+                textAlign = TextAlign.End,
+                modifier = Modifier.width(44.dp),
+            )
+        }
+    }
+}
+
 private fun isMotionPreviewEnabled(context: Context, path: String?): Boolean {
     if (path.isNullOrBlank()) return false
     val appContext = context.applicationContext
     val isSmb = path.startsWith("smb://", ignoreCase = true)
     return AppSettingsStore.isLibraryHoverPreviewEnabled(appContext) &&
+        RuntimeConfigRegistry.current.features.motionPreviewEnabled &&
         (!isSmb || AppSettingsStore.isSmbHoverPreviewEnabled(appContext))
 }
 
@@ -2197,13 +2304,14 @@ private fun ExtraFanartSlideshow(
 ) {
     if (imagePaths.isEmpty()) return
     val context = LocalContext.current
+    val fanartIntervalMs = RuntimeConfigRegistry.current.preview.fanartIntervalMs
     var currentIndex by remember(imagePaths) { mutableStateOf(0) }
 
     LaunchedEffect(imagePaths) {
         currentIndex = 0
         if (imagePaths.size <= 1) return@LaunchedEffect
         while (true) {
-            delay(4_000L)
+            delay(fanartIntervalMs)
             currentIndex = (currentIndex + 1) % imagePaths.size
         }
     }
@@ -2491,13 +2599,16 @@ private data class AppVersionInfo(
     val releaseChannel: String,
     val gitSha: String,
     val buildTimeUtc: String,
+    val signingCertificateSha256: String,
 )
 
 private fun resolveAppVersionInfo(context: Context): AppVersionInfo {
     val packageInfo = runCatching {
         context.packageManager.getPackageInfo(
             context.packageName,
-            android.content.pm.PackageManager.PackageInfoFlags.of(0),
+            android.content.pm.PackageManager.PackageInfoFlags.of(
+                android.content.pm.PackageManager.GET_SIGNING_CERTIFICATES.toLong()
+            ),
         )
     }.getOrNull()
 
@@ -2511,9 +2622,17 @@ private fun resolveAppVersionInfo(context: Context): AppVersionInfo {
     }
     val internalVersion = BuildConfig.INTERNAL_DISPLAY_VERSION.ifBlank {
         val channel = BuildConfig.INTERNAL_RELEASE_CHANNEL.ifBlank { "internal" }
-        val minor = BuildConfig.INTERNAL_MINOR_VERSION.takeIf { it >= 0 } ?: 0
-        "$channel.$minor"
+        channel
     }
+    val signingCertificateSha256 = packageInfo?.signingInfo?.apkContentsSigners
+        ?.firstOrNull()
+        ?.toByteArray()
+        ?.let { certificate ->
+            MessageDigest.getInstance("SHA-256")
+                .digest(certificate)
+                .joinToString("") { byte -> "%02x".format(byte.toInt() and 0xff) }
+        }
+        ?: "Unknown"
 
     return AppVersionInfo(
         packageVersionName = packageVersionName,
@@ -2523,6 +2642,7 @@ private fun resolveAppVersionInfo(context: Context): AppVersionInfo {
         releaseChannel = BuildConfig.INTERNAL_RELEASE_CHANNEL.ifBlank { "unknown" },
         gitSha = BuildConfig.INTERNAL_GIT_SHA.ifBlank { "unknown" },
         buildTimeUtc = BuildConfig.INTERNAL_BUILD_TIME_UTC.ifBlank { "unknown" },
+        signingCertificateSha256 = signingCertificateSha256,
     )
 }
 
@@ -2803,6 +2923,10 @@ private fun SettingsPanel(
                 },
             )
 
+            HorizontalDivider(color = DividerGray)
+
+            GitHubRemoteSettingsSection()
+
             MetadataScopeSettingsSection(
                 servers = servers.filterNot(SavedServer::isLocalStorage),
                 selectedServer = selectedServer?.takeUnless(SavedServer::isLocalStorage),
@@ -2942,6 +3066,10 @@ private fun SettingsPanel(
             SettingsValueRow(
                 title = stringResource(R.string.git_commit),
                 value = versionInfo.gitSha,
+            )
+            SettingsValueRow(
+                title = stringResource(R.string.signing_certificate_sha256),
+                value = versionInfo.signingCertificateSha256,
             )
             SettingsValueRow(
                 title = stringResource(R.string.build_time_utc),
@@ -3507,11 +3635,230 @@ private fun SettingsValueRow(
             text = title,
             style = MaterialTheme.typography.titleMedium,
             color = TextPrimary,
+            modifier = Modifier.weight(0.42f),
         )
+        Spacer(modifier = Modifier.width(16.dp))
         Text(
             text = value,
             style = MaterialTheme.typography.bodyMedium,
             color = TextSecondary,
+            textAlign = TextAlign.End,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(0.58f),
+        )
+    }
+}
+
+@Composable
+private fun GitHubRemoteSettingsSection() {
+    val context = LocalContext.current.applicationContext
+    val application = remember(context) { context as XRStreamApplication }
+    val repository = application.container.runtimeConfigRepository
+    val credentialStore = application.container.githubCredentialStore
+    val updateManager = application.container.appUpdateManager
+    val snapshot by repository.snapshot.collectAsStateWithLifecycle()
+    val status by repository.status.collectAsStateWithLifecycle()
+    val updateState by updateManager.state.collectAsStateWithLifecycle()
+    val scope = rememberCoroutineScope()
+    var tokenInput by rememberSaveable { mutableStateOf("") }
+    var hasToken by remember { mutableStateOf(credentialStore.hasToken()) }
+    var isWorking by remember { mutableStateOf(false) }
+    var feedback by remember { mutableStateOf<String?>(null) }
+
+    val statusLabel = when (val current = status) {
+        RemoteConfigStatus.Idle -> stringResource(R.string.remote_config_status_idle)
+        RemoteConfigStatus.Checking -> stringResource(R.string.remote_config_status_checking)
+        RemoteConfigStatus.AuthenticationRequired -> stringResource(
+            R.string.remote_config_status_auth_required
+        )
+        is RemoteConfigStatus.Ready -> stringResource(
+            if (current.changed) {
+                R.string.remote_config_status_updated
+            } else {
+                R.string.remote_config_status_current
+            }
+        )
+        is RemoteConfigStatus.Failed -> current.message
+    }
+    val updateLabel = when (val current = updateState) {
+        UpdateState.Idle -> stringResource(R.string.update_status_idle)
+        UpdateState.Checking -> stringResource(R.string.update_status_checking)
+        is UpdateState.UpToDate -> stringResource(R.string.update_status_current)
+        is UpdateState.Available -> stringResource(
+            R.string.update_status_available,
+            current.release.versionName,
+        )
+        is UpdateState.Downloading -> stringResource(
+            R.string.update_status_downloading,
+            (current.progress * 100f).roundToInt(),
+        )
+        is UpdateState.ReadyToInstall -> stringResource(R.string.update_status_ready)
+        is UpdateState.Installing -> stringResource(R.string.update_status_installing)
+        is UpdateState.Failed -> current.message
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text(
+            text = stringResource(R.string.internal_updates),
+            style = MaterialTheme.typography.titleLarge,
+            color = TextPrimary,
+        )
+        Text(
+            text = stringResource(R.string.internal_updates_description),
+            style = MaterialTheme.typography.bodySmall,
+            color = TextTertiary,
+        )
+        OutlinedTextField(
+            value = tokenInput,
+            onValueChange = { tokenInput = it },
+            modifier = Modifier.fillMaxWidth(),
+            enabled = !isWorking,
+            singleLine = true,
+            label = { Text(stringResource(R.string.github_pat)) },
+            placeholder = {
+                Text(
+                    stringResource(
+                        if (hasToken) R.string.github_pat_saved else R.string.github_pat_placeholder
+                    )
+                )
+            },
+            visualTransformation = PasswordVisualTransformation(),
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(
+                enabled = tokenInput.isNotBlank() && !isWorking,
+                onClick = {
+                    scope.launch {
+                        isWorking = true
+                        feedback = null
+                        val candidate = tokenInput.trim()
+                        repository.testToken(candidate)
+                            .onSuccess {
+                                credentialStore.saveToken(candidate)
+                                tokenInput = ""
+                                hasToken = true
+                                val refreshed = repository.refresh()
+                                updateManager.check(repository.snapshot.value)
+                                feedback = if (refreshed is RemoteConfigStatus.Failed) {
+                                    refreshed.message
+                                } else {
+                                    context.getString(R.string.github_pat_saved_and_connected)
+                                }
+                            }
+                            .onFailure { error ->
+                                feedback = error.message
+                                    ?: context.getString(R.string.github_pat_connection_failed)
+                            }
+                        isWorking = false
+                    }
+                },
+            ) {
+                Text(stringResource(R.string.save_and_test))
+            }
+            Button(
+                enabled = hasToken && !isWorking,
+                onClick = {
+                    scope.launch {
+                        isWorking = true
+                        val token = credentialStore.getToken()
+                        val result = token?.let { repository.testToken(it) }
+                            ?: Result.failure(IllegalStateException(
+                                context.getString(R.string.github_pat_missing)
+                            ))
+                        feedback = result.fold(
+                            onSuccess = { context.getString(R.string.connection_successful) },
+                            onFailure = { it.message ?: context.getString(R.string.connection_failed) },
+                        )
+                        isWorking = false
+                    }
+                },
+            ) {
+                Text(stringResource(R.string.test_connection))
+            }
+            TextButton(
+                enabled = hasToken && !isWorking,
+                onClick = {
+                    credentialStore.clearToken()
+                    hasToken = false
+                    tokenInput = ""
+                    feedback = context.getString(R.string.github_pat_deleted)
+                },
+            ) {
+                Text(stringResource(R.string.delete), color = NetflixRed)
+            }
+        }
+        Button(
+            enabled = hasToken && !isWorking,
+            onClick = {
+                scope.launch {
+                    isWorking = true
+                    val refreshed = repository.refresh()
+                    updateManager.check(repository.snapshot.value)
+                    feedback = when (refreshed) {
+                        is RemoteConfigStatus.Failed -> refreshed.message
+                        RemoteConfigStatus.AuthenticationRequired -> context.getString(
+                            R.string.github_pat_missing
+                        )
+                        else -> context.getString(R.string.remote_check_complete)
+                    }
+                    isWorking = false
+                }
+            },
+        ) {
+            Text(stringResource(R.string.check_now))
+        }
+        when (val currentUpdate = updateState) {
+            is UpdateState.Available -> {
+                Button(
+                    enabled = hasToken && !isWorking,
+                    onClick = {
+                        scope.launch {
+                            updateManager.downloadAndVerify(currentUpdate.release)
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = NetflixRed),
+                ) {
+                    Text(stringResource(R.string.update_now))
+                }
+            }
+            is UpdateState.ReadyToInstall -> {
+                Button(
+                    onClick = { updateManager.requestInstall() },
+                    colors = ButtonDefaults.buttonColors(containerColor = NetflixRed),
+                ) {
+                    Text(stringResource(R.string.install))
+                }
+            }
+            else -> Unit
+        }
+        if (isWorking) {
+            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+        }
+        feedback?.let {
+            Text(it, style = MaterialTheme.typography.bodySmall, color = TextSecondary)
+        }
+        SettingsValueRow(
+            title = stringResource(R.string.remote_config_status),
+            value = statusLabel,
+        )
+        SettingsValueRow(
+            title = stringResource(R.string.runtime_config_source),
+            value = snapshot.source.name,
+        )
+        SettingsValueRow(
+            title = stringResource(R.string.manifest_sha),
+            value = snapshot.manifestSha?.take(12) ?: stringResource(R.string.not_available),
+        )
+        SettingsValueRow(
+            title = stringResource(R.string.last_remote_check),
+            value = repository.lastCheckedAt()
+                ?.let { Instant.ofEpochMilli(it).toString() }
+                ?: stringResource(R.string.never),
+        )
+        SettingsValueRow(
+            title = stringResource(R.string.app_update_status),
+            value = updateLabel,
         )
     }
 }
@@ -3568,6 +3915,13 @@ fun MainDashboardScreen(
     hasHandTrackingPermission: Boolean,
 ) {
     val context = LocalContext.current
+    val xrApplication = remember(context) {
+        context.applicationContext as XRStreamApplication
+    }
+    val runtimeConfigSnapshot by xrApplication.container.runtimeConfigRepository.snapshot
+        .collectAsStateWithLifecycle()
+    val appUpdateState by xrApplication.container.appUpdateManager.state
+        .collectAsStateWithLifecycle()
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val servers by viewModel.servers.collectAsStateWithLifecycle()
     val metadataScopes by viewModel.metadataScopes.collectAsStateWithLifecycle()
@@ -3605,12 +3959,21 @@ fun MainDashboardScreen(
     var activeSettingsAction by remember { mutableStateOf<SettingsAction?>(null) }
     var settingsFeedback by remember { mutableStateOf<SettingsFeedback?>(null) }
     var pendingHomeVideo by remember { mutableStateOf<LibraryVideoItem?>(null) }
+    var deferredUpdateVersionCode by rememberSaveable { mutableStateOf<Long?>(null) }
     val dashboardScope = rememberCoroutineScope()
     val appVersionInfo = remember(context) { resolveAppVersionInfo(context) }
     val shouldShowControllerHandTrackingPrompt =
         hasControllerLikeInputDevice &&
                 uiState.isHandTrackingEnabled &&
                 !uiState.isControllerHandTrackingPromptHandled
+
+    LaunchedEffect(
+        runtimeConfigSnapshot.manifestSha,
+        runtimeConfigSnapshot.manifest?.release?.versionCode,
+    ) {
+        xrApplication.container.appUpdateManager.check(runtimeConfigSnapshot)
+    }
+
     fun clearAllPreviewItems() {
         browserPreviewItem = null
         libraryPreviewItem = null
@@ -4618,6 +4981,178 @@ fun MainDashboardScreen(
         )
     }
 
+    when (val update = appUpdateState) {
+        is UpdateState.Available -> {
+            if (deferredUpdateVersionCode != update.release.versionCode) {
+                AlertDialog(
+                    onDismissRequest = {
+                        if (!update.required) {
+                            deferredUpdateVersionCode = update.release.versionCode
+                            xrApplication.container.appUpdateManager.dismiss()
+                        }
+                    },
+                    title = {
+                        Text(
+                            stringResource(
+                                if (update.required) {
+                                    R.string.required_update_available_title
+                                } else {
+                                    R.string.update_available_title
+                                }
+                            )
+                        )
+                    },
+                    text = {
+                        Text(
+                            stringResource(
+                                if (update.required) {
+                                    R.string.required_update_available_message
+                                } else {
+                                    R.string.update_available_message
+                                },
+                                update.release.versionName,
+                            )
+                        )
+                    },
+                    confirmButton = {
+                        TextButton(
+                            onClick = {
+                                dashboardScope.launch {
+                                    xrApplication.container.appUpdateManager
+                                        .downloadAndVerify(update.release)
+                                }
+                            },
+                        ) {
+                            Text(stringResource(R.string.update_now), color = NetflixRed)
+                        }
+                    },
+                    dismissButton = {
+                        if (!update.required) {
+                            TextButton(
+                                onClick = {
+                                    deferredUpdateVersionCode = update.release.versionCode
+                                    xrApplication.container.appUpdateManager.dismiss()
+                                },
+                            ) {
+                                Text(stringResource(R.string.later), color = TextSecondary)
+                            }
+                        }
+                    },
+                )
+            }
+        }
+
+        is UpdateState.Downloading -> {
+            AlertDialog(
+                onDismissRequest = {},
+                title = { Text(stringResource(R.string.downloading_update_title)) },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Text(
+                            stringResource(
+                                R.string.update_status_downloading,
+                                (update.progress * 100f).roundToInt(),
+                            )
+                        )
+                        LinearProgressIndicator(
+                            progress = { update.progress },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                },
+                confirmButton = {},
+            )
+        }
+
+        is UpdateState.ReadyToInstall -> {
+            AlertDialog(
+                onDismissRequest = {
+                    xrApplication.container.appUpdateManager.dismiss()
+                },
+                title = { Text(stringResource(R.string.update_ready_title)) },
+                text = { Text(stringResource(R.string.update_ready_message)) },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            xrApplication.container.appUpdateManager.requestInstall()
+                        },
+                    ) {
+                        Text(stringResource(R.string.install), color = NetflixRed)
+                    }
+                },
+                dismissButton = {
+                    TextButton(
+                        onClick = {
+                            deferredUpdateVersionCode = update.release.versionCode
+                            xrApplication.container.appUpdateManager.dismiss()
+                        },
+                    ) {
+                        Text(stringResource(R.string.later), color = TextSecondary)
+                    }
+                },
+            )
+        }
+
+        is UpdateState.Installing -> {
+            AlertDialog(
+                onDismissRequest = {},
+                title = { Text(stringResource(R.string.installing_update_title)) },
+                text = {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        CircularProgressIndicator(modifier = Modifier.size(28.dp))
+                        Text(stringResource(R.string.installing_update_message))
+                    }
+                },
+                confirmButton = {},
+            )
+        }
+
+        is UpdateState.Failed -> {
+            AlertDialog(
+                onDismissRequest = {
+                    xrApplication.container.appUpdateManager.dismiss()
+                },
+                title = { Text(stringResource(R.string.update_failed_title)) },
+                text = { Text(update.message) },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            val release = update.release
+                            if (release != null) {
+                                dashboardScope.launch {
+                                    xrApplication.container.appUpdateManager
+                                        .downloadAndVerify(release)
+                                }
+                            } else {
+                                xrApplication.container.appUpdateManager.check(
+                                    runtimeConfigSnapshot
+                                )
+                            }
+                        },
+                    ) {
+                        Text(stringResource(R.string.retry), color = NetflixRed)
+                    }
+                },
+                dismissButton = {
+                    TextButton(
+                        onClick = {
+                            xrApplication.container.appUpdateManager.dismiss()
+                        },
+                    ) {
+                        Text(stringResource(R.string.close), color = TextSecondary)
+                    }
+                },
+            )
+        }
+
+        UpdateState.Checking,
+        UpdateState.Idle,
+        is UpdateState.UpToDate -> Unit
+    }
+
     if (shouldShowControllerHandTrackingPrompt) {
         AlertDialog(
             onDismissRequest = {
@@ -4726,7 +5261,6 @@ private data class VideoMetadataLookupRequest(
     val folderPath: String,
 )
 
-private val videoFileCodePattern = Regex("(?i)([a-z]{2,10})[-_](\\d{2,5})(?!\\d)")
 private fun buildVideoMetadataLookupRequest(filePath: String): VideoMetadataLookupRequest? {
     val normalizedPath = filePath
         .substringBefore('?')
@@ -4740,9 +5274,13 @@ private fun buildVideoMetadataLookupRequest(filePath: String): VideoMetadataLook
 
     val fileName = normalizedPath.substringAfterLast('/')
     val stem = fileName.substringBeforeLast('.', fileName)
-    val codeMatch = videoFileCodePattern.find(stem) ?: return null
+    val codeMatch = Regex(RuntimeConfigRegistry.current.metadata.contentIdPattern)
+        .find(stem)
+        ?: return null
 
-    val code = "${codeMatch.groupValues[1].uppercase()}-${codeMatch.groupValues[2]}"
+    val studio = codeMatch.groupValues.getOrNull(1)?.takeIf(String::isNotBlank) ?: return null
+    val number = codeMatch.groupValues.getOrNull(2)?.takeIf(String::isNotBlank) ?: return null
+    val code = "${studio.uppercase()}-$number"
     return VideoMetadataLookupRequest(code = code, folderPath = folderPath)
 }
 

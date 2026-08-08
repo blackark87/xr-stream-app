@@ -5,6 +5,7 @@ import android.util.Log
 import blackark.app.vr.network.LocalFileClient
 import blackark.app.vr.network.SMBClient
 import blackark.app.vr.network.SMBFileItem
+import blackark.app.vr.remote.RuntimeConfigRegistry
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.InputStream
@@ -16,7 +17,8 @@ import java.util.Locale
 
 private const val LOCAL_NFO_SOURCE = "local_nfo"
 private const val TAG = "LocalNfoMetadata"
-private val localNfoImageExtensions = listOf("jpg", "jpeg", "png", "webp")
+private val localNfoImageExtensions: List<String>
+    get() = RuntimeConfigRegistry.current.metadata.imageExtensions
 private val absoluteArtworkScheme =
     Regex("^(?:smb|content|file|https?)://", RegexOption.IGNORE_CASE)
 
@@ -197,18 +199,34 @@ class LocalNfoMetadataResolver(
             val primarySidecars = sidecarCandidates.subList(0, fanartIndex)
             val fanartSidecars = sidecarCandidates.subList(fanartIndex, coverIndex)
             val coverSidecars = sidecarCandidates.subList(coverIndex, sidecarCandidates.size)
-            val posterUrl = firstResolvableArtworkReference(
-                references = nfoArtwork.poster + nfoArtwork.thumb,
-                video = video,
-                siblings = siblingFiles,
-            ) ?: findPosterCandidate(primarySidecars, siblingFiles)?.path
-                ?: firstResolvableArtworkReference(
-                    references = nfoArtwork.fanart,
-                    video = video,
-                    siblings = siblingFiles,
-                )
-                ?: findPosterCandidate(fanartSidecars, siblingFiles)?.path
-                ?: findPosterCandidate(coverSidecars, siblingFiles)?.path
+                .filter { it.startsWith("cover.", ignoreCase = true) }
+            val folderSidecars = sidecarCandidates.subList(coverIndex, sidecarCandidates.size)
+                .filter { it.startsWith("folder.", ignoreCase = true) }
+            var posterUrl: String? = null
+            for (source in RuntimeConfigRegistry.current.metadata.artworkPriority) {
+                posterUrl = when (source) {
+                    "nfoPoster" -> firstResolvableArtworkReference(
+                        references = nfoArtwork.poster,
+                        video = video,
+                        siblings = siblingFiles,
+                    )
+                    "nfoThumb" -> firstResolvableArtworkReference(
+                        references = nfoArtwork.thumb,
+                        video = video,
+                        siblings = siblingFiles,
+                    )
+                    "sidecarPoster" -> findPosterCandidate(primarySidecars, siblingFiles)?.path
+                    "fanart" -> firstResolvableArtworkReference(
+                        references = nfoArtwork.fanart,
+                        video = video,
+                        siblings = siblingFiles,
+                    ) ?: findPosterCandidate(fanartSidecars, siblingFiles)?.path
+                    "cover" -> findPosterCandidate(coverSidecars, siblingFiles)?.path
+                    "folder" -> findPosterCandidate(folderSidecars, siblingFiles)?.path
+                    else -> null
+                }
+                if (posterUrl != null) break
+            }
             val metadata = nfoText?.let { text -> parseNfo(text, fallbackCode, posterUrl) }
                 ?: posterUrl?.let { artworkUrl ->
                     JvrMovieMetadata(

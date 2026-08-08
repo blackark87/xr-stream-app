@@ -1,5 +1,5 @@
+import java.time.Instant
 import java.time.ZoneOffset
-import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 import java.util.Properties
 
@@ -9,6 +9,8 @@ plugins {
     alias(libs.plugins.ksp)
 }
 
+val internalVersionEpochSeconds = 1_735_689_600L // 2025-01-01T00:00:00Z
+
 val versionPropertiesFile = rootProject.file("version.properties")
 val versionProperties = Properties().apply {
     check(versionPropertiesFile.exists()) {
@@ -17,54 +19,12 @@ val versionProperties = Properties().apply {
     versionPropertiesFile.inputStream().use(::load)
 }
 
-data class PlayVersion(
-    val major: Int,
-    val minor: Int,
-    val patch: Int,
-)
-
 val playVersionRaw = versionProperties.getProperty("PLAY_VERSION")?.trim().orEmpty()
 check(playVersionRaw.matches(Regex("\\d+\\.\\d+\\.\\d+"))) {
     "PLAY_VERSION must be in MAJOR.MINOR.PATCH format, but was '$playVersionRaw'"
 }
-val playVersionParts = playVersionRaw.split('.')
-val playVersion = PlayVersion(
-    major = playVersionParts[0].toInt(),
-    minor = playVersionParts[1].toInt(),
-    patch = playVersionParts[2].toInt(),
-)
-check(playVersion.minor in 0..99) {
-    "PLAY_VERSION minor must be between 0 and 99, but was ${playVersion.minor}"
-}
-check(playVersion.patch in 0..99) {
-    "PLAY_VERSION patch must be between 0 and 99, but was ${playVersion.patch}"
-}
-
-val internalMinor = versionProperties.getProperty("INTERNAL_MINOR")?.trim()?.toIntOrNull()
-    ?: error("INTERNAL_MINOR must be an integer.")
-check(internalMinor in 0..99) {
-    "INTERNAL_MINOR must be between 0 and 99, but was $internalMinor"
-}
 val releaseChannel = versionProperties.getProperty("RELEASE_CHANNEL")?.trim().orEmpty()
     .ifBlank { "internal" }
-
-val internalVersionCode =
-    playVersion.major * 1_000_000 +
-            playVersion.minor * 10_000 +
-            playVersion.patch * 100 +
-            internalMinor
-check(internalVersionCode in 1..2_100_000_000) {
-    "Computed versionCode=$internalVersionCode is out of allowed range."
-}
-val internalDisplayVersion = "$releaseChannel.$internalMinor"
-val internalVersionName =
-    if (releaseChannel.equals("play", ignoreCase = true)) {
-        playVersionRaw
-    } else {
-        "$playVersionRaw-$internalDisplayVersion"
-    }
-val internalBuildTimeUtc =
-    ZonedDateTime.now(ZoneOffset.UTC).format(DateTimeFormatter.ISO_INSTANT)
 
 fun escapeForBuildConfig(value: String): String {
     return value
@@ -89,6 +49,51 @@ fun resolveGitSha(): String {
 }
 
 val internalGitSha = resolveGitSha()
+val internalBuildEpochSeconds =
+    providers.environmentVariable("XR_BUILD_EPOCH_SECONDS").orNull?.trim()?.toLongOrNull()
+        ?: Instant.now().epochSecond
+val internalVersionCodeLong = internalBuildEpochSeconds - internalVersionEpochSeconds
+check(internalVersionCodeLong in 1..2_100_000_000L) {
+    "Computed timestamp versionCode=$internalVersionCodeLong is out of range."
+}
+val internalVersionCode = internalVersionCodeLong.toInt()
+val internalBuildInstant = Instant.ofEpochSecond(internalBuildEpochSeconds)
+val internalBuildId = DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmss")
+    .withZone(ZoneOffset.UTC)
+    .format(internalBuildInstant)
+val internalDisplayVersion = "$releaseChannel.$internalBuildId"
+val internalVersionName =
+    if (releaseChannel.equals("play", ignoreCase = true)) {
+        playVersionRaw
+    } else {
+        "$playVersionRaw-$internalDisplayVersion+$internalGitSha"
+    }
+val internalBuildTimeUtc = DateTimeFormatter.ISO_INSTANT.format(internalBuildInstant)
+val internalKeystoreFile = providers.environmentVariable("INTERNAL_KEYSTORE_FILE").orNull
+    ?.trim()
+    ?.takeIf(String::isNotBlank)
+val internalKeystorePassword = providers.environmentVariable("INTERNAL_KEYSTORE_PASSWORD").orNull
+val internalKeyAlias = providers.environmentVariable("INTERNAL_KEY_ALIAS").orNull
+val internalKeyPassword = providers.environmentVariable("INTERNAL_KEY_PASSWORD").orNull
+val hasInternalSigningConfiguration = listOf(
+    internalKeystoreFile,
+    internalKeystorePassword,
+    internalKeyAlias,
+    internalKeyPassword,
+).all { !it.isNullOrBlank() }
+
+tasks.register("printInternalVersion") {
+    group = "versioning"
+    doLast {
+        println("PLAY_VERSION=$playVersionRaw")
+        println("RELEASE_CHANNEL=$releaseChannel")
+        println("INTERNAL_VERSION_CODE=$internalVersionCode")
+        println("INTERNAL_VERSION_NAME=$internalVersionName")
+        println("INTERNAL_DISPLAY_VERSION=$internalDisplayVersion")
+        println("INTERNAL_GIT_SHA=$internalGitSha")
+        println("INTERNAL_BUILD_TIME_UTC=$internalBuildTimeUtc")
+    }
+}
 
 android {
     namespace = "blackark.app.vr"
@@ -99,14 +104,13 @@ android {
     defaultConfig {
         applicationId = "blackark.app.vr"
         minSdk = 34
-    targetSdk = 37
+        targetSdk = 37
         versionCode = internalVersionCode
         versionName = internalVersionName
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         buildConfigField("String", "PLAY_STORE_VERSION", "\"${escapeForBuildConfig(playVersionRaw)}\"")
-        buildConfigField("int", "INTERNAL_MINOR_VERSION", internalMinor.toString())
         buildConfigField("String", "INTERNAL_DISPLAY_VERSION", "\"${escapeForBuildConfig(internalDisplayVersion)}\"")
         buildConfigField("String", "INTERNAL_VERSION_NAME", "\"${escapeForBuildConfig(internalVersionName)}\"")
         buildConfigField("int", "INTERNAL_VERSION_CODE", internalVersionCode.toString())
@@ -115,7 +119,21 @@ android {
         buildConfigField("String", "INTERNAL_GIT_SHA", "\"${escapeForBuildConfig(internalGitSha)}\"")
     }
 
+    val internalSigningConfig = if (hasInternalSigningConfiguration) {
+        signingConfigs.create("internal") {
+            storeFile = file(requireNotNull(internalKeystoreFile))
+            storePassword = requireNotNull(internalKeystorePassword)
+            keyAlias = requireNotNull(internalKeyAlias)
+            keyPassword = requireNotNull(internalKeyPassword)
+        }
+    } else {
+        null
+    }
+
     buildTypes {
+        debug {
+            internalSigningConfig?.let { signingConfig = it }
+        }
         release {
             isMinifyEnabled = false
             proguardFiles(
@@ -183,6 +201,9 @@ dependencies {
     implementation(libs.androidx.media3.exoplayer)
     implementation(libs.androidx.media3.exoplayer.dash)
     implementation(libs.androidx.media3.ui)
+    implementation(libs.androidx.media3.effect)
+    implementation(libs.androidx.media3.inspector)
+    implementation(libs.androidx.media3.inspector.frame)
 
     // SMB Support
     implementation(libs.jcifs.ng)
@@ -210,6 +231,7 @@ dependencies {
 
     // Testing
     testImplementation(libs.junit)
+    testImplementation(libs.json)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(libs.androidx.room.testing)

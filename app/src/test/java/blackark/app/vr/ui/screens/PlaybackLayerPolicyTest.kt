@@ -193,35 +193,33 @@ class PlaybackLayerPolicyTest {
     }
 
     @Test
-    fun `visible immersive controls enable head follow`() {
-        assertTrue(
-            shouldEnablePlaybackUiHeadFollow(
-                isTwoDimensional = false,
-                isImmersive = true,
-                showControlsLayer = true,
-            )
+    fun `format policy follows 180 video and only 360 controls`() {
+        assertEquals(
+            PlaybackFollowPolicy(follow180Video = false, followPlaybackControls = false),
+            resolvePlaybackFollowPolicy(
+                videoFormat = VideoFormat.Format2D,
+                playbackControlsHeadFollowEnabled = true,
+            ),
+        )
+        assertEquals(
+            PlaybackFollowPolicy(follow180Video = true, followPlaybackControls = false),
+            resolvePlaybackFollowPolicy(
+                videoFormat = VideoFormat.Format180,
+                playbackControlsHeadFollowEnabled = true,
+            ),
+        )
+        assertEquals(
+            PlaybackFollowPolicy(follow180Video = false, followPlaybackControls = true),
+            resolvePlaybackFollowPolicy(
+                videoFormat = VideoFormat.Format360,
+                playbackControlsHeadFollowEnabled = true,
+            ),
         )
         assertFalse(
-            shouldEnablePlaybackUiHeadFollow(
-                isTwoDimensional = false,
-                isImmersive = true,
-                showControlsLayer = false,
-            )
-        )
-        assertTrue(
-            shouldEnablePlaybackUiHeadFollow(
-                isTwoDimensional = true,
-                isImmersive = false,
-                showControlsLayer = true,
-            )
-        )
-        assertFalse(
-            shouldEnablePlaybackUiHeadFollow(
-                isEnabledBySetting = false,
-                isTwoDimensional = true,
-                isImmersive = true,
-                showControlsLayer = true,
-            )
+            resolvePlaybackFollowPolicy(
+                videoFormat = VideoFormat.Format360,
+                playbackControlsHeadFollowEnabled = false,
+            ).followPlaybackControls
         )
     }
 
@@ -245,6 +243,33 @@ class PlaybackLayerPolicyTest {
         )
         assertFalse(
             shouldUpdatePlaybackUiHeadFollow(
+                currentForward = forward,
+                targetForward = Vector3.Right,
+                interactionLocked = true,
+            )
+        )
+    }
+
+    @Test
+    fun `180 video only retargets outside thirty degree dead zone`() {
+        val forward = Vector3.Forward
+
+        assertFalse(
+            shouldUpdate180VideoHeadFollow(
+                currentForward = forward,
+                targetForward = Vector3(x = 0.4f, y = 0f, z = -0.9165f),
+                interactionLocked = false,
+            )
+        )
+        assertTrue(
+            shouldUpdate180VideoHeadFollow(
+                currentForward = forward,
+                targetForward = Vector3.Right,
+                interactionLocked = false,
+            )
+        )
+        assertFalse(
+            shouldUpdate180VideoHeadFollow(
                 currentForward = forward,
                 targetForward = Vector3.Right,
                 interactionLocked = true,

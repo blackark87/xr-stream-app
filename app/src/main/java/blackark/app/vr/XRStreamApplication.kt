@@ -6,6 +6,7 @@ import blackark.app.vr.di.AppContainer
 import blackark.app.vr.utils.ImageCacheVersionStore
 import blackark.app.vr.utils.MetadataScopeRegistry
 import blackark.app.vr.utils.VideoThumbnailFetcher
+import blackark.app.vr.remote.RuntimeConfigRegistry
 import coil3.ImageLoader
 import coil3.SingletonImageLoader
 import coil3.disk.DiskCache
@@ -16,6 +17,7 @@ import okio.Path.Companion.toOkioPath
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 
 /**
  * Application class for XR Stream App
@@ -32,6 +34,10 @@ class XRStreamApplication : Application(), SingletonImageLoader.Factory {
         super.onCreate()
         AppDataResetCoordinator.resetIfNeeded(this)
         container = AppContainer(this)
+        applicationScope.launch {
+            container.runtimeConfigRepository.refresh()
+            container.appUpdateManager.check(container.runtimeConfigRepository.snapshot.value)
+        }
         MetadataScopeRegistry.initialize(container.metadataScopeRepository, applicationScope)
         android.util.Log.d("XRStreamApplication", "Application created")
         ImageCacheVersionStore.initialize(this)
@@ -63,7 +69,10 @@ class XRStreamApplication : Application(), SingletonImageLoader.Factory {
             }
             .memoryCache {
                 MemoryCache.Builder()
-                    .maxSizePercent(context, 0.25) // Use 25% of app memory for image cache
+                    .maxSizePercent(
+                        context,
+                        RuntimeConfigRegistry.current.cache.imageMemoryPercent,
+                    )
                     .build()
             }
             .diskCache {
@@ -74,7 +83,7 @@ class XRStreamApplication : Application(), SingletonImageLoader.Factory {
                 )
                 DiskCache.Builder()
                     .directory(cacheDir.toOkioPath())
-                    .maxSizeBytes(500L * 1024 * 1024) // 500MB fixed size
+                    .maxSizeBytes(RuntimeConfigRegistry.current.cache.imageDiskBytes)
                     .build()
             }
             .diskCachePolicy(CachePolicy.ENABLED)
@@ -82,4 +91,3 @@ class XRStreamApplication : Application(), SingletonImageLoader.Factory {
             .build()
     }
 }
-

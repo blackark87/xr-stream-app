@@ -1,0 +1,97 @@
+{
+  "schemaVersion": 1,
+  "channel": "internal",
+  "minimumAppVersionCode": 1,
+  "runtime": {
+    "features": {
+      "remoteUpdatesEnabled": true,
+      "motionPreviewEnabled": true,
+      "generatedSeekPreviewEnabled": true
+    },
+    "defaults": {
+      "backgroundIndexingEnabled": false,
+      "handTrackingEnabled": true,
+      "playbackControlsHeadFollowEnabled": true,
+      "libraryHoverPreviewEnabled": true,
+      "smbHoverPreviewEnabled": true
+    },
+    "preview": {
+      "focusDelayMs": 800,
+      "mainVideoDurationMs": 60000,
+      "fanartIntervalMs": 4000,
+      "defaultVolume": 1.0
+    },
+    "playback": {
+      "controlsAutoHideMs": 10000,
+      "seekStepMs": 7500,
+      "seekInitialRepeatMs": 260,
+      "seekRepeatMs": 140,
+      "volumeStep": 0.04,
+      "volumeInitialRepeatMs": 220,
+      "volumeRepeatMs": 130
+    },
+    "controller": {
+      "axisEmitThreshold": 0.08,
+      "axisProfileThreshold": 0.08,
+      "deadZone": 0.08,
+      "engageThreshold": 0.45,
+      "releaseThreshold": 0.25,
+      "dominanceMargin": 0.10,
+      "logIntervalMs": 250
+    },
+    "headFollow": {
+      "video180DeadZoneDegrees": 30.0,
+      "controls360DeadZoneDegrees": 12.0,
+      "video180Smoothing": 0.18,
+      "controls360Smoothing": 0.45,
+      "controlsDistanceDp": 900.0,
+      "backgroundInputDistanceDp": 980.0,
+      "controlsDownOffsetDp": -320.0,
+      "flatPanelVerticalOffsetDp": -40.0,
+      "menuControlsGapDp": 20.0,
+      "menuFrontOffsetDp": 16.0,
+      "seekPreviewControlsGapDp": 28.0,
+      "seekPreviewFrontOffsetDp": 24.0,
+      "subtitleBaseUpOffsetDp": 180.0
+    },
+    "seekPreview": {
+      "bucketMs": 2000,
+      "memoryEntries": 12,
+      "frameHeight": 270,
+      "fallbackFrameWidth": 480
+    },
+    "subtitles": {
+      "defaultDistanceMeters": 1.5,
+      "minDistanceMeters": 0.7,
+      "maxDistanceMeters": 2.0,
+      "defaultVerticalOffsetMeters": 0.15,
+      "minVerticalOffsetMeters": -0.15,
+      "maxVerticalOffsetMeters": 0.15,
+      "defaultHorizontalOffsetMeters": 0.0,
+      "minHorizontalOffsetMeters": -0.30,
+      "maxHorizontalOffsetMeters": 0.30
+    },
+    "metadata": {
+      "baseUrl": "https://jvrlibrary.com",
+      "avWikiBaseUrl": "https://av-wiki.net",
+      "requestIntervalMs": 300,
+      "contentIdPattern": "(?i)([a-z]{2,10})[-_ ]?(\\d{2,6})(?!\\d)",
+      "vrTokenPattern": "(?:VR|8K|8KVR|VR8K)",
+      "videoExtensions": ["mp4", "mkv", "avi", "mov", "wmv", "flv", "webm", "m4v", "mpg", "mpeg", "3gp", "ts", "m2ts"],
+      "imageExtensions": ["jpg", "jpeg", "png", "webp"],
+      "artworkPriority": [
+        "nfoPoster",
+        "nfoThumb",
+        "sidecarPoster",
+        "fanart",
+        "cover",
+        "folder",
+        "generatedFrame"
+      ]
+    },
+    "cache": {
+      "imageMemoryPercent": 0.25,
+      "imageDiskBytes": 524288000
+    }
+  }
+}

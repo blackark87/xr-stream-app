@@ -9,6 +9,7 @@ import androidx.core.net.toUri
 import blackark.app.vr.data.database.AppDatabase
 import blackark.app.vr.data.database.entity.VideoDisplaySettings
 import blackark.app.vr.data.repository.AvLibraryRepository
+import blackark.app.vr.remote.RuntimeConfigRegistry
 import coil3.ImageLoader
 import coil3.decode.DataSource
 import coil3.decode.ImageSource
@@ -161,7 +162,8 @@ class VideoThumbnailFetcher(
 
     private fun isDirectImageFile(path: String): Boolean {
         val sanitizedPath = path.substringBefore('?').substringBefore('#').trim().lowercase()
-        return listOf("jpg", "jpeg", "png", "webp").any { sanitizedPath.endsWith(".$it") }
+        return RuntimeConfigRegistry.current.metadata.imageExtensions
+            .any { sanitizedPath.endsWith(".$it") }
     }
 
     private suspend fun fetchDirectImage(smbUrl: String): FetchResult? {
@@ -1242,9 +1244,8 @@ class VideoThumbnailFetcher(
                 return true
             }
 
-            val videoExtensions =
-                listOf(".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".webm", ".m4v")
-            return videoExtensions.any { sanitizedPath.lowercase().endsWith(it) }
+            val extension = sanitizedPath.substringAfterLast('.', "").lowercase()
+            return extension in RuntimeConfigRegistry.current.metadata.videoExtensions
         }
     }
 }

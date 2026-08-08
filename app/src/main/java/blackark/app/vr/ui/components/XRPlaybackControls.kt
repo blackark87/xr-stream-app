@@ -3,6 +3,7 @@ package blackark.app.vr.ui.components
 import android.annotation.SuppressLint
 import androidx.annotation.OptIn
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -61,12 +62,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.positionInRoot
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -89,10 +90,7 @@ import blackark.app.vr.utils.MAX_IMMERSIVE_UI_HORIZONTAL_OFFSET_METERS
 import blackark.app.vr.utils.MIN_IMMERSIVE_SUBTITLE_DISTANCE_METERS
 import blackark.app.vr.utils.MIN_IMMERSIVE_SUBTITLE_VERTICAL_OFFSET_METERS
 import blackark.app.vr.utils.MIN_IMMERSIVE_UI_HORIZONTAL_OFFSET_METERS
-import blackark.app.vr.utils.ThumbnailImageLoaderProvider
-import coil3.compose.AsyncImage
-import coil3.request.CachePolicy
-import coil3.request.ImageRequest
+import blackark.app.vr.utils.SeekPreviewFrame
 import kotlin.math.roundToInt
 
 enum class XRPlaybackControlsContent {
@@ -1144,21 +1142,9 @@ private fun PlaybackFloatingMenuCard(
 @Composable
 internal fun PlaybackSeekPreviewCard(
     targetPositionMs: Long,
-    previewPath: String?,
+    previewFrame: SeekPreviewFrame?,
     modifier: Modifier = Modifier,
 ) {
-    val context = LocalContext.current
-    val imageLoader = remember(context) { ThumbnailImageLoaderProvider.get(context) }
-    val previewRequest = remember(previewPath, targetPositionMs, context) {
-        previewPath?.let { path ->
-            ImageRequest.Builder(context)
-                .data(path)
-                .memoryCachePolicy(CachePolicy.DISABLED)
-                .diskCachePolicy(CachePolicy.DISABLED)
-                .build()
-        }
-    }
-
     Box(
         modifier = modifier
             .shadow(
@@ -1178,10 +1164,9 @@ internal fun PlaybackSeekPreviewCard(
                 .background(Color.Black.copy(alpha = 0.42f)),
             contentAlignment = Alignment.Center,
         ) {
-            if (previewRequest != null) {
-                AsyncImage(
-                    model = previewRequest,
-                    imageLoader = imageLoader,
+            if (previewFrame != null) {
+                Image(
+                    bitmap = previewFrame.bitmap.asImageBitmap(),
                     contentDescription = null,
                     modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.Fit,

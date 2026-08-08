@@ -2,5 +2,7 @@
 <full-backup-content>
     <!-- The AES key is device-local, so restoring its ciphertext can never succeed. -->
     <exclude domain="sharedpref" path="encrypted_smb_credentials.xml" />
+    <exclude domain="sharedpref" path="encrypted_github_credentials.xml" />
     <exclude domain="sharedpref" path="server_autofill.xml" />
+    <exclude domain="file" path="app-updates/" />
 </full-backup-content>

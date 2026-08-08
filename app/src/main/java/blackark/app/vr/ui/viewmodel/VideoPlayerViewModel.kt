@@ -48,10 +48,12 @@ import blackark.app.vr.utils.DEFAULT_IMMERSIVE_SUBTITLE_DISTANCE_METERS
 import blackark.app.vr.utils.DEFAULT_IMMERSIVE_SUBTITLE_VERTICAL_OFFSET_METERS
 import blackark.app.vr.utils.DEFAULT_IMMERSIVE_UI_HORIZONTAL_OFFSET_METERS
 import blackark.app.vr.utils.InferredDisplayProfile
+import blackark.app.vr.utils.SeekPreviewFrame
 import blackark.app.vr.utils.SubtitleFontCatalog
 import blackark.app.vr.utils.ThumbnailImageLoaderProvider
 import blackark.app.vr.utils.VideoFramePreviewExtractor
 import blackark.app.vr.utils.VideoThumbnailFetcher
+import blackark.app.vr.remote.RuntimeConfigRegistry
 import blackark.app.vr.utils.inferDisplayProfileFromFrame
 import blackark.app.vr.utils.normalizeImmersiveSubtitleVerticalOffsetMeters
 import blackark.app.vr.utils.normalizeImmersiveUiHorizontalOffsetMeters
@@ -105,6 +107,19 @@ internal fun resolveControlsVisibilityBlockReason(
 internal fun shouldPreserveFullSeekPreviewFrame(videoFormat: VideoFormat): Boolean =
     videoFormat != VideoFormat.Format2D
 
+internal fun shouldApplySeekPreviewFrame(
+    requestGeneration: Long,
+    currentGeneration: Long,
+    seekPreviewActive: Boolean,
+    requestedTargetPositionMs: Long,
+    latestTargetPositionMs: Long,
+    frameAvailable: Boolean,
+): Boolean =
+    requestGeneration == currentGeneration &&
+        seekPreviewActive &&
+        frameAvailable &&
+        requestedTargetPositionMs == latestTargetPositionMs
+
 private fun describeCueColors(cues: List<Cue>): String {
     val colors = cues
         .asSequence()
@@ -149,7 +164,7 @@ data class VideoPlayerState(
     val navigationExitPending: Boolean = false,
     val seekPreviewActive: Boolean = false,
     val seekPreviewTargetPositionMs: Long = 0,
-    val seekPreviewThumbnailPath: String? = null,
+    val seekPreviewFrame: SeekPreviewFrame? = null,
     val subtitlesEnabled: Boolean = true,
     val subtitleFontId: String = SubtitleFontCatalog.DEFAULT_FONT_ID,
     val subtitleTextSize: SubtitleTextSize = SubtitleTextSize.Medium,
@@ -158,6 +173,7 @@ data class VideoPlayerState(
         DEFAULT_IMMERSIVE_SUBTITLE_VERTICAL_OFFSET_METERS,
     val immersiveUiHorizontalOffsetMeters: Float =
         DEFAULT_IMMERSIVE_UI_HORIZONTAL_OFFSET_METERS,
+    val recenterRequestId: Long = 0L,
     val subtitleCues: List<Cue> = emptyList(),
     val externalSubtitleFileName: String? = null,
     val audioTracks: List<PlayerTrackOption> = emptyList(),
@@ -196,6 +212,25 @@ enum class SubtitleTextSize(val scale: Float) {
     Large(1.25f),
     ExtraLarge(1.5f),
 }
+
+internal enum class ControllerAxisInputGate {
+    Ignore,
+    Handle,
+    RevealAndHandle,
+}
+
+internal fun resolveControllerAxisInputGate(
+    showControls: Boolean,
+    x: Float,
+    y: Float,
+    engageThreshold: Float,
+): ControllerAxisInputGate =
+    when {
+        showControls -> ControllerAxisInputGate.Handle
+        abs(x) >= engageThreshold || abs(y) >= engageThreshold ->
+            ControllerAxisInputGate.RevealAndHandle
+        else -> ControllerAxisInputGate.Ignore
+    }
 
 @UnstableApi
 class VideoPlayerViewModel(
@@ -245,25 +280,29 @@ class VideoPlayerViewModel(
     private var controlsInputLockCount = 0
     private var seekPreviewResumePlayback = false
     private var seekPreviewShowControls = false
-    private var pendingThumbnailPreviewPositionMs: Long? = null
     private var renderedThumbnailPreviewPositionMs: Long? = null
-    private var controllerAxisAwaitingNeutralReset = false
+    private var requestedThumbnailPreviewPositionMs: Long? = null
+    private var thumbnailPreviewRequestGeneration = 0L
 
-    private val controllerAxisEngageThreshold = 0.45f
-    private val controllerAxisReleaseThreshold = 0.25f
-    private val controllerAxisDominanceMargin = 0.10f
-    private val controllerSeekStepMs = 7_500L
-    private val controllerSeekInitialRepeatMs = 260L
-    private val controllerSeekRepeatMs = 140L
-    private val controllerVolumeStep = 0.04f
-    private val controllerVolumeInitialRepeatMs = 220L
-    private val controllerVolumeRepeatMs = 130L
+    private val runtimePlaybackConfig = RuntimeConfigRegistry.current.playback
+    private val runtimeControllerConfig = RuntimeConfigRegistry.current.controller
+    private val generatedSeekPreviewEnabled =
+        RuntimeConfigRegistry.current.features.generatedSeekPreviewEnabled
+    private val controllerAxisEngageThreshold = runtimeControllerConfig.engageThreshold
+    private val controllerAxisReleaseThreshold = runtimeControllerConfig.releaseThreshold
+    private val controllerAxisDominanceMargin = runtimeControllerConfig.dominanceMargin
+    private val controllerSeekStepMs = runtimePlaybackConfig.seekStepMs
+    private val controllerSeekInitialRepeatMs = runtimePlaybackConfig.seekInitialRepeatMs
+    private val controllerSeekRepeatMs = runtimePlaybackConfig.seekRepeatMs
+    private val controllerVolumeStep = runtimePlaybackConfig.volumeStep
+    private val controllerVolumeInitialRepeatMs = runtimePlaybackConfig.volumeInitialRepeatMs
+    private val controllerVolumeRepeatMs = runtimePlaybackConfig.volumeRepeatMs
     private val playbackScrollMagnitudeThreshold = 1.0f
-    private val playbackScrollSeekInitialRepeatMs = 260L
-    private val playbackScrollSeekRepeatMs = 140L
-    private val playbackScrollHoldTimeoutMs = 240L
-    private val thumbnailPreviewDebounceMs = 180L
-    private val thumbnailPreviewFrameIntervalMs = 1_000L
+    private val playbackScrollSeekInitialRepeatMs = runtimePlaybackConfig.seekInitialRepeatMs
+    private val playbackScrollSeekRepeatMs = runtimePlaybackConfig.seekRepeatMs
+    private val playbackScrollHoldTimeoutMs =
+        (runtimePlaybackConfig.seekRepeatMs * 2L).coerceIn(100L, 1_000L)
+    private val thumbnailPreviewFrameIntervalMs = RuntimeConfigRegistry.current.seekPreview.bucketMs
     private var lastPlaybackHorizontalScrollAtMs = 0L
     private var lastPlaybackVerticalScrollAtMs = 0L
     private var lastPlaybackHorizontalDirection = 0
@@ -284,7 +323,7 @@ class VideoPlayerViewModel(
     private var hasDispatchedNavigateBack = false
     private val releaseMutex = Mutex()
     // XR controllers need additional time to acquire small spatial button targets.
-    private val controlsAutoHideDelayMs = 10_000L
+    private val controlsAutoHideDelayMs = runtimePlaybackConfig.controlsAutoHideMs
     private val controlsToggleSuppressAfterInputMs = 300L
     private val immersiveUiHorizontalOffsetApplyDelayMs = 220L
 
@@ -362,6 +401,7 @@ class VideoPlayerViewModel(
         _state.value = _state.value.copy(
             zoomLevel = 1.0f,
             immersiveUiHorizontalOffsetMeters = 0.0f,
+            recenterRequestId = _state.value.recenterRequestId + 1L,
         )
         appContext?.let { context ->
             AppSettingsStore.setImmersiveUiHorizontalOffsetMeters(context, 0.0f)
@@ -728,7 +768,7 @@ class VideoPlayerViewModel(
             showControls = true,
             seekPreviewActive = true,
             seekPreviewTargetPositionMs = startPosition,
-            seekPreviewThumbnailPath = null,
+            seekPreviewFrame = null,
         )
         Log.d(
             PLAYER_LOG_TAG,
@@ -736,10 +776,13 @@ class VideoPlayerViewModel(
                 "resume=$seekPreviewResumePlayback format=${currentState.videoFormat}",
         )
         cancelControlsAutoHide()
-        enqueueThumbnailPreview(startPosition)
+        if (generatedSeekPreviewEnabled) {
+            enqueueThumbnailPreview(startPosition)
+        }
     }
 
     private fun enqueueThumbnailPreview(targetPositionMs: Long) {
+        if (!generatedSeekPreviewEnabled) return
         val context = appContext ?: return
         val videoPath = _state.value.videoFile?.path ?: return
         val preserveFullFrame = shouldPreserveFullSeekPreviewFrame(_state.value.videoFormat)
@@ -747,71 +790,61 @@ class VideoPlayerViewModel(
 
         if (
             normalizedTargetPositionMs == renderedThumbnailPreviewPositionMs &&
-            !_state.value.seekPreviewThumbnailPath.isNullOrBlank()
+            _state.value.seekPreviewFrame != null
+        ) {
+            return
+        }
+        if (
+            normalizedTargetPositionMs == requestedThumbnailPreviewPositionMs &&
+            thumbnailPreviewJob?.isActive == true
         ) {
             return
         }
 
-        pendingThumbnailPreviewPositionMs = normalizedTargetPositionMs
-        if (thumbnailPreviewJob?.isActive == true) {
-            return
-        }
-
+        val requestGeneration = ++thumbnailPreviewRequestGeneration
+        requestedThumbnailPreviewPositionMs = normalizedTargetPositionMs
+        thumbnailPreviewJob?.cancel()
         thumbnailPreviewJob = viewModelScope.launch {
-            while (isActive) {
-                var nextTarget = pendingThumbnailPreviewPositionMs ?: break
-                pendingThumbnailPreviewPositionMs = null
-                // Wait for the slider/controller to settle instead of decoding every intermediate
-                // SMB position. A single frame decode is slower than a typical input update.
-                while (isActive) {
-                    delay(thumbnailPreviewDebounceMs)
-                    val newerTarget = pendingThumbnailPreviewPositionMs ?: break
-                    pendingThumbnailPreviewPositionMs = null
-                    nextTarget = newerTarget
-                }
+            val previewFrame = VideoFramePreviewExtractor.requestFrame(
+                context = context,
+                videoPath = videoPath,
+                targetPositionMs = normalizedTargetPositionMs,
+                preserveFullFrame = preserveFullFrame,
+            )
 
-                val previewPath =
-                    VideoFramePreviewExtractor.extractPreviewFrame(
-                        context = context,
-                        videoPath = videoPath,
-                        targetPositionMs = nextTarget,
-                        preserveFullFrame = preserveFullFrame,
-                    )
+            if (!isActive) {
+                return@launch
+            }
 
-                if (!isActive) {
-                    break
-                }
-
-                val latestState = _state.value
-                if (
-                    !latestState.seekPreviewActive
-                ) {
-                    break
-                }
-
-                val latestRequestedTarget =
-                    normalizeThumbnailPreviewPosition(latestState.seekPreviewTargetPositionMs)
-                if (
-                    previewPath != null &&
-                    pendingThumbnailPreviewPositionMs == null &&
-                    latestRequestedTarget == nextTarget
-                ) {
-                    renderedThumbnailPreviewPositionMs = nextTarget
-                    _state.value = latestState.copy(seekPreviewThumbnailPath = previewPath)
-                }
+            val latestState = _state.value
+            val latestRequestedTarget =
+                normalizeThumbnailPreviewPosition(latestState.seekPreviewTargetPositionMs)
+            if (shouldApplySeekPreviewFrame(
+                    requestGeneration = requestGeneration,
+                    currentGeneration = thumbnailPreviewRequestGeneration,
+                    seekPreviewActive = latestState.seekPreviewActive,
+                    requestedTargetPositionMs = normalizedTargetPositionMs,
+                    latestTargetPositionMs = latestRequestedTarget,
+                    frameAvailable = previewFrame != null,
+                )
+            ) {
+                renderedThumbnailPreviewPositionMs = normalizedTargetPositionMs
+                _state.value = latestState.copy(seekPreviewFrame = previewFrame!!)
             }
         }.also { job ->
             job.invokeOnCompletion {
                 if (thumbnailPreviewJob === job) {
                     thumbnailPreviewJob = null
+                    requestedThumbnailPreviewPositionMs = null
                 }
             }
         }
     }
 
     private fun cancelThumbnailPreview() {
-        pendingThumbnailPreviewPositionMs = null
         renderedThumbnailPreviewPositionMs = null
+        requestedThumbnailPreviewPositionMs = null
+        thumbnailPreviewRequestGeneration += 1L
         thumbnailPreviewJob?.cancel()
         thumbnailPreviewJob = null
     }
@@ -901,7 +934,7 @@ class VideoPlayerViewModel(
             showControls = seekPreviewShowControls,
             seekPreviewActive = false,
             seekPreviewTargetPositionMs = 0L,
-            seekPreviewThumbnailPath = null,
+            seekPreviewFrame = null,
         )
         seekPreviewResumePlayback = false
         seekPreviewShowControls = false
@@ -1066,26 +1099,22 @@ class VideoPlayerViewModel(
 
         val x = event.x.coerceIn(-1f, 1f)
         val y = event.y.coerceIn(-1f, 1f)
-        val isNeutral =
-            abs(x) <= controllerAxisReleaseThreshold && abs(y) <= controllerAxisReleaseThreshold
 
-        if (controllerAxisAwaitingNeutralReset) {
-            if (isNeutral) {
-                controllerAxisAwaitingNeutralReset = false
-                resetControllerAxisState()
-            }
-            return
-        }
-
-        if (!_state.value.showControls) {
-            val shouldRevealControls =
-                abs(x) >= controllerAxisEngageThreshold || abs(y) >= controllerAxisEngageThreshold
-            if (shouldRevealControls) {
+        when (resolveControllerAxisInputGate(
+            showControls = _state.value.showControls,
+            x = x,
+            y = y,
+            engageThreshold = controllerAxisEngageThreshold,
+        )) {
+            ControllerAxisInputGate.Ignore -> return
+            ControllerAxisInputGate.RevealAndHandle -> {
                 revealControlsIfHidden()
-                resetControllerAxisState()
-                controllerAxisAwaitingNeutralReset = true
+                Log.d(
+                    "ControllerInputDebug",
+                    "first axis input revealed controls and continues x=$x y=$y",
+                )
             }
-            return
+            ControllerAxisInputGate.Handle -> Unit
         }
 
         val absX = abs(x)
@@ -1163,6 +1192,10 @@ class VideoPlayerViewModel(
 
     private fun applySeekStep(direction: Int) {
         updateSeekPreviewTargetByStep(direction)
+        Log.d(
+            "ControllerInputDebug",
+            "seek direction=$direction targetMs=${_state.value.seekPreviewTargetPositionMs}",
+        )
     }
 
     fun beginSeekPreview() {
@@ -1247,6 +1280,7 @@ class VideoPlayerViewModel(
         val delta = if (direction > 0) controllerVolumeStep else -controllerVolumeStep
         val newVolume = (_state.value.volume + delta).coerceIn(0f, 1f)
         setVolume(newVolume)
+        Log.d("ControllerInputDebug", "volume direction=$direction value=$newVolume")
     }
 
     private fun stepVolume(direction: Int, step: Float = 0.05f) {
@@ -1260,7 +1294,6 @@ class VideoPlayerViewModel(
         controllerAxisMode = ControllerAxisMode.None
         seekDirection = 0
         volumeDirection = 0
-        controllerAxisAwaitingNeutralReset = false
         cancelSeekRepeat()
         cancelVolumeRepeat()
         cancelThumbnailPreview()
@@ -1534,7 +1567,7 @@ class VideoPlayerViewModel(
                     controlsInputLocked = false,
                     seekPreviewActive = false,
                     seekPreviewTargetPositionMs = 0L,
-                    seekPreviewThumbnailPath = null,
+                    seekPreviewFrame = null,
                     subtitlesEnabled = true,
                     subtitleFontId = initialSubtitleFontId,
                     subtitleTextSize = initialSubtitleTextSize,
@@ -1548,7 +1581,7 @@ class VideoPlayerViewModel(
                     textTracks = emptyList(),
                 )
                 viewModelScope.launch {
-                    VideoFramePreviewExtractor.prepareVideo(
+                    VideoFramePreviewExtractor.prepare(
                         context = context.applicationContext,
                         videoPath = videoFile.path,
                     )
@@ -2664,7 +2697,7 @@ class VideoPlayerViewModel(
         cancelThumbnailPreview()
         cancelControlsAutoHide()
         resetControlsInputLock()
-        VideoFramePreviewExtractor.clearPreparedVideo(previewVideoPath)
+        VideoFramePreviewExtractor.release(previewVideoPath)
         lastPlaybackHorizontalDirection = 0
         lastPlaybackHorizontalScrollAtMs = 0L
 
@@ -2755,7 +2788,7 @@ class VideoPlayerViewModel(
                     durationMs = duration,
                 )
             }
-            runCatching { VideoFramePreviewExtractor.clearPreparedVideo(previewVideoPath) }
+            runCatching { VideoFramePreviewExtractor.release(previewVideoPath) }
         }
     }
 

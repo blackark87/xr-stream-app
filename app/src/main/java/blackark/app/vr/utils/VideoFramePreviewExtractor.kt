@@ -1,3 +1,5 @@
+@file:OptIn(androidx.media3.common.util.UnstableApi::class)
+
 package blackark.app.vr.utils
 
 import android.content.Context
@@ -7,23 +9,41 @@ import android.media.MediaMetadataRetriever
 import android.os.SystemClock
 import android.util.Log
 import androidx.core.net.toUri
+import androidx.media3.common.MediaItem
+import androidx.media3.common.SeekParameters
+import androidx.media3.datasource.DefaultDataSource
+import androidx.media3.effect.Presentation
+import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.inspector.frame.FrameExtractor
+import blackark.app.vr.AppState
+import blackark.app.vr.player.SMBDataSource
+import blackark.app.vr.remote.RuntimeConfigRegistry
+import com.google.common.util.concurrent.ListenableFuture
 import jcifs.smb.SmbFile
 import jcifs.smb.SmbRandomAccessFile
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.asCoroutineDispatcher
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import java.io.File
-import java.security.MessageDigest
+import java.util.concurrent.ExecutionException
+import java.util.concurrent.Executor
 import java.util.concurrent.Executors
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
+
+data class SeekPreviewFrame(
+    val requestedPositionMs: Long,
+    val presentationPositionMs: Long,
+    val bitmap: Bitmap,
+)
 
 object VideoFramePreviewExtractor {
 
     private const val TAG = "VideoFramePreview"
-    private const val CACHE_VERSION = "v2"
-    private const val PREVIEW_FRAME_WIDTH = 480
-    private const val PREVIEW_FRAME_HEIGHT = 270
+    private val directExecutor = Executor { command -> command.run() }
     private val sessionMutex = Mutex()
     private val previewDispatcher =
         Executors.newSingleThreadExecutor { task ->
@@ -39,23 +59,49 @@ object VideoFramePreviewExtractor {
         }.asCoroutineDispatcher()
     private var preparedSession: PreparedSession? = null
 
-    private data class PreparedSession(
-        val videoPath: String,
-        val retriever: MediaMetadataRetriever,
-        val durationMs: Long,
-        val closeDataSource: (() -> Unit)? = null,
+    private data class FrameCacheKey(
+        val targetPositionMs: Long,
+        val preserveFullFrame: Boolean,
     )
 
-    suspend fun prepareVideo(
+    private class FrameMemoryCache(private val maximumEntries: Int) {
+        private val entries = LinkedHashMap<FrameCacheKey, SeekPreviewFrame>(
+            maximumEntries,
+            0.75f,
+            true,
+        )
+
+        operator fun get(key: FrameCacheKey): SeekPreviewFrame? = entries[key]
+
+        fun put(key: FrameCacheKey, frame: SeekPreviewFrame) {
+            entries[key] = frame
+            while (entries.size > maximumEntries) {
+                val eldestKey = entries.entries.iterator().next().key
+                entries.remove(eldestKey)
+            }
+        }
+
+        fun clear() {
+            entries.clear()
+        }
+    }
+
+    private data class PreparedSession(
+        val videoPath: String,
+        val extractor: FrameExtractor,
+        val cache: FrameMemoryCache,
+    )
+
+    suspend fun prepare(
         context: Context,
         videoPath: String,
     ): Unit = withContext(previewDispatcher) {
         sessionMutex.withLock {
-            obtainPreparedSessionLocked(context, videoPath)
+            obtainPreparedSessionLocked(context.applicationContext, videoPath)
         }
     }
 
-    suspend fun clearPreparedVideo(videoPath: String? = null) = withContext(previewDispatcher) {
+    suspend fun release(videoPath: String? = null) = withContext(previewDispatcher) {
         sessionMutex.withLock {
             val currentSession = preparedSession ?: return@withLock
             if (videoPath == null || currentSession.videoPath == videoPath) {
@@ -64,90 +110,91 @@ object VideoFramePreviewExtractor {
         }
     }
 
-    suspend fun extractPreviewFrame(
+    suspend fun requestFrame(
         context: Context,
         videoPath: String,
         targetPositionMs: Long,
         preserveFullFrame: Boolean = false,
-    ): String? = withContext(previewDispatcher) {
-        val extractionStartedAtMs = SystemClock.elapsedRealtime()
-        val previewDir = File(context.cacheDir, "seek_previews").apply { mkdirs() }
-        val cacheKey = videoPath.toByteArray()
-        val fileHash =
-            MessageDigest.getInstance("MD5")
-                .digest(cacheKey)
-                .joinToString("") { "%02x".format(it) }
+    ): SeekPreviewFrame? = withContext(previewDispatcher) {
+        val startedAtMs = SystemClock.elapsedRealtime()
         val safeTargetPositionMs = targetPositionMs.coerceAtLeast(0L)
-        val frameVariant = if (preserveFullFrame) "_full" else ""
-        val previewFile = File(
-            previewDir,
-            "seek_preview_${CACHE_VERSION}_${fileHash}_${safeTargetPositionMs}${frameVariant}.jpg",
-        )
-        val tempFile = File(
-            previewDir,
-            "seek_preview_${CACHE_VERSION}_${fileHash}_${safeTargetPositionMs}${frameVariant}.tmp",
-        )
-
-        if (previewFile.exists() && previewFile.length() > 0L) {
-            return@withContext previewFile.absolutePath
-        }
+        val cacheKey = FrameCacheKey(safeTargetPositionMs, preserveFullFrame)
 
         try {
-            sessionMutex.withLock {
-                val session =
-                    obtainPreparedSessionLocked(context, videoPath) ?: return@withContext null
-                val clampedTargetMs =
-                    if (session.durationMs > 0L) {
-                        targetPositionMs.coerceIn(0L, session.durationMs)
+            sessionMutex.lock()
+            try {
+                val session = obtainPreparedSessionLocked(context.applicationContext, videoPath)
+                session?.cache?.get(cacheKey)?.let { cached ->
+                    Log.d(TAG, "Seek preview cache hit targetMs=$safeTargetPositionMs")
+                    return@withContext cached
+                }
+
+                val extractedFrame =
+                    if (session != null) {
+                        extractWithFrameExtractor(
+                            session = session,
+                            requestedPositionMs = safeTargetPositionMs,
+                            preserveFullFrame = preserveFullFrame,
+                        )
                     } else {
-                        targetPositionMs.coerceAtLeast(0L)
+                        null
                     }
 
-                val previewBitmap =
-                    extractPreviewBitmap(
-                        retriever = session.retriever,
-                        durationMs = session.durationMs,
-                        targetPositionMs = clampedTargetMs,
-                        preserveFullFrame = preserveFullFrame,
-                    ) ?: return@withContext null
-
-                tempFile.outputStream().use { output ->
-                    previewBitmap.compress(Bitmap.CompressFormat.JPEG, 85, output)
-                }
-                if (tempFile != previewFile) {
-                    if (previewFile.exists()) {
-                        previewFile.delete()
-                    }
-                    tempFile.copyTo(previewFile, overwrite = true)
-                    tempFile.delete()
-                }
-                if (!previewBitmap.isRecycled) {
-                    previewBitmap.recycle()
-                }
-            }
-
-            previewFile.absolutePath
-                .also {
+                val resolvedFrame = extractedFrame ?: extractFallbackFrame(
+                    context = context.applicationContext,
+                    videoPath = videoPath,
+                    requestedPositionMs = safeTargetPositionMs,
+                    preserveFullFrame = preserveFullFrame,
+                )
+                resolvedFrame?.also { frame ->
+                    session?.cache?.put(cacheKey, frame)
                     Log.d(
                         TAG,
-                        "Seek preview ready targetMs=$safeTargetPositionMs " +
-                            "elapsedMs=${SystemClock.elapsedRealtime() - extractionStartedAtMs} " +
-                            "fullFrame=$preserveFullFrame",
+                        "Seek preview ready requestedMs=$safeTargetPositionMs " +
+                            "presentationMs=${frame.presentationPositionMs} " +
+                            "elapsedMs=${SystemClock.elapsedRealtime() - startedAtMs} " +
+                        "fullFrame=$preserveFullFrame",
                     )
                 }
+            } finally {
+                sessionMutex.unlock()
+            }
+        } catch (cancelled: CancellationException) {
+            Log.d(TAG, "Seek preview cancelled targetMs=$safeTargetPositionMs")
+            throw cancelled
+        } catch (error: Exception) {
+            Log.w(
+                TAG,
+                "Failed to extract seek preview for path=$videoPath at ${targetPositionMs}ms",
+                error,
+            )
+            null
+        }
+    }
+
+    private suspend fun extractWithFrameExtractor(
+        session: PreparedSession,
+        requestedPositionMs: Long,
+        preserveFullFrame: Boolean,
+    ): SeekPreviewFrame? {
+        return try {
+            val extracted = session.extractor.getFrame(requestedPositionMs).awaitCancellable()
+            val normalizedBitmap =
+                if (preserveFullFrame) extracted.bitmap else normalizePreviewFrame(extracted.bitmap)
+            SeekPreviewFrame(
+                requestedPositionMs = requestedPositionMs,
+                presentationPositionMs = extracted.presentationTimeMs,
+                bitmap = normalizedBitmap,
+            )
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (error: Exception) {
             Log.w(
                 TAG,
-                "Failed to extract seek preview for path=$videoPath at ${targetPositionMs}ms: ${error.message}",
+                "FrameExtractor failed at ${requestedPositionMs}ms; using sync-frame fallback",
                 error,
             )
             null
-        } finally {
-            if (tempFile.exists()) {
-                tempFile.delete()
-            }
         }
     }
 
@@ -159,188 +206,89 @@ object VideoFramePreviewExtractor {
 
         releasePreparedSessionLocked()
 
-        val retriever = MediaMetadataRetriever()
-        var closeDataSource: (() -> Unit)? = null
-
-        try {
-            val uri = videoPath.toUri()
-            when (uri.scheme) {
-                "smb" -> {
-                    val smbClient = blackark.app.vr.AppState.smbClient ?: return null
-                    val smbFile = smbClient.getSmbFile(videoPath)
-                    val dataSource = SmbMediaDataSource(smbFile)
-                    closeDataSource = { runCatching { dataSource.close() } }
-                    retriever.setDataSource(dataSource)
+        return try {
+            val mediaSourceFactory =
+                if (videoPath.startsWith("smb://", ignoreCase = true)) {
+                    val config = AppState.smbConfig ?: return null
+                    DefaultMediaSourceFactory(SMBDataSource.Factory(config))
+                } else {
+                    DefaultMediaSourceFactory(DefaultDataSource.Factory(context))
                 }
+            val seekConfig = RuntimeConfigRegistry.current.seekPreview
+            val extractor = FrameExtractor.Builder(context, MediaItem.fromUri(videoPath))
+                .setMediaSourceFactory(mediaSourceFactory)
+                .setMediaCodecSelector(MediaCodecSelector.DEFAULT)
+                .setSeekParameters(SeekParameters.CLOSEST_SYNC)
+                .setEffects(listOf(Presentation.createForHeight(seekConfig.frameHeight)))
+                .build()
 
-                "file" -> {
-                    retriever.setDataSource(uri.path ?: videoPath)
-                }
-
-                "content" -> {
-                    retriever.setDataSource(context, uri)
-                }
-
-                else -> {
-                    retriever.setDataSource(videoPath)
-                }
-            }
-
-            val durationMs =
-                retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
-                    ?.toLongOrNull()
-                    ?.coerceAtLeast(0L)
-                    ?: 0L
-
-            return PreparedSession(
+            PreparedSession(
                 videoPath = videoPath,
-                retriever = retriever,
-                durationMs = durationMs,
-                closeDataSource = closeDataSource,
+                extractor = extractor,
+                cache = FrameMemoryCache(seekConfig.memoryEntries),
             ).also { session ->
                 preparedSession = session
-                Log.d(TAG, "Prepared reusable preview session for path=$videoPath")
+                Log.d(TAG, "Prepared Media3 frame extractor for path=$videoPath")
             }
         } catch (error: Exception) {
-            runCatching { retriever.release() }
-            closeDataSource?.invoke()
-            Log.w(
-                TAG,
-                "Failed to prepare preview session for path=$videoPath: ${error.message}",
-                error
-            )
-            return null
+            Log.w(TAG, "Failed to prepare Media3 frame extractor for path=$videoPath", error)
+            null
         }
     }
 
     private fun releasePreparedSessionLocked() {
         val currentSession = preparedSession ?: return
-        runCatching { currentSession.retriever.release() }
-        currentSession.closeDataSource?.invoke()
+        currentSession.cache.clear()
+        runCatching { currentSession.extractor.close() }
         preparedSession = null
     }
 
-    private fun extractPreviewBitmap(
-        retriever: MediaMetadataRetriever,
-        durationMs: Long,
-        targetPositionMs: Long,
+    private fun extractFallbackFrame(
+        context: Context,
+        videoPath: String,
+        requestedPositionMs: Long,
         preserveFullFrame: Boolean,
-    ): Bitmap? {
-        val candidateTimesUs = buildCandidateTimesUs(durationMs, targetPositionMs)
-        val extractionOptions =
-            listOf(
+    ): SeekPreviewFrame? {
+        val retriever = MediaMetadataRetriever()
+        var closeDataSource: (() -> Unit)? = null
+        return try {
+            val uri = videoPath.toUri()
+            when (uri.scheme) {
+                "smb" -> {
+                    val smbClient = AppState.smbClient ?: return null
+                    val dataSource = SmbMediaDataSource(smbClient.getSmbFile(videoPath))
+                    closeDataSource = { runCatching { dataSource.close() } }
+                    retriever.setDataSource(dataSource)
+                }
+
+                "file" -> retriever.setDataSource(uri.path ?: videoPath)
+                "content" -> retriever.setDataSource(context, uri)
+                else -> retriever.setDataSource(videoPath)
+            }
+
+            val seekConfig = RuntimeConfigRegistry.current.seekPreview
+            val bitmap = retriever.getScaledFrameAtTime(
+                requestedPositionMs * 1_000L,
                 MediaMetadataRetriever.OPTION_CLOSEST_SYNC,
-                MediaMetadataRetriever.OPTION_PREVIOUS_SYNC,
-                MediaMetadataRetriever.OPTION_NEXT_SYNC,
-                MediaMetadataRetriever.OPTION_CLOSEST,
+                seekConfig.fallbackFrameWidth,
+                seekConfig.frameHeight,
+            ) ?: return null
+            SeekPreviewFrame(
+                requestedPositionMs = requestedPositionMs,
+                presentationPositionMs = requestedPositionMs,
+                bitmap = if (preserveFullFrame) bitmap else normalizePreviewFrame(bitmap),
             )
-        var blankFallback: Bitmap? = null
-
-        for (candidateTimeUs in candidateTimesUs) {
-            for (option in extractionOptions) {
-                try {
-                    val bitmap =
-                        retriever.getScaledFrameAtTime(
-                            candidateTimeUs,
-                            option,
-                            PREVIEW_FRAME_WIDTH,
-                            PREVIEW_FRAME_HEIGHT,
-                        ) ?: retriever.getFrameAtTime(candidateTimeUs, option)
-                    if (bitmap != null) {
-                        val normalized =
-                            if (preserveFullFrame) {
-                                bitmap
-                            } else {
-                                normalizePreviewFrame(bitmap)
-                            }
-                        if (!isLikelyBlankFrame(normalized)) {
-                            blankFallback?.takeUnless(Bitmap::isRecycled)?.recycle()
-                            return normalized
-                        }
-                        if (blankFallback == null) {
-                            blankFallback = normalized
-                        } else if (!normalized.isRecycled) {
-                            normalized.recycle()
-                        }
-                        break
-                    }
-                } catch (error: Exception) {
-                    Log.v(
-                        TAG,
-                        "Seek preview extraction failed at ${candidateTimeUs / 1_000_000.0}s option=$option: ${error.message}",
-                    )
-                }
-            }
+        } catch (error: Exception) {
+            Log.w(TAG, "Sync-frame fallback failed at ${requestedPositionMs}ms", error)
+            null
+        } finally {
+            runCatching { retriever.release() }
+            closeDataSource?.invoke()
         }
-
-        return blankFallback
-    }
-
-    private fun isLikelyBlankFrame(bitmap: Bitmap): Boolean {
-        if (bitmap.width <= 0 || bitmap.height <= 0) return true
-
-        var minimumLuma = 255
-        var maximumLuma = 0
-        var totalLuma = 0L
-        var sampleCount = 0
-        val columns = 10
-        val rows = 6
-        for (row in 0 until rows) {
-            val y = ((row + 0.5f) * bitmap.height / rows)
-                .toInt()
-                .coerceIn(0, bitmap.height - 1)
-            for (column in 0 until columns) {
-                val x = ((column + 0.5f) * bitmap.width / columns)
-                    .toInt()
-                    .coerceIn(0, bitmap.width - 1)
-                val color = bitmap.getPixel(x, y)
-                val red = color shr 16 and 0xff
-                val green = color shr 8 and 0xff
-                val blue = color and 0xff
-                val luma = (red * 54 + green * 183 + blue * 19) shr 8
-                minimumLuma = minOf(minimumLuma, luma)
-                maximumLuma = maxOf(maximumLuma, luma)
-                totalLuma += luma
-                sampleCount += 1
-            }
-        }
-
-        val averageLuma = if (sampleCount == 0) 0f else totalLuma.toFloat() / sampleCount
-        return averageLuma < 12f && maximumLuma - minimumLuma < 18
-    }
-
-    private fun buildCandidateTimesUs(
-        durationMs: Long,
-        targetPositionMs: Long,
-    ): List<Long> {
-        val durationUs = if (durationMs > 0L) durationMs * 1_000L else Long.MAX_VALUE
-        val targetUs = targetPositionMs * 1_000L
-        val offsetsUs =
-            listOf(
-                0L,
-                -750_000L,
-                750_000L,
-                -1_500_000L,
-                1_500_000L,
-                -3_000_000L,
-                3_000_000L,
-            )
-
-        return offsetsUs
-            .map { offsetUs ->
-                val candidate = targetUs + offsetUs
-                if (durationUs == Long.MAX_VALUE) {
-                    candidate.coerceAtLeast(0L)
-                } else {
-                    candidate.coerceIn(0L, durationUs)
-                }
-            }
-            .distinct()
     }
 
     private fun normalizePreviewFrame(bitmap: Bitmap): Bitmap {
-        val inferredProfile =
-            inferDisplayProfileFromFrame(bitmap.width, bitmap.height) ?: return bitmap
+        val inferredProfile = inferDisplayProfileFromFrame(bitmap.width, bitmap.height) ?: return bitmap
         return try {
             when (inferredProfile.stereoMode) {
                 "SideBySide" -> Bitmap.createBitmap(bitmap, 0, 0, bitmap.width / 2, bitmap.height)
@@ -356,6 +304,24 @@ object VideoFramePreviewExtractor {
         }
     }
 
+    private suspend fun <T> ListenableFuture<T>.awaitCancellable(): T =
+        suspendCancellableCoroutine { continuation ->
+            continuation.invokeOnCancellation { cancel(true) }
+            addListener(
+                {
+                    if (!continuation.isActive) return@addListener
+                    try {
+                        continuation.resume(get())
+                    } catch (error: ExecutionException) {
+                        continuation.resumeWithException(error.cause ?: error)
+                    } catch (error: Exception) {
+                        continuation.resumeWithException(error)
+                    }
+                },
+                directExecutor,
+            )
+        }
+
     private class SmbMediaDataSource(
         smbFile: SmbFile,
     ) : MediaDataSource() {
@@ -365,15 +331,9 @@ object VideoFramePreviewExtractor {
         override fun getSize(): Long = fileSize
 
         override fun readAt(position: Long, buffer: ByteArray, offset: Int, size: Int): Int {
-            if (size == 0) {
-                return 0
-            }
-            if (position < 0L || offset < 0 || size < 0 || offset + size > buffer.size) {
-                return -1
-            }
-            if (fileSize >= 0L && position >= fileSize) {
-                return -1
-            }
+            if (size == 0) return 0
+            if (position < 0L || offset < 0 || size < 0 || offset + size > buffer.size) return -1
+            if (fileSize >= 0L && position >= fileSize) return -1
 
             return try {
                 synchronized(randomAccessFile) {

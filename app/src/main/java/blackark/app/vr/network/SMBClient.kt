@@ -5,6 +5,7 @@ import jcifs.config.PropertyConfiguration
 import jcifs.context.BaseContext
 import jcifs.smb.NtlmPasswordAuthenticator
 import jcifs.smb.SmbFile
+import blackark.app.vr.remote.RuntimeConfigRegistry
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.InputStream
@@ -244,12 +245,8 @@ class SMBClient(private val config: SMBConfig) {
 
     companion object {
         fun isVideoFile(fileName: String): Boolean {
-            val videoExtensions = setOf(
-                "mp4", "mkv", "avi", "mov", "wmv", "flv", "webm",
-                "m4v", "mpg", "mpeg", "3gp", "ts", "m2ts"
-            )
             val extension = fileName.substringAfterLast('.', "").lowercase()
-            return extension in videoExtensions
+            return extension in RuntimeConfigRegistry.current.metadata.videoExtensions
         }
     }
 }

@@ -1,6 +1,33 @@
 package blackark.app.vr.utils
 
 import android.content.Context
+import blackark.app.vr.remote.RuntimeConfigRegistry
+
+internal data class PreviewVolumeToggleResult(
+    val volume: Float,
+    val lastAudibleVolume: Float,
+)
+
+internal fun normalizePreviewVolume(volume: Float): Float = volume.coerceIn(0f, 1f)
+
+internal fun togglePreviewMute(
+    currentVolume: Float,
+    lastAudibleVolume: Float,
+): PreviewVolumeToggleResult {
+    val normalizedCurrent = normalizePreviewVolume(currentVolume)
+    return if (normalizedCurrent > 0f) {
+        PreviewVolumeToggleResult(
+            volume = 0f,
+            lastAudibleVolume = normalizedCurrent,
+        )
+    } else {
+        val restored = lastAudibleVolume.coerceIn(0.01f, 1f)
+        PreviewVolumeToggleResult(
+            volume = restored,
+            lastAudibleVolume = restored,
+        )
+    }
+}
 
 object AppSettingsStore {
 
@@ -22,13 +49,18 @@ object AppSettingsStore {
         "immersive_subtitle_vertical_offset_meters"
     private const val KEY_LIBRARY_HOVER_PREVIEW_ENABLED = "library_hover_preview_enabled"
     private const val KEY_SMB_HOVER_PREVIEW_ENABLED = "smb_hover_preview_enabled"
+    private const val KEY_PREVIEW_VOLUME = "preview_volume"
+    private const val KEY_LAST_AUDIBLE_PREVIEW_VOLUME = "last_audible_preview_volume"
     private const val KEY_LAST_FOLDER_PREFIX = "last_folder_server_"
 
     private fun prefs(context: Context) =
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
     fun isBackgroundIndexingEnabled(context: Context): Boolean {
-        return prefs(context).getBoolean(KEY_BACKGROUND_INDEXING_ENABLED, false)
+        return prefs(context).getBoolean(
+            KEY_BACKGROUND_INDEXING_ENABLED,
+            RuntimeConfigRegistry.current.defaults.backgroundIndexingEnabled,
+        )
     }
 
     fun setBackgroundIndexingEnabled(context: Context, enabled: Boolean) {
@@ -39,17 +71,51 @@ object AppSettingsStore {
     }
 
     fun isLibraryHoverPreviewEnabled(context: Context): Boolean =
-        prefs(context).getBoolean(KEY_LIBRARY_HOVER_PREVIEW_ENABLED, true)
+        prefs(context).getBoolean(
+            KEY_LIBRARY_HOVER_PREVIEW_ENABLED,
+            RuntimeConfigRegistry.current.defaults.libraryHoverPreviewEnabled,
+        )
 
     fun setLibraryHoverPreviewEnabled(context: Context, enabled: Boolean) {
         prefs(context).edit().putBoolean(KEY_LIBRARY_HOVER_PREVIEW_ENABLED, enabled).apply()
     }
 
     fun isSmbHoverPreviewEnabled(context: Context): Boolean =
-        prefs(context).getBoolean(KEY_SMB_HOVER_PREVIEW_ENABLED, true)
+        prefs(context).getBoolean(
+            KEY_SMB_HOVER_PREVIEW_ENABLED,
+            RuntimeConfigRegistry.current.defaults.smbHoverPreviewEnabled,
+        )
 
     fun setSmbHoverPreviewEnabled(context: Context, enabled: Boolean) {
         prefs(context).edit().putBoolean(KEY_SMB_HOVER_PREVIEW_ENABLED, enabled).apply()
+    }
+
+    fun getPreviewVolume(context: Context): Float =
+        normalizePreviewVolume(
+            prefs(context).getFloat(
+                KEY_PREVIEW_VOLUME,
+                RuntimeConfigRegistry.current.preview.defaultVolume,
+            )
+        )
+
+    fun getLastAudiblePreviewVolume(context: Context): Float =
+        normalizePreviewVolume(
+            prefs(context).getFloat(
+                KEY_LAST_AUDIBLE_PREVIEW_VOLUME,
+                getPreviewVolume(context).takeIf { it > 0f } ?: 1f,
+            )
+        ).coerceAtLeast(0.01f)
+
+    fun setPreviewVolume(context: Context, volume: Float) {
+        val normalized = normalizePreviewVolume(volume)
+        prefs(context).edit()
+            .putFloat(KEY_PREVIEW_VOLUME, normalized)
+            .apply {
+                if (normalized > 0f) {
+                    putFloat(KEY_LAST_AUDIBLE_PREVIEW_VOLUME, normalized)
+                }
+            }
+            .apply()
     }
 
     fun getLastFolder(context: Context, serverId: Long): String? =
@@ -62,7 +128,10 @@ object AppSettingsStore {
     }
 
     fun isHandTrackingEnabled(context: Context): Boolean {
-        return prefs(context).getBoolean(KEY_HAND_TRACKING_ENABLED, true)
+        return prefs(context).getBoolean(
+            KEY_HAND_TRACKING_ENABLED,
+            RuntimeConfigRegistry.current.defaults.handTrackingEnabled,
+        )
     }
 
     fun setHandTrackingEnabled(context: Context, enabled: Boolean) {
@@ -73,7 +142,10 @@ object AppSettingsStore {
     }
 
     fun isPlaybackUiHeadFollowEnabled(context: Context): Boolean =
-        prefs(context).getBoolean(KEY_PLAYBACK_UI_HEAD_FOLLOW_ENABLED, true)
+        prefs(context).getBoolean(
+            KEY_PLAYBACK_UI_HEAD_FOLLOW_ENABLED,
+            RuntimeConfigRegistry.current.defaults.playbackControlsHeadFollowEnabled,
+        )
 
     fun setPlaybackUiHeadFollowEnabled(context: Context, enabled: Boolean) {
         prefs(context)

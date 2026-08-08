@@ -1,0 +1,27 @@
+name: Validate remote config
+
+on:
+  pull_request:
+    paths:
+      - "remote-config/**"
+      - "scripts/validate_remote_manifest.py"
+      - ".github/workflows/remote-config-validate.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "remote-config/**"
+      - "scripts/validate_remote_manifest.py"
+      - ".github/workflows/remote-config-validate.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate internal manifest
+        run: python3 scripts/validate_remote_manifest.py

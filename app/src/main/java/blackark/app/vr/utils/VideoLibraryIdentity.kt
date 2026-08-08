@@ -2,8 +2,9 @@ package blackark.app.vr.utils
 
 import blackark.app.vr.network.SMBClient
 import blackark.app.vr.network.SMBFileItem
+import blackark.app.vr.remote.RuntimeConfigRegistry
 
-private val videoFileCodePattern = Regex("""(?i)([a-z]{2,10})[-_](\d{2,5})(?!\d)""")
+private val bundledVideoFileCodePattern = Regex("""(?i)([a-z]{2,10})[-_ ]?(\d{2,6})(?!\d)""")
 private val multipartVideoPattern = Regex(
     """^(.*?)[ _-](?:(?:cd|pt|part)[ _-]?)?(\d{1,2})$""",
     RegexOption.IGNORE_CASE,
@@ -65,15 +66,28 @@ internal fun groupMultipartVideoFiles(
 
 fun extractNormalizedCodeFromFileName(fileName: String): String? {
     val stem = fileName.substringBeforeLast('.', fileName)
-    val directMatch = videoFileCodePattern.find(stem)
+    val configuredPattern = runCatching {
+        Regex(RuntimeConfigRegistry.current.metadata.contentIdPattern)
+    }.getOrDefault(bundledVideoFileCodePattern)
+    val directMatch = configuredPattern.find(stem)
     if (directMatch != null) {
-        return "${directMatch.groupValues[1].uppercase()}-${directMatch.groupValues[2]}"
+        val studio = directMatch.groupValues.getOrNull(1)?.takeIf(String::isNotBlank)
+        val number = directMatch.groupValues.getOrNull(2)?.takeIf(String::isNotBlank)
+        if (studio != null && number != null) {
+            return "${studio.uppercase()}-$number"
+        }
     }
 
     val groupKey = extractVirtualGroupKey(fileName) ?: return null
-    val groupMatch = videoFileCodePattern.find(groupKey)
+    val groupMatch = configuredPattern.find(groupKey)
     return if (groupMatch != null) {
-        "${groupMatch.groupValues[1].uppercase()}-${groupMatch.groupValues[2]}"
+        val studio = groupMatch.groupValues.getOrNull(1)?.takeIf(String::isNotBlank)
+        val number = groupMatch.groupValues.getOrNull(2)?.takeIf(String::isNotBlank)
+        if (studio != null && number != null) {
+            "${studio.uppercase()}-$number"
+        } else {
+            groupKey.trim().uppercase().takeIf { it.isNotBlank() }
+        }
     } else {
         groupKey.trim().uppercase().takeIf { it.isNotBlank() }
     }

@@ -26,6 +26,7 @@ import java.net.URLEncoder
 import java.time.LocalDate
 import java.time.format.DateTimeParseException
 import java.util.concurrent.ConcurrentHashMap
+import blackark.app.vr.remote.RuntimeConfigRegistry
 
 data class JvrCastMetadata(
     val performerId: String,
@@ -58,7 +59,6 @@ data class PersistedMetadataLookup(
 object JvrLibraryMetadataProvider {
 
     private const val TAG = "JvrLibraryMetadata"
-    private const val BASE_URL = "https://jvrlibrary.com"
     private const val USER_AGENT =
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15"
 
@@ -71,7 +71,6 @@ object JvrLibraryMetadataProvider {
     private const val ALIAS_KIND_LEGACY = "legacy"
 
     // Minimum delay between metadata requests to the same remote host.
-    private const val THROTTLED_REQUEST_INTERVAL_MS = 300L
     private val THROTTLED_HOSTS = setOf(
         "jvrlibrary.com",
         "av-wiki.net",
@@ -95,9 +94,13 @@ object JvrLibraryMetadataProvider {
         Regex("^\\s*n\\s*/?\\s*a\\s*$", RegexOption.IGNORE_CASE),
         Regex("^\\s*(?:null|none|undefined|error)\\s*$", RegexOption.IGNORE_CASE),
     )
-    private const val VR_TOKEN_PATTERN = "(?:VR|8K|8KVR|VR8K)"
-    private const val VR_BRACKET_TAG_PATTERN =
-        "(?:\\[(?:$VR_TOKEN_PATTERN)(?:\\s*(?:$VR_TOKEN_PATTERN))*]|【(?:$VR_TOKEN_PATTERN)(?:\\s*(?:$VR_TOKEN_PATTERN))*】)"
+    private fun baseUrl(): String = RuntimeConfigRegistry.current.metadata.baseUrl
+
+    private fun vrBracketTagPattern(): String {
+        val tokenPattern = RuntimeConfigRegistry.current.metadata.vrTokenPattern
+        return "(?:\\[(?:$tokenPattern)(?:\\s*(?:$tokenPattern))*]|" +
+            "【(?:$tokenPattern)(?:\\s*(?:$tokenPattern))*】)"
+    }
 
     private fun logMetadataTrace(message: String) {
         Log.v(TAG, message)
@@ -682,7 +685,8 @@ object JvrLibraryMetadataProvider {
     }
 
     private suspend fun fetchByCodeFromAvWiki(code: String): JvrMovieMetadata? {
-        val avWikiUrl = "https://av-wiki.net/${code.lowercase()}/"
+        val avWikiUrl =
+            "${RuntimeConfigRegistry.current.metadata.avWikiBaseUrl.trimEnd('/')}/${code.lowercase()}/"
         logMetadataTrace("Starting AV-Wiki metadata lookup for $code url=$avWikiUrl")
         val html = fetchPageHtml(avWikiUrl) ?: return null
         return parseAvWikiMetadataHtml(code = code, html = html, baseUrl = avWikiUrl)
@@ -690,8 +694,8 @@ object JvrLibraryMetadataProvider {
 
     private suspend fun fetchByCodeFromJvrLibrary(code: String): JvrMovieMetadata? {
         val encodedCode = URLEncoder.encode(code, Charsets.UTF_8.name())
-        val zhUrl = "$BASE_URL/zh/jvr?id=$encodedCode"
-        val enUrl = "$BASE_URL/jvr?id=$encodedCode"
+        val zhUrl = "${baseUrl()}/zh/jvr?id=$encodedCode"
+        val enUrl = "${baseUrl()}/jvr?id=$encodedCode"
 
         logMetadataTrace("Starting JVR metadata lookup for $code")
 
@@ -1096,7 +1100,7 @@ object JvrLibraryMetadataProvider {
                     0L
                 } else {
                     val elapsed = now - lastRequestAt
-                    val remaining = THROTTLED_REQUEST_INTERVAL_MS - elapsed
+                    val remaining = RuntimeConfigRegistry.current.metadata.requestIntervalMs - elapsed
                     if (remaining <= 0L) {
                         lastRequestAtByHost[host] = now
                         0L
@@ -1116,7 +1120,7 @@ object JvrLibraryMetadataProvider {
     }
 
     internal fun parseJvrMetadataHtml(code: String, html: String): JvrMovieMetadata? {
-        val document = Jsoup.parse(html, BASE_URL)
+        val document = Jsoup.parse(html, baseUrl())
         val ogImage = extractMetaContent(document, "og:image")
         val ogDescription = extractMetaContent(document, "og:description")
         val htmlTitle = document.title().takeIf { it.isNotBlank() }
@@ -1459,7 +1463,7 @@ object JvrLibraryMetadataProvider {
             ""
         ).trim()
 
-        val vrTagPattern = VR_BRACKET_TAG_PATTERN
+        val vrTagPattern = vrBracketTagPattern()
         val marker = Regex(
             "$vrTagPattern(?:\\s*$vrTagPattern)*|\\b(?:8KVR|VR8K)\\b",
             RegexOption.IGNORE_CASE
@@ -1474,7 +1478,7 @@ object JvrLibraryMetadataProvider {
     }
 
     private fun stripLeadingVrTags(text: String): String {
-        val vrTagPattern = VR_BRACKET_TAG_PATTERN
+        val vrTagPattern = vrBracketTagPattern()
         return text.replace(
             Regex(
                 "^\\s*(?:$vrTagPattern|(?:8KVR|VR8K))(?:\\s*(?:$vrTagPattern|(?:8KVR|VR8K)))*\\s*",
@@ -1485,7 +1489,7 @@ object JvrLibraryMetadataProvider {
     }
 
     private fun removeVrTagMarkers(text: String): String {
-        val vrTagPattern = VR_BRACKET_TAG_PATTERN
+        val vrTagPattern = vrBracketTagPattern()
         return text
             .replace(Regex(vrTagPattern, RegexOption.IGNORE_CASE), " ")
             .replace(Regex("\\b(?:8KVR|VR8K)\\b", RegexOption.IGNORE_CASE), " ")
@@ -1915,8 +1919,8 @@ object JvrLibraryMetadataProvider {
             value.startsWith("content:", ignoreCase = true) -> value
             value.startsWith("file:", ignoreCase = true) -> value
             value.startsWith("//") -> "https:$value"
-            value.startsWith("/") -> "$BASE_URL$value"
-            else -> "$BASE_URL/$value"
+            value.startsWith("/") -> "${baseUrl()}$value"
+            else -> "${baseUrl()}/$value"
         }
     }
 

@@ -64,4 +64,60 @@ class PlaybackControlsVisibilityPolicyTest {
             )
         }
     }
+
+    @Test
+    fun `seek preview only applies the latest active request`() {
+        assertTrue(
+            shouldApplySeekPreviewFrame(
+                requestGeneration = 4L,
+                currentGeneration = 4L,
+                seekPreviewActive = true,
+                requestedTargetPositionMs = 20_000L,
+                latestTargetPositionMs = 20_000L,
+                frameAvailable = true,
+            )
+        )
+        assertFalse(
+            shouldApplySeekPreviewFrame(
+                requestGeneration = 3L,
+                currentGeneration = 4L,
+                seekPreviewActive = true,
+                requestedTargetPositionMs = 20_000L,
+                latestTargetPositionMs = 20_000L,
+                frameAvailable = true,
+            )
+        )
+        assertFalse(
+            shouldApplySeekPreviewFrame(
+                requestGeneration = 4L,
+                currentGeneration = 4L,
+                seekPreviewActive = false,
+                requestedTargetPositionMs = 20_000L,
+                latestTargetPositionMs = 22_000L,
+                frameAvailable = true,
+            )
+        )
+    }
+
+    @Test
+    fun `first engaged thumbstick input reveals controls and is handled`() {
+        assertEquals(
+            ControllerAxisInputGate.RevealAndHandle,
+            resolveControllerAxisInputGate(
+                showControls = false,
+                x = 0.8f,
+                y = 0f,
+                engageThreshold = 0.45f,
+            ),
+        )
+        assertEquals(
+            ControllerAxisInputGate.Ignore,
+            resolveControllerAxisInputGate(
+                showControls = false,
+                x = 0.1f,
+                y = 0.1f,
+                engageThreshold = 0.45f,
+            ),
+        )
+    }
 }

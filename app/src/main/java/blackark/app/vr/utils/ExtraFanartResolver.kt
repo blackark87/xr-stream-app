@@ -3,8 +3,10 @@ package blackark.app.vr.utils
 import blackark.app.vr.network.LocalFileClient
 import blackark.app.vr.network.SMBClient
 import blackark.app.vr.network.SMBFileItem
+import blackark.app.vr.remote.RuntimeConfigRegistry
 
-private val extraFanartImageExtensions = setOf("jpg", "jpeg", "png", "webp")
+private val extraFanartImageExtensions: Set<String>
+    get() = RuntimeConfigRegistry.current.metadata.imageExtensions.toSet()
 private val naturalNameChunkPattern = Regex("""\d+|\D+""")
 
 class ExtraFanartResolver(

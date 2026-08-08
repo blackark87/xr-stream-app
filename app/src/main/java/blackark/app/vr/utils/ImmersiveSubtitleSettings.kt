@@ -1,22 +1,44 @@
 package blackark.app.vr.utils
 
 import androidx.xr.runtime.math.Vector3
+import blackark.app.vr.remote.RuntimeConfigRegistry
 import kotlin.math.roundToInt
 
-const val MIN_IMMERSIVE_SUBTITLE_DISTANCE_METERS = 0.7f
-const val MAX_IMMERSIVE_SUBTITLE_DISTANCE_METERS = 2.0f
-const val DEFAULT_IMMERSIVE_SUBTITLE_DISTANCE_METERS = 1.5f
+val MIN_IMMERSIVE_SUBTITLE_DISTANCE_METERS: Float
+    get() = RuntimeConfigRegistry.current.subtitles.minDistanceMeters
+val MAX_IMMERSIVE_SUBTITLE_DISTANCE_METERS: Float
+    get() = RuntimeConfigRegistry.current.subtitles.maxDistanceMeters
+val DEFAULT_IMMERSIVE_SUBTITLE_DISTANCE_METERS: Float
+    get() = RuntimeConfigRegistry.current.subtitles.defaultDistanceMeters
 const val IMMERSIVE_SUBTITLE_REFERENCE_DISTANCE_METERS = 1.75f
 const val IMMERSIVE_SUBTITLE_DISTANCE_STEP_METERS = 0.1f
-const val IMMERSIVE_SUBTITLE_DISTANCE_SLIDER_STEPS = 12
-const val MIN_IMMERSIVE_UI_HORIZONTAL_OFFSET_METERS = -0.30f
-const val MAX_IMMERSIVE_UI_HORIZONTAL_OFFSET_METERS = 0.30f
-const val DEFAULT_IMMERSIVE_UI_HORIZONTAL_OFFSET_METERS = 0.0f
-const val IMMERSIVE_UI_HORIZONTAL_OFFSET_SLIDER_STEPS = 11
-const val MIN_IMMERSIVE_SUBTITLE_VERTICAL_OFFSET_METERS = -0.15f
-const val MAX_IMMERSIVE_SUBTITLE_VERTICAL_OFFSET_METERS = 0.15f
-const val DEFAULT_IMMERSIVE_SUBTITLE_VERTICAL_OFFSET_METERS = 0.15f
-const val IMMERSIVE_SUBTITLE_VERTICAL_OFFSET_SLIDER_STEPS = 29
+val IMMERSIVE_SUBTITLE_DISTANCE_SLIDER_STEPS: Int
+    get() = (
+        (MAX_IMMERSIVE_SUBTITLE_DISTANCE_METERS - MIN_IMMERSIVE_SUBTITLE_DISTANCE_METERS) /
+            IMMERSIVE_SUBTITLE_DISTANCE_STEP_METERS
+    ).roundToInt().minus(1).coerceAtLeast(0)
+val MIN_IMMERSIVE_UI_HORIZONTAL_OFFSET_METERS: Float
+    get() = RuntimeConfigRegistry.current.subtitles.minHorizontalOffsetMeters
+val MAX_IMMERSIVE_UI_HORIZONTAL_OFFSET_METERS: Float
+    get() = RuntimeConfigRegistry.current.subtitles.maxHorizontalOffsetMeters
+val DEFAULT_IMMERSIVE_UI_HORIZONTAL_OFFSET_METERS: Float
+    get() = RuntimeConfigRegistry.current.subtitles.defaultHorizontalOffsetMeters
+val IMMERSIVE_UI_HORIZONTAL_OFFSET_SLIDER_STEPS: Int
+    get() = (
+        (MAX_IMMERSIVE_UI_HORIZONTAL_OFFSET_METERS -
+            MIN_IMMERSIVE_UI_HORIZONTAL_OFFSET_METERS) / 0.05f
+    ).roundToInt().minus(1).coerceAtLeast(0)
+val MIN_IMMERSIVE_SUBTITLE_VERTICAL_OFFSET_METERS: Float
+    get() = RuntimeConfigRegistry.current.subtitles.minVerticalOffsetMeters
+val MAX_IMMERSIVE_SUBTITLE_VERTICAL_OFFSET_METERS: Float
+    get() = RuntimeConfigRegistry.current.subtitles.maxVerticalOffsetMeters
+val DEFAULT_IMMERSIVE_SUBTITLE_VERTICAL_OFFSET_METERS: Float
+    get() = RuntimeConfigRegistry.current.subtitles.defaultVerticalOffsetMeters
+val IMMERSIVE_SUBTITLE_VERTICAL_OFFSET_SLIDER_STEPS: Int
+    get() = (
+        (MAX_IMMERSIVE_SUBTITLE_VERTICAL_OFFSET_METERS -
+            MIN_IMMERSIVE_SUBTITLE_VERTICAL_OFFSET_METERS) / 0.01f
+    ).roundToInt().minus(1).coerceAtLeast(0)
 
 internal data class ImmersiveSubtitlePlacement(
     val distanceMeters: Float,

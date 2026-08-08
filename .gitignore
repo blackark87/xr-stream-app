@@ -11,8 +11,18 @@ CLAUDE.md
 .gradle/
 .gradle-user/
 .kotlin/
+/gradle/gradle-daemon-jvm.properties
 /local.properties
 local.properties
+keystore.properties
+*.jks
+*.keystore
+*.apk
+*.apks
+*.aab
+/github-token.txt
+/.github-pat
+/secrets.local.properties
 
 # OS files
 .DS_Store
