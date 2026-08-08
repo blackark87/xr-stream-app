@@ -2,7 +2,6 @@ package blackark.app.vr.remote
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.assertThrows
 import org.junit.Test
@@ -40,7 +39,6 @@ class RemoteManifestParserTest {
             {
               "schemaVersion": 1,
               "channel": "internal",
-              "minimumAppVersionCode": 0,
               "unknownRoot": true,
               "runtime": {
                 "preview": {
@@ -69,8 +67,6 @@ class RemoteManifestParserTest {
             """.trimIndent()
         )
 
-        assertEquals(1L, manifest.minimumAppVersionCode)
-        assertNull(manifest.release)
         assertEquals(5_000L, manifest.runtime.preview.focusDelayMs)
         assertEquals(0f, manifest.runtime.preview.defaultVolume, 0f)
         assertTrue(
@@ -90,37 +86,6 @@ class RemoteManifestParserTest {
     }
 
     @Test
-    fun `release is parsed only with valid hashes`() {
-        val hash = "a".repeat(64)
-        val certificate = "b".repeat(64)
-        val manifest = RemoteManifestParser.parse(
-            """
-            {
-              "schemaVersion": 1,
-              "channel": "internal",
-              "minimumAppVersionCode": 10,
-              "runtime": {},
-              "release": {
-                "versionCode": 20,
-                "versionName": "0.1.0-internal.20260808T000000+abcdef0",
-                "gitSha": "abcdef0",
-                "publishedAt": "2026-08-08T00:00:00Z",
-                "assetId": 30,
-                "sizeBytes": 40,
-                "sha256": "$hash",
-                "signingCertificateSha256": "$certificate",
-                "mandatory": true
-              }
-            }
-            """.trimIndent()
-        )
-
-        assertEquals(20L, manifest.release?.versionCode)
-        assertEquals(30L, manifest.release?.assetId)
-        assertTrue(manifest.release?.mandatory == true)
-    }
-
-    @Test
     fun `unsupported schema is rejected`() {
         val error = assertThrows(IllegalArgumentException::class.java) {
             RemoteManifestParser.parse(
@@ -134,7 +99,7 @@ class RemoteManifestParserTest {
     @Test
     fun `last known good manifest is selected when current cache is invalid`() {
         val previous =
-            """{"schemaVersion":1,"channel":"internal","minimumAppVersionCode":1,"runtime":{}}"""
+            """{"schemaVersion":1,"channel":"internal","runtime":{}}"""
 
         val selected = firstValidRemoteManifest(sequenceOf("not-json", previous))
 

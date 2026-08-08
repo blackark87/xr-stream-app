@@ -207,7 +207,6 @@ import blackark.app.vr.network.SmbEndpointParser
 import blackark.app.vr.player.SMBDataSource
 import blackark.app.vr.remote.RemoteConfigStatus
 import blackark.app.vr.remote.GitHubTokenSource
-import blackark.app.vr.remote.UpdateState
 import blackark.app.vr.ui.ApplyHandTrackingPreference
 import blackark.app.vr.ui.components.EmptyState
 import blackark.app.vr.ui.components.FancyFileCard
@@ -3660,10 +3659,8 @@ private fun GitHubRemoteSettingsSection() {
     val application = remember(context) { context as XRStreamApplication }
     val repository = application.container.runtimeConfigRepository
     val credentialStore = application.container.githubCredentialStore
-    val updateManager = application.container.appUpdateManager
     val snapshot by repository.snapshot.collectAsStateWithLifecycle()
     val status by repository.status.collectAsStateWithLifecycle()
-    val updateState by updateManager.state.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     var tokenInput by rememberSaveable { mutableStateOf("") }
     var tokenSource by remember { mutableStateOf(credentialStore.resolution().source) }
@@ -3686,23 +3683,6 @@ private fun GitHubRemoteSettingsSection() {
         )
         is RemoteConfigStatus.Failed -> current.message
     }
-    val updateLabel = when (val current = updateState) {
-        UpdateState.Idle -> stringResource(R.string.update_status_idle)
-        UpdateState.Checking -> stringResource(R.string.update_status_checking)
-        is UpdateState.UpToDate -> stringResource(R.string.update_status_current)
-        is UpdateState.Available -> stringResource(
-            R.string.update_status_available,
-            current.release.versionName,
-        )
-        is UpdateState.Downloading -> stringResource(
-            R.string.update_status_downloading,
-            (current.progress * 100f).roundToInt(),
-        )
-        is UpdateState.ReadyToInstall -> stringResource(R.string.update_status_ready)
-        is UpdateState.Installing -> stringResource(R.string.update_status_installing)
-        is UpdateState.Failed -> current.message
-    }
-
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text(
             text = stringResource(R.string.internal_updates),
@@ -3758,7 +3738,6 @@ private fun GitHubRemoteSettingsSection() {
                                 tokenInput = ""
                                 tokenSource = credentialStore.resolution().source
                                 val refreshed = repository.refresh()
-                                updateManager.check(repository.snapshot.value)
                                 feedback = if (refreshed is RemoteConfigStatus.Failed) {
                                     refreshed.message
                                 } else {
@@ -3819,7 +3798,6 @@ private fun GitHubRemoteSettingsSection() {
                 scope.launch {
                     isWorking = true
                     val refreshed = repository.refresh()
-                    updateManager.check(repository.snapshot.value)
                     feedback = when (refreshed) {
                         is RemoteConfigStatus.Failed -> refreshed.message
                         RemoteConfigStatus.AuthenticationRequired -> context.getString(
@@ -3832,30 +3810,6 @@ private fun GitHubRemoteSettingsSection() {
             },
         ) {
             Text(stringResource(R.string.check_now))
-        }
-        when (val currentUpdate = updateState) {
-            is UpdateState.Available -> {
-                Button(
-                    enabled = hasToken && !isWorking,
-                    onClick = {
-                        scope.launch {
-                            updateManager.downloadAndVerify(currentUpdate.release)
-                        }
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = NetflixRed),
-                ) {
-                    Text(stringResource(R.string.update_now))
-                }
-            }
-            is UpdateState.ReadyToInstall -> {
-                Button(
-                    onClick = { updateManager.requestInstall() },
-                    colors = ButtonDefaults.buttonColors(containerColor = NetflixRed),
-                ) {
-                    Text(stringResource(R.string.install))
-                }
-            }
-            else -> Unit
         }
         if (isWorking) {
             LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
@@ -3880,10 +3834,6 @@ private fun GitHubRemoteSettingsSection() {
             value = repository.lastCheckedAt()
                 ?.let { Instant.ofEpochMilli(it).toString() }
                 ?: stringResource(R.string.never),
-        )
-        SettingsValueRow(
-            title = stringResource(R.string.app_update_status),
-            value = updateLabel,
         )
     }
 }
@@ -3943,10 +3893,6 @@ fun MainDashboardScreen(
     val xrApplication = remember(context) {
         context.applicationContext as XRStreamApplication
     }
-    val runtimeConfigSnapshot by xrApplication.container.runtimeConfigRepository.snapshot
-        .collectAsStateWithLifecycle()
-    val appUpdateState by xrApplication.container.appUpdateManager.state
-        .collectAsStateWithLifecycle()
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val servers by viewModel.servers.collectAsStateWithLifecycle()
     val metadataScopes by viewModel.metadataScopes.collectAsStateWithLifecycle()
@@ -3984,20 +3930,12 @@ fun MainDashboardScreen(
     var activeSettingsAction by remember { mutableStateOf<SettingsAction?>(null) }
     var settingsFeedback by remember { mutableStateOf<SettingsFeedback?>(null) }
     var pendingHomeVideo by remember { mutableStateOf<LibraryVideoItem?>(null) }
-    var deferredUpdateVersionCode by rememberSaveable { mutableStateOf<Long?>(null) }
     val dashboardScope = rememberCoroutineScope()
     val appVersionInfo = remember(context) { resolveAppVersionInfo(context) }
     val shouldShowControllerHandTrackingPrompt =
         hasControllerLikeInputDevice &&
                 uiState.isHandTrackingEnabled &&
                 !uiState.isControllerHandTrackingPromptHandled
-
-    LaunchedEffect(
-        runtimeConfigSnapshot.manifestSha,
-        runtimeConfigSnapshot.manifest?.release?.versionCode,
-    ) {
-        xrApplication.container.appUpdateManager.check(runtimeConfigSnapshot)
-    }
 
     fun clearAllPreviewItems() {
         browserPreviewItem = null
@@ -5004,178 +4942,6 @@ fun MainDashboardScreen(
                 }
             },
         )
-    }
-
-    when (val update = appUpdateState) {
-        is UpdateState.Available -> {
-            if (deferredUpdateVersionCode != update.release.versionCode) {
-                AlertDialog(
-                    onDismissRequest = {
-                        if (!update.required) {
-                            deferredUpdateVersionCode = update.release.versionCode
-                            xrApplication.container.appUpdateManager.dismiss()
-                        }
-                    },
-                    title = {
-                        Text(
-                            stringResource(
-                                if (update.required) {
-                                    R.string.required_update_available_title
-                                } else {
-                                    R.string.update_available_title
-                                }
-                            )
-                        )
-                    },
-                    text = {
-                        Text(
-                            stringResource(
-                                if (update.required) {
-                                    R.string.required_update_available_message
-                                } else {
-                                    R.string.update_available_message
-                                },
-                                update.release.versionName,
-                            )
-                        )
-                    },
-                    confirmButton = {
-                        TextButton(
-                            onClick = {
-                                dashboardScope.launch {
-                                    xrApplication.container.appUpdateManager
-                                        .downloadAndVerify(update.release)
-                                }
-                            },
-                        ) {
-                            Text(stringResource(R.string.update_now), color = NetflixRed)
-                        }
-                    },
-                    dismissButton = {
-                        if (!update.required) {
-                            TextButton(
-                                onClick = {
-                                    deferredUpdateVersionCode = update.release.versionCode
-                                    xrApplication.container.appUpdateManager.dismiss()
-                                },
-                            ) {
-                                Text(stringResource(R.string.later), color = TextSecondary)
-                            }
-                        }
-                    },
-                )
-            }
-        }
-
-        is UpdateState.Downloading -> {
-            AlertDialog(
-                onDismissRequest = {},
-                title = { Text(stringResource(R.string.downloading_update_title)) },
-                text = {
-                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Text(
-                            stringResource(
-                                R.string.update_status_downloading,
-                                (update.progress * 100f).roundToInt(),
-                            )
-                        )
-                        LinearProgressIndicator(
-                            progress = { update.progress },
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                    }
-                },
-                confirmButton = {},
-            )
-        }
-
-        is UpdateState.ReadyToInstall -> {
-            AlertDialog(
-                onDismissRequest = {
-                    xrApplication.container.appUpdateManager.dismiss()
-                },
-                title = { Text(stringResource(R.string.update_ready_title)) },
-                text = { Text(stringResource(R.string.update_ready_message)) },
-                confirmButton = {
-                    TextButton(
-                        onClick = {
-                            xrApplication.container.appUpdateManager.requestInstall()
-                        },
-                    ) {
-                        Text(stringResource(R.string.install), color = NetflixRed)
-                    }
-                },
-                dismissButton = {
-                    TextButton(
-                        onClick = {
-                            deferredUpdateVersionCode = update.release.versionCode
-                            xrApplication.container.appUpdateManager.dismiss()
-                        },
-                    ) {
-                        Text(stringResource(R.string.later), color = TextSecondary)
-                    }
-                },
-            )
-        }
-
-        is UpdateState.Installing -> {
-            AlertDialog(
-                onDismissRequest = {},
-                title = { Text(stringResource(R.string.installing_update_title)) },
-                text = {
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        CircularProgressIndicator(modifier = Modifier.size(28.dp))
-                        Text(stringResource(R.string.installing_update_message))
-                    }
-                },
-                confirmButton = {},
-            )
-        }
-
-        is UpdateState.Failed -> {
-            AlertDialog(
-                onDismissRequest = {
-                    xrApplication.container.appUpdateManager.dismiss()
-                },
-                title = { Text(stringResource(R.string.update_failed_title)) },
-                text = { Text(update.message) },
-                confirmButton = {
-                    TextButton(
-                        onClick = {
-                            val release = update.release
-                            if (release != null) {
-                                dashboardScope.launch {
-                                    xrApplication.container.appUpdateManager
-                                        .downloadAndVerify(release)
-                                }
-                            } else {
-                                xrApplication.container.appUpdateManager.check(
-                                    runtimeConfigSnapshot
-                                )
-                            }
-                        },
-                    ) {
-                        Text(stringResource(R.string.retry), color = NetflixRed)
-                    }
-                },
-                dismissButton = {
-                    TextButton(
-                        onClick = {
-                            xrApplication.container.appUpdateManager.dismiss()
-                        },
-                    ) {
-                        Text(stringResource(R.string.close), color = TextSecondary)
-                    }
-                },
-            )
-        }
-
-        UpdateState.Checking,
-        UpdateState.Idle,
-        is UpdateState.UpToDate -> Unit
     }
 
     if (shouldShowControllerHandTrackingPrompt) {

@@ -118,11 +118,11 @@ class GitHubRemoteConfigClient : RemoteManifestClient {
     }
 
     companion object {
-        const val REPOSITORY_OWNER = "blackark87"
-        const val REPOSITORY_NAME = "xr-stream-app"
-        const val MANIFEST_PATH = "remote-config/internal/manifest.json"
+        private const val REPOSITORY_OWNER = "blackark87"
+        private const val REPOSITORY_NAME = "xr-stream-app"
+        private const val MANIFEST_PATH = "remote-config/internal/manifest.json"
         private const val GITHUB_API_VERSION = "2022-11-28"
-        private const val USER_AGENT = "xr-stream-app-internal-updater"
+        private const val USER_AGENT = "xr-stream-app-runtime-config"
         private const val NETWORK_TIMEOUT_MS = 2_000
         private const val MAX_MANIFEST_RESPONSE_CHARS = 2_000_000
         private const val MAX_MANIFEST_CONTENT_CHARS = 1_000_000

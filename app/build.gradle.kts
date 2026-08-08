@@ -87,18 +87,6 @@ val internalVersionName =
         "$playVersionRaw-$internalDisplayVersion+$internalGitSha"
     }
 val internalBuildTimeUtc = DateTimeFormatter.ISO_INSTANT.format(internalBuildInstant)
-val internalKeystoreFile = providers.environmentVariable("INTERNAL_KEYSTORE_FILE").orNull
-    ?.trim()
-    ?.takeIf(String::isNotBlank)
-val internalKeystorePassword = providers.environmentVariable("INTERNAL_KEYSTORE_PASSWORD").orNull
-val internalKeyAlias = providers.environmentVariable("INTERNAL_KEY_ALIAS").orNull
-val internalKeyPassword = providers.environmentVariable("INTERNAL_KEY_PASSWORD").orNull
-val hasInternalSigningConfiguration = listOf(
-    internalKeystoreFile,
-    internalKeystorePassword,
-    internalKeyAlias,
-    internalKeyPassword,
-).all { !it.isNullOrBlank() }
 
 tasks.register("printInternalVersion") {
     group = "versioning"
@@ -138,21 +126,7 @@ android {
         buildConfigField("String", "BUNDLED_GITHUB_PAT", "\"${escapeForBuildConfig(bundledGitHubPat)}\"")
     }
 
-    val internalSigningConfig = if (hasInternalSigningConfiguration) {
-        signingConfigs.create("internal") {
-            storeFile = file(requireNotNull(internalKeystoreFile))
-            storePassword = requireNotNull(internalKeystorePassword)
-            keyAlias = requireNotNull(internalKeyAlias)
-            keyPassword = requireNotNull(internalKeyPassword)
-        }
-    } else {
-        null
-    }
-
     buildTypes {
-        debug {
-            internalSigningConfig?.let { signingConfig = it }
-        }
         release {
             isMinifyEnabled = false
             proguardFiles(

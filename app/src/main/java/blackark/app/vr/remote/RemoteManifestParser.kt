@@ -2,7 +2,6 @@ package blackark.app.vr.remote
 
 import org.json.JSONArray
 import org.json.JSONObject
-import java.time.Instant
 
 object RemoteManifestParser {
     const val SUPPORTED_SCHEMA_VERSION = 1
@@ -14,24 +13,12 @@ object RemoteManifestParser {
             "Unsupported remote manifest schema $schemaVersion"
         }
         val channel = root.optString("channel", "internal").trim().ifBlank { "internal" }
-        require(channel == "internal") { "Unsupported update channel '$channel'" }
-
-        val minimumAppVersionCode = root.optLong("minimumAppVersionCode", 1L).coerceAtLeast(1L)
-        require(minimumAppVersionCode <= MAX_ANDROID_VERSION_CODE) {
-            "minimumAppVersionCode is too large"
-        }
-        val release = root.optJSONObject("release")?.let(::parseRelease)
-        require(
-            minimumAppVersionCode <= 1L ||
-                (release != null && release.versionCode >= minimumAppVersionCode)
-        ) { "A minimum app version requires a matching release" }
+        require(channel == "internal") { "Unsupported config channel '$channel'" }
 
         return RemoteManifest(
             schemaVersion = schemaVersion,
             channel = channel,
-            minimumAppVersionCode = minimumAppVersionCode,
             runtime = parseRuntime(root.optJSONObject("runtime") ?: JSONObject()).validated(),
-            release = release,
         )
     }
 
@@ -50,7 +37,6 @@ object RemoteManifestParser {
 
         return RuntimeConfig(
             features = FeatureRuntimeConfig(
-                remoteUpdatesEnabled = features.optBoolean("remoteUpdatesEnabled", bundled.features.remoteUpdatesEnabled),
                 motionPreviewEnabled = features.optBoolean("motionPreviewEnabled", bundled.features.motionPreviewEnabled),
                 generatedSeekPreviewEnabled = features.optBoolean(
                     "generatedSeekPreviewEnabled",
@@ -263,44 +249,8 @@ object RemoteManifestParser {
         )
     }
 
-    private fun parseRelease(json: JSONObject): RemoteRelease {
-        val release = RemoteRelease(
-            versionCode = json.requireLong("versionCode"),
-            versionName = json.requireString("versionName"),
-            gitSha = json.requireString("gitSha"),
-            publishedAt = json.requireString("publishedAt"),
-            assetId = json.requireLong("assetId"),
-            sizeBytes = json.requireLong("sizeBytes"),
-            sha256 = json.requireString("sha256").lowercase(),
-            signingCertificateSha256 = json.requireString("signingCertificateSha256").lowercase(),
-            mandatory = json.optBoolean("mandatory", false),
-        )
-        require(release.versionCode > 0L)
-        require(release.versionCode <= MAX_ANDROID_VERSION_CODE)
-        require(release.assetId > 0L)
-        require(release.sizeBytes in 1L..MAX_APK_SIZE_BYTES)
-        require(INTERNAL_VERSION_NAME_PATTERN.matches(release.versionName)) {
-            "Invalid internal release version name"
-        }
-        require(GIT_SHA_PATTERN.matches(release.gitSha)) { "Invalid release Git SHA" }
-        require(runCatching { Instant.parse(release.publishedAt) }.isSuccess) {
-            "Invalid release publication time"
-        }
-        require(SHA_256_PATTERN.matches(release.sha256)) { "Invalid release SHA-256" }
-        require(SHA_256_PATTERN.matches(release.signingCertificateSha256)) {
-            "Invalid signing certificate SHA-256"
-        }
-        return release
-    }
-
-    private fun JSONObject.requireString(name: String): String =
-        getString(name).trim().also { require(it.isNotBlank()) { "Missing '$name'" } }
-
     private fun JSONObject.requireInt(name: String): Int =
         getInt(name)
-
-    private fun JSONObject.requireLong(name: String): Long =
-        getLong(name)
 
     private fun JSONArray.toStringList(): List<String> =
         buildList {
@@ -309,10 +259,4 @@ object RemoteManifestParser {
             }
         }
 
-    private val SHA_256_PATTERN = Regex("^[0-9a-f]{64}$")
-    private val GIT_SHA_PATTERN = Regex("^[0-9a-f]{7,40}$")
-    private val INTERNAL_VERSION_NAME_PATTERN =
-        Regex("^\\d+\\.\\d+\\.\\d+-internal\\.\\d{8}T\\d{6}\\+[0-9a-f]{7,40}$")
-    private const val MAX_ANDROID_VERSION_CODE = 2_100_000_000L
-    private const val MAX_APK_SIZE_BYTES = 2L * 1024L * 1024L * 1024L
 }

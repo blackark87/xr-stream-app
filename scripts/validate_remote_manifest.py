@@ -11,11 +11,6 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 
-SHA256 = re.compile(r"^[0-9a-f]{64}$")
-GIT_SHA = re.compile(r"^[0-9a-f]{7,40}$")
-VERSION_NAME = re.compile(
-    r"^\d+\.\d+\.\d+-internal\.\d{8}T\d{6}\+[0-9a-f]{7,40}$"
-)
 SAFE_EXTENSION = re.compile(r"^[a-z0-9]{1,8}$")
 ARTWORK_MODES = {
     "nfoPoster",
@@ -44,11 +39,6 @@ def validate_url(value: str, allowed_hosts: set[str], field: str) -> None:
 def validate_manifest(manifest: dict) -> None:
     require(manifest.get("schemaVersion") == 1, "schemaVersion must be 1")
     require(manifest.get("channel") == "internal", "channel must be internal")
-    minimum = manifest.get("minimumAppVersionCode", 1)
-    require(
-        type(minimum) is int and 1 <= minimum <= 2_100_000_000,
-        "minimumAppVersionCode is out of range",
-    )
     runtime = manifest.get("runtime")
     require(isinstance(runtime, dict), "runtime must be an object")
 
@@ -98,28 +88,6 @@ def validate_manifest(manifest: dict) -> None:
     require(isinstance(artwork, list) and artwork, "artworkPriority must not be empty")
     require(all(value in ARTWORK_MODES for value in artwork), "artworkPriority contains an unknown mode")
 
-    release = manifest.get("release")
-    if release is None:
-        require(minimum <= 1, "minimumAppVersionCode above 1 requires a release")
-        return
-    require(isinstance(release, dict), "release must be an object")
-    for field in ("versionCode", "assetId", "sizeBytes"):
-        require(type(release.get(field)) is int and release[field] > 0, f"release.{field} must be positive")
-    require(release["versionCode"] <= 2_100_000_000, "release.versionCode is too large")
-    require(release["sizeBytes"] <= 2 * 1024 * 1024 * 1024, "release.sizeBytes is too large")
-    require(release["versionCode"] >= minimum, "release version is below minimumAppVersionCode")
-    require(VERSION_NAME.fullmatch(release.get("versionName", "")) is not None, "invalid release.versionName")
-    require(GIT_SHA.fullmatch(release.get("gitSha", "")) is not None, "invalid release.gitSha")
-    require(SHA256.fullmatch(release.get("sha256", "")) is not None, "invalid release.sha256")
-    require(
-        SHA256.fullmatch(release.get("signingCertificateSha256", "")) is not None,
-        "invalid release.signingCertificateSha256",
-    )
-    published_at = release.get("publishedAt", "")
-    require(
-        isinstance(published_at, str) and published_at.endswith("Z") and "T" in published_at,
-        "invalid release.publishedAt",
-    )
 
 
 def main() -> None:

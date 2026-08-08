@@ -1,7 +1,6 @@
 package blackark.app.vr.remote
 
 import android.content.Context
-import android.content.pm.PackageManager
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -118,14 +117,11 @@ class RuntimeConfigRepository(
         runCatching { writeLastKnownGood(result.json) }
             .onFailure { error -> Log.w(TAG, "Could not persist remote manifest", error) }
 
-        val current = _snapshot.value
-        val compatible = installedVersionCode() >= parsed.minimumAppVersionCode
         val nextSnapshot = RuntimeConfigSnapshot(
-            source = if (compatible) RuntimeConfigSource.Remote else current.source,
+            source = RuntimeConfigSource.Remote,
             manifestSha = result.manifestSha,
             fetchedAt = now,
-            config = if (compatible) parsed.runtime else current.config,
-            manifest = parsed,
+            config = parsed.runtime,
         )
         _snapshot.value = nextSnapshot
         RuntimeConfigRegistry.update(nextSnapshot)
@@ -141,13 +137,12 @@ class RuntimeConfigRepository(
     private fun loadBestAvailableSnapshot(): RuntimeConfigSnapshot {
         val bundledJson = appContext.assets.open(BUNDLED_MANIFEST_ASSET).bufferedReader().use { it.readText() }
         val bundledManifest = runCatching { RemoteManifestParser.parse(bundledJson) }
-            .getOrElse { RemoteManifest(1, "internal", 1L, RuntimeConfig(), null) }
+            .getOrElse { RemoteManifest(1, "internal", RuntimeConfig()) }
         val bundledSnapshot = RuntimeConfigSnapshot(
             source = RuntimeConfigSource.Bundled,
             manifestSha = null,
             fetchedAt = null,
             config = bundledManifest.runtime,
-            manifest = bundledManifest,
         )
 
         val currentManifest = currentFile.takeIf(File::isFile)?.let { file ->
@@ -157,14 +152,12 @@ class RuntimeConfigRepository(
             runCatching { RemoteManifestParser.parse(file.readText()) }.getOrNull()
         }
         val cached = currentManifest ?: previousManifest ?: return bundledSnapshot
-        val compatible = installedVersionCode() >= cached.minimumAppVersionCode
         return RuntimeConfigSnapshot(
-            source = if (compatible) RuntimeConfigSource.Cache else RuntimeConfigSource.Bundled,
+            source = RuntimeConfigSource.Cache,
             manifestSha = preferences.getString(KEY_MANIFEST_SHA, null)
                 .takeIf { currentManifest != null },
             fetchedAt = preferences.getLong(KEY_FETCHED_AT, 0L).takeIf { it > 0L },
-            config = if (compatible) cached.runtime else bundledSnapshot.config,
-            manifest = cached,
+            config = cached.runtime,
         )
     }
 
@@ -196,13 +189,6 @@ class RuntimeConfigRepository(
             )
         }
     }
-
-    private fun installedVersionCode(): Long = runCatching {
-        appContext.packageManager.getPackageInfo(
-            appContext.packageName,
-            PackageManager.PackageInfoFlags.of(0L),
-        ).longVersionCode
-    }.getOrDefault(1L)
 
     companion object {
         private const val TAG = "RuntimeConfigRepository"

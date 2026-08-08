@@ -273,7 +273,6 @@ data class RuntimeConfig(
 }
 
 data class FeatureRuntimeConfig(
-    val remoteUpdatesEnabled: Boolean = true,
     val motionPreviewEnabled: Boolean = true,
     val generatedSeekPreviewEnabled: Boolean = true,
 )
@@ -375,24 +374,10 @@ data class CacheRuntimeConfig(
     val imageDiskBytes: Long = 500L * 1024L * 1024L,
 )
 
-data class RemoteRelease(
-    val versionCode: Long,
-    val versionName: String,
-    val gitSha: String,
-    val publishedAt: String,
-    val assetId: Long,
-    val sizeBytes: Long,
-    val sha256: String,
-    val signingCertificateSha256: String,
-    val mandatory: Boolean = false,
-)
-
 data class RemoteManifest(
     val schemaVersion: Int,
     val channel: String,
-    val minimumAppVersionCode: Long,
     val runtime: RuntimeConfig,
-    val release: RemoteRelease?,
 )
 
 enum class RuntimeConfigSource {
@@ -406,7 +391,6 @@ data class RuntimeConfigSnapshot(
     val manifestSha: String?,
     val fetchedAt: Long?,
     val config: RuntimeConfig,
-    val manifest: RemoteManifest?,
 )
 
 object RuntimeConfigRegistry {
@@ -416,7 +400,6 @@ object RuntimeConfigRegistry {
             manifestSha = null,
             fetchedAt = null,
             config = RuntimeConfig(),
-            manifest = null,
         )
     )
     val snapshot: StateFlow<RuntimeConfigSnapshot> = _snapshot.asStateFlow()

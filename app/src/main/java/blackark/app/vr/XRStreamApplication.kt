@@ -36,7 +36,6 @@ class XRStreamApplication : Application(), SingletonImageLoader.Factory {
         container = AppContainer(this)
         applicationScope.launch {
             container.runtimeConfigRepository.refresh()
-            container.appUpdateManager.check(container.runtimeConfigRepository.snapshot.value)
         }
         MetadataScopeRegistry.initialize(container.metadataScopeRepository, applicationScope)
         android.util.Log.d("XRStreamApplication", "Application created")
