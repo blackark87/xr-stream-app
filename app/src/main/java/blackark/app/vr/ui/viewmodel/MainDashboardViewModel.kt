@@ -117,6 +117,12 @@ internal fun resolveRelativeBrowserParentPath(currentPath: String): String? {
     return normalized.substringBeforeLast('/', missingDelimiterValue = "")
 }
 
+internal fun resolveBrowserConnectionStartPath(
+    isLocalStorage: Boolean,
+    requestedPath: String?,
+    lastFolder: String?,
+): String = requestedPath ?: if (isLocalStorage) lastFolder.orEmpty() else ""
+
 class MainDashboardViewModel(
     private val context: Context,
     private val serverRepository: ServerRepository,
@@ -476,9 +482,19 @@ class MainDashboardViewModel(
                         serverRepository.updateLastConnected(connectedServer.id)
                     }
 
-                    val restoredPath = requestedPath
-                        ?: AppSettingsStore.getLastFolder(context.applicationContext, server.id)
-                        ?: ""
+                    val lastLocalFolder = if (connectedServer.isLocalStorage) {
+                        AppSettingsStore.getLastFolder(
+                            context.applicationContext,
+                            connectedServer.id,
+                        )
+                    } else {
+                        null
+                    }
+                    val initialPath = resolveBrowserConnectionStartPath(
+                        isLocalStorage = connectedServer.isLocalStorage,
+                        requestedPath = requestedPath,
+                        lastFolder = lastLocalFolder,
+                    )
                     _uiState.value = _uiState.value.copy(
                         isConnecting = false,
                         isConnected = true,
@@ -493,8 +509,8 @@ class MainDashboardViewModel(
                     )
 
                     loadFiles(
-                        path = restoredPath,
-                        fallbackToRootOnFailure = restoredPath.isNotBlank(),
+                        path = initialPath,
+                        fallbackToRootOnFailure = initialPath.isNotBlank(),
                     )
                     refreshAvSnapshot(
                         buildSourceScope(
@@ -631,13 +647,16 @@ class MainDashboardViewModel(
                         currentPath = path,
                         errorMessage = null
                     )
-                    _uiState.value.selectedServer?.id?.let { serverId ->
-                        AppSettingsStore.setLastFolder(
-                            context.applicationContext,
-                            serverId,
-                            path,
-                        )
-                    }
+                    _uiState.value.selectedServer
+                        ?.takeIf { it.isLocalStorage }
+                        ?.id
+                        ?.let { serverId ->
+                            AppSettingsStore.setLastFolder(
+                                context.applicationContext,
+                                serverId,
+                                path,
+                            )
+                        }
                     syncCurrentListingForAv(sortedFiles)
                 } else {
                     if (fallbackToRootOnFailure && path.isNotBlank()) {

@@ -21,4 +21,40 @@ class FileBrowserNavigationTest {
         assertNull(resolveRelativeBrowserParentPath(""))
         assertNull(resolveRelativeBrowserParentPath("/"))
     }
+
+    @Test
+    fun `ordinary SMB connection always starts at root`() {
+        assertEquals(
+            "",
+            resolveBrowserConnectionStartPath(
+                isLocalStorage = false,
+                requestedPath = null,
+                lastFolder = "japan/모리 히나코",
+            ),
+        )
+    }
+
+    @Test
+    fun `explicit quick access path is honored for SMB connection`() {
+        assertEquals(
+            "japan/모리 히나코",
+            resolveBrowserConnectionStartPath(
+                isLocalStorage = false,
+                requestedPath = "japan/모리 히나코",
+                lastFolder = "ignored/last/folder",
+            ),
+        )
+    }
+
+    @Test
+    fun `local storage may restore its last folder`() {
+        assertEquals(
+            "content://local/last-folder",
+            resolveBrowserConnectionStartPath(
+                isLocalStorage = true,
+                requestedPath = null,
+                lastFolder = "content://local/last-folder",
+            ),
+        )
+    }
 }
