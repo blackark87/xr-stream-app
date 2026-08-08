@@ -151,7 +151,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalAutofillManager
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -206,7 +205,6 @@ import blackark.app.vr.network.SMBFileItem
 import blackark.app.vr.network.SmbEndpointParser
 import blackark.app.vr.player.SMBDataSource
 import blackark.app.vr.remote.RemoteConfigStatus
-import blackark.app.vr.remote.GitHubTokenSource
 import blackark.app.vr.ui.ApplyHandTrackingPreference
 import blackark.app.vr.ui.components.EmptyState
 import blackark.app.vr.ui.components.FancyFileCard
@@ -3662,11 +3660,9 @@ private fun GitHubRemoteSettingsSection() {
     val snapshot by repository.snapshot.collectAsStateWithLifecycle()
     val status by repository.status.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
-    var tokenInput by rememberSaveable { mutableStateOf("") }
-    var tokenSource by remember { mutableStateOf(credentialStore.resolution().source) }
     var isWorking by remember { mutableStateOf(false) }
     var feedback by remember { mutableStateOf<String?>(null) }
-    val hasToken = tokenSource != GitHubTokenSource.Missing
+    val hasToken = credentialStore.hasToken()
 
     val statusLabel = when (val current = status) {
         RemoteConfigStatus.Idle -> stringResource(R.string.remote_config_status_idle)
@@ -3694,66 +3690,7 @@ private fun GitHubRemoteSettingsSection() {
             style = MaterialTheme.typography.bodySmall,
             color = TextTertiary,
         )
-        SettingsValueRow(
-            title = stringResource(R.string.github_pat_source),
-            value = stringResource(
-                when (tokenSource) {
-                    GitHubTokenSource.SavedOverride -> R.string.github_pat_source_saved
-                    GitHubTokenSource.Bundled -> R.string.github_pat_source_bundled
-                    GitHubTokenSource.Missing -> R.string.github_pat_source_missing
-                }
-            ),
-        )
-        OutlinedTextField(
-            value = tokenInput,
-            onValueChange = { tokenInput = it },
-            modifier = Modifier.fillMaxWidth(),
-            enabled = !isWorking,
-            singleLine = true,
-            label = { Text(stringResource(R.string.github_pat)) },
-            placeholder = {
-                Text(
-                    stringResource(
-                        when (tokenSource) {
-                            GitHubTokenSource.SavedOverride -> R.string.github_pat_saved
-                            GitHubTokenSource.Bundled -> R.string.github_pat_bundled
-                            GitHubTokenSource.Missing -> R.string.github_pat_placeholder
-                        }
-                    )
-                )
-            },
-            visualTransformation = PasswordVisualTransformation(),
-        )
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(
-                enabled = tokenInput.isNotBlank() && !isWorking,
-                onClick = {
-                    scope.launch {
-                        isWorking = true
-                        feedback = null
-                        val candidate = tokenInput.trim()
-                        repository.testToken(candidate)
-                            .onSuccess {
-                                credentialStore.saveToken(candidate)
-                                tokenInput = ""
-                                tokenSource = credentialStore.resolution().source
-                                val refreshed = repository.refresh()
-                                feedback = if (refreshed is RemoteConfigStatus.Failed) {
-                                    refreshed.message
-                                } else {
-                                    context.getString(R.string.github_pat_saved_and_connected)
-                                }
-                            }
-                            .onFailure { error ->
-                                feedback = error.message
-                                    ?: context.getString(R.string.github_pat_connection_failed)
-                            }
-                        isWorking = false
-                    }
-                },
-            ) {
-                Text(stringResource(R.string.save_and_test))
-            }
             Button(
                 enabled = hasToken && !isWorking,
                 onClick = {
@@ -3762,7 +3699,7 @@ private fun GitHubRemoteSettingsSection() {
                         val token = credentialStore.getToken()
                         val result = token?.let { repository.testToken(it) }
                             ?: Result.failure(IllegalStateException(
-                                context.getString(R.string.github_pat_missing)
+                                context.getString(R.string.remote_config_unavailable)
                             ))
                         feedback = result.fold(
                             onSuccess = { context.getString(R.string.connection_successful) },
@@ -3774,42 +3711,25 @@ private fun GitHubRemoteSettingsSection() {
             ) {
                 Text(stringResource(R.string.test_connection))
             }
-            TextButton(
-                enabled = tokenSource == GitHubTokenSource.SavedOverride && !isWorking,
+            Button(
+                enabled = hasToken && !isWorking,
                 onClick = {
-                    credentialStore.clearToken()
-                    tokenSource = credentialStore.resolution().source
-                    tokenInput = ""
-                    feedback = context.getString(
-                        if (tokenSource == GitHubTokenSource.Bundled) {
-                            R.string.github_pat_override_deleted
-                        } else {
-                            R.string.github_pat_deleted
+                    scope.launch {
+                        isWorking = true
+                        val refreshed = repository.refresh()
+                        feedback = when (refreshed) {
+                            is RemoteConfigStatus.Failed -> refreshed.message
+                            RemoteConfigStatus.AuthenticationRequired -> context.getString(
+                                R.string.remote_config_unavailable
+                            )
+                            else -> context.getString(R.string.remote_check_complete)
                         }
-                    )
+                        isWorking = false
+                    }
                 },
             ) {
-                Text(stringResource(R.string.delete), color = NetflixRed)
+                Text(stringResource(R.string.check_now))
             }
-        }
-        Button(
-            enabled = hasToken && !isWorking,
-            onClick = {
-                scope.launch {
-                    isWorking = true
-                    val refreshed = repository.refresh()
-                    feedback = when (refreshed) {
-                        is RemoteConfigStatus.Failed -> refreshed.message
-                        RemoteConfigStatus.AuthenticationRequired -> context.getString(
-                            R.string.github_pat_missing
-                        )
-                        else -> context.getString(R.string.remote_check_complete)
-                    }
-                    isWorking = false
-                }
-            },
-        ) {
-            Text(stringResource(R.string.check_now))
         }
         if (isWorking) {
             LinearProgressIndicator(modifier = Modifier.fillMaxWidth())

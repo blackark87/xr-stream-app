@@ -14,6 +14,8 @@ import blackark.app.vr.data.database.entity.RecentVideo
 import blackark.app.vr.data.database.entity.SavedServer
 import blackark.app.vr.data.database.entity.MetadataScope
 import blackark.app.vr.data.database.entity.QuickAccessFolder
+import blackark.app.vr.data.model.AvLibrarySnapshot
+import blackark.app.vr.data.model.AvLibraryWork
 import blackark.app.vr.data.repository.AvLibraryRepository
 import blackark.app.vr.data.repository.MetadataScopeRepository
 import blackark.app.vr.data.repository.QuickAccessRepository
@@ -1497,10 +1499,17 @@ class MainDashboardViewModel(
 
     private fun updateAvFilters(filters: AvFilterState) {
         val snapshot = _uiState.value.avLibrary.snapshot
+        val filteredWorks = snapshot.applyFilters(filters)
+        logAvFilterResult(
+            source = "selection",
+            snapshot = snapshot,
+            filters = filters,
+            filteredWorks = filteredWorks,
+        )
         _uiState.value = _uiState.value.copy(
             avLibrary = _uiState.value.avLibrary.copy(
                 filters = filters,
-                filteredWorks = snapshot.applyFilters(filters),
+                filteredWorks = filteredWorks,
             )
         )
     }
@@ -1509,6 +1518,12 @@ class MainDashboardViewModel(
         val snapshot = avLibraryRepository.loadSnapshot(sourceScope)
         val currentFilters = _uiState.value.avLibrary.filters
         val filteredWorks = snapshot.applyFilters(currentFilters)
+        logAvFilterResult(
+            source = "snapshot",
+            snapshot = snapshot,
+            filters = currentFilters,
+            filteredWorks = filteredWorks,
+        )
         val selectedAssetKey = _uiState.value.avLibrary.selectedAssetKey
             ?.takeIf { key -> snapshot.works.any { it.assetKey == key } }
 
@@ -1524,6 +1539,21 @@ class MainDashboardViewModel(
         )
 
         startAvCastRepairIfNeeded(sourceScope)
+    }
+
+    private fun logAvFilterResult(
+        source: String,
+        snapshot: AvLibrarySnapshot,
+        filters: AvFilterState,
+        filteredWorks: List<AvLibraryWork>,
+    ) {
+        val vrWorks = snapshot.works.filter(AvLibraryWork::isVrContent)
+        Log.d(
+            "AvFilterDebug",
+            "source=$source selected=${filters.selectedVrFilter} " +
+                    "total=${snapshot.works.size} vr=${vrWorks.size} result=${filteredWorks.size} " +
+                    "vrCodes=${vrWorks.take(12).joinToString(",") { it.asset.normalizedCode }}",
+        )
     }
 
     private fun startAvCastRepairIfNeeded(sourceScope: String) {

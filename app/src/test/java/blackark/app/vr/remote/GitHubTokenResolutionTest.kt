@@ -7,26 +7,16 @@ import org.junit.Test
 class GitHubTokenResolutionTest {
 
     @Test
-    fun savedOverrideWinsOverBundledToken() {
-        val result = resolveGitHubToken(" saved ", "bundled")
+    fun bundledTokenIsTrimmed() {
+        val result = resolveBundledGitHubToken(" bundled ")
 
-        assertEquals("saved", result.token)
-        assertEquals(GitHubTokenSource.SavedOverride, result.source)
+        assertEquals("bundled", result)
     }
 
     @Test
-    fun bundledTokenIsUsedWhenSavedTokenIsMissing() {
-        val result = resolveGitHubToken(null, " bundled ")
+    fun blankBundledTokenResolvesToMissing() {
+        val result = resolveBundledGitHubToken(" ")
 
-        assertEquals("bundled", result.token)
-        assertEquals(GitHubTokenSource.Bundled, result.source)
-    }
-
-    @Test
-    fun blankValuesResolveToMissing() {
-        val result = resolveGitHubToken(" ", "")
-
-        assertNull(result.token)
-        assertEquals(GitHubTokenSource.Missing, result.source)
+        assertNull(result)
     }
 }

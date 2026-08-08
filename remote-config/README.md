@@ -16,9 +16,9 @@ INTERNAL_GITHUB_PAT=github_pat_your_token
 ```
 
 The value is compiled into locally built APKs as a fallback credential, so app data resets and
-reinstalls do not require entering it again. A token saved from the app's Settings screen remains an
-encrypted override. Neither value is written to Room or build logs. GitHub Actions secrets are not
-available to Android Studio builds, so `secrets.local.properties` is required for an embedded token.
+reinstalls do not require entering it again. The app does not provide a PAT input field and never
+writes the token to Room or logs. GitHub Actions secrets are not available to Android Studio builds,
+so `secrets.local.properties` is required for an embedded token.
 
 Do not add PATs, passwords, local paths, or user choices to the manifest. Unsupported schema
 versions, invalid regular expressions, non-HTTPS metadata URLs, out-of-range numbers, and unknown
