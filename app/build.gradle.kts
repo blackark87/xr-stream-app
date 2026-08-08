@@ -1,6 +1,4 @@
 import java.time.Instant
-import java.time.ZoneOffset
-import java.time.format.DateTimeFormatter
 import java.util.Properties
 
 plugins {
@@ -9,7 +7,7 @@ plugins {
     alias(libs.plugins.ksp)
 }
 
-val internalVersionEpochSeconds = 1_735_689_600L // 2025-01-01T00:00:00Z
+val versionCodeEpochSeconds = 1_735_689_600L // 2025-01-01T00:00:00Z
 
 val versionPropertiesFile = rootProject.file("version.properties")
 val versionProperties = Properties().apply {
@@ -26,12 +24,10 @@ val localSecrets = Properties().apply {
     }
 }
 
-val playVersionRaw = versionProperties.getProperty("PLAY_VERSION")?.trim().orEmpty()
-check(playVersionRaw.matches(Regex("\\d+\\.\\d+\\.\\d+"))) {
-    "PLAY_VERSION must be in MAJOR.MINOR.PATCH format, but was '$playVersionRaw'"
+val appVersion = versionProperties.getProperty("APP_VERSION")?.trim().orEmpty()
+check(appVersion.matches(Regex("\\d+\\.\\d+\\.\\d+"))) {
+    "APP_VERSION must be in MAJOR.MINOR.PATCH format, but was '$appVersion'"
 }
-val releaseChannel = versionProperties.getProperty("RELEASE_CHANNEL")?.trim().orEmpty()
-    .ifBlank { "internal" }
 
 fun escapeForBuildConfig(value: String): String {
     return value
@@ -50,54 +46,20 @@ check('\n' !in bundledGitHubPat && '\r' !in bundledGitHubPat) {
     "INTERNAL_GITHUB_PAT must be a single-line value."
 }
 
-fun resolveGitSha(): String {
-    return runCatching {
-        val process = ProcessBuilder("git", "rev-parse", "--short", "HEAD")
-            .directory(rootProject.rootDir)
-            .redirectErrorStream(true)
-            .start()
-        val output = process.inputStream.bufferedReader().readText().trim()
-        val exitCode = process.waitFor()
-        if (exitCode == 0 && output.isNotBlank()) {
-            output
-        } else {
-            "unknown"
-        }
-    }.getOrDefault("unknown")
-}
-
-val internalGitSha = resolveGitSha()
-val internalBuildEpochSeconds =
+val buildEpochSeconds =
     providers.environmentVariable("XR_BUILD_EPOCH_SECONDS").orNull?.trim()?.toLongOrNull()
         ?: Instant.now().epochSecond
-val internalVersionCodeLong = internalBuildEpochSeconds - internalVersionEpochSeconds
-check(internalVersionCodeLong in 1..2_100_000_000L) {
-    "Computed timestamp versionCode=$internalVersionCodeLong is out of range."
+val appVersionCodeLong = buildEpochSeconds - versionCodeEpochSeconds
+check(appVersionCodeLong in 1..2_100_000_000L) {
+    "Computed timestamp versionCode=$appVersionCodeLong is out of range."
 }
-val internalVersionCode = internalVersionCodeLong.toInt()
-val internalBuildInstant = Instant.ofEpochSecond(internalBuildEpochSeconds)
-val internalBuildId = DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmss")
-    .withZone(ZoneOffset.UTC)
-    .format(internalBuildInstant)
-val internalDisplayVersion = "$releaseChannel.$internalBuildId"
-val internalVersionName =
-    if (releaseChannel.equals("play", ignoreCase = true)) {
-        playVersionRaw
-    } else {
-        "$playVersionRaw-$internalDisplayVersion+$internalGitSha"
-    }
-val internalBuildTimeUtc = DateTimeFormatter.ISO_INSTANT.format(internalBuildInstant)
+val appVersionCode = appVersionCodeLong.toInt()
 
-tasks.register("printInternalVersion") {
+tasks.register("printAppVersion") {
     group = "versioning"
     doLast {
-        println("PLAY_VERSION=$playVersionRaw")
-        println("RELEASE_CHANNEL=$releaseChannel")
-        println("INTERNAL_VERSION_CODE=$internalVersionCode")
-        println("INTERNAL_VERSION_NAME=$internalVersionName")
-        println("INTERNAL_DISPLAY_VERSION=$internalDisplayVersion")
-        println("INTERNAL_GIT_SHA=$internalGitSha")
-        println("INTERNAL_BUILD_TIME_UTC=$internalBuildTimeUtc")
+        println("APP_VERSION=$appVersion")
+        println("VERSION_CODE=$appVersionCode")
     }
 }
 
@@ -111,18 +73,12 @@ android {
         applicationId = "blackark.app.vr"
         minSdk = 34
         targetSdk = 37
-        versionCode = internalVersionCode
-        versionName = internalVersionName
+        versionCode = appVersionCode
+        versionName = appVersion
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-        buildConfigField("String", "PLAY_STORE_VERSION", "\"${escapeForBuildConfig(playVersionRaw)}\"")
-        buildConfigField("String", "INTERNAL_DISPLAY_VERSION", "\"${escapeForBuildConfig(internalDisplayVersion)}\"")
-        buildConfigField("String", "INTERNAL_VERSION_NAME", "\"${escapeForBuildConfig(internalVersionName)}\"")
-        buildConfigField("int", "INTERNAL_VERSION_CODE", internalVersionCode.toString())
-        buildConfigField("String", "INTERNAL_RELEASE_CHANNEL", "\"${escapeForBuildConfig(releaseChannel)}\"")
-        buildConfigField("String", "INTERNAL_BUILD_TIME_UTC", "\"${escapeForBuildConfig(internalBuildTimeUtc)}\"")
-        buildConfigField("String", "INTERNAL_GIT_SHA", "\"${escapeForBuildConfig(internalGitSha)}\"")
+        buildConfigField("String", "APP_VERSION", "\"${escapeForBuildConfig(appVersion)}\"")
         buildConfigField("String", "BUNDLED_GITHUB_PAT", "\"${escapeForBuildConfig(bundledGitHubPat)}\"")
     }
 

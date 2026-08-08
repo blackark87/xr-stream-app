@@ -5,8 +5,8 @@ plugins {
     alias(libs.plugins.kotlin.compose) apply false
 }
 
-tasks.register("printInternalVersion") {
+tasks.register("printAppVersion") {
     group = "versioning"
-    description = "Print the timestamp-based internal version resolved by the app module."
-    dependsOn(":app:printInternalVersion")
+    description = "Print the semantic app version and install version code."
+    dependsOn(":app:printAppVersion")
 }

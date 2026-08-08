@@ -272,7 +272,6 @@ import java.time.LocalDate
 import java.time.ZoneId
 import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
-import java.security.MessageDigest
 import kotlin.math.roundToInt
 import androidx.xr.compose.subspace.layout.onGloballyPositioned as onSubspaceGloballyPositioned
 
@@ -2592,61 +2591,6 @@ private fun ConnectedPaneResizeHandle(
     }
 }
 
-private data class AppVersionInfo(
-    val packageVersionName: String,
-    val versionCode: String,
-    val playStoreVersion: String,
-    val internalVersion: String,
-    val releaseChannel: String,
-    val gitSha: String,
-    val buildTimeUtc: String,
-    val signingCertificateSha256: String,
-)
-
-private fun resolveAppVersionInfo(context: Context): AppVersionInfo {
-    val packageInfo = runCatching {
-        context.packageManager.getPackageInfo(
-            context.packageName,
-            android.content.pm.PackageManager.PackageInfoFlags.of(
-                android.content.pm.PackageManager.GET_SIGNING_CERTIFICATES.toLong()
-            ),
-        )
-    }.getOrNull()
-
-    val packageVersionName = packageInfo?.versionName?.takeIf { it.isNotBlank() }
-        ?: BuildConfig.INTERNAL_VERSION_NAME.ifBlank { "Unknown" }
-    val versionCode = packageInfo?.longVersionCode?.toString()
-        ?: BuildConfig.INTERNAL_VERSION_CODE.takeIf { it > 0 }?.toString()
-        ?: "Unknown"
-    val playStoreVersion = BuildConfig.PLAY_STORE_VERSION.ifBlank {
-        packageVersionName.substringBefore('-')
-    }
-    val internalVersion = BuildConfig.INTERNAL_DISPLAY_VERSION.ifBlank {
-        val channel = BuildConfig.INTERNAL_RELEASE_CHANNEL.ifBlank { "internal" }
-        channel
-    }
-    val signingCertificateSha256 = packageInfo?.signingInfo?.apkContentsSigners
-        ?.firstOrNull()
-        ?.toByteArray()
-        ?.let { certificate ->
-            MessageDigest.getInstance("SHA-256")
-                .digest(certificate)
-                .joinToString("") { byte -> "%02x".format(byte.toInt() and 0xff) }
-        }
-        ?: "Unknown"
-
-    return AppVersionInfo(
-        packageVersionName = packageVersionName,
-        versionCode = versionCode,
-        playStoreVersion = playStoreVersion,
-        internalVersion = internalVersion,
-        releaseChannel = BuildConfig.INTERNAL_RELEASE_CHANNEL.ifBlank { "unknown" },
-        gitSha = BuildConfig.INTERNAL_GIT_SHA.ifBlank { "unknown" },
-        buildTimeUtc = BuildConfig.INTERNAL_BUILD_TIME_UTC.ifBlank { "unknown" },
-        signingCertificateSha256 = signingCertificateSha256,
-    )
-}
-
 private fun deleteTrackedThumbnailFiles(directory: File) {
     if (!directory.exists()) return
 
@@ -2806,20 +2750,12 @@ private fun SourceSwitcherButton(
 
 @Composable
 private fun SettingsPanel(
-    versionInfo: AppVersionInfo,
-    servers: List<SavedServer>,
-    selectedServer: SavedServer?,
-    metadataScopes: List<MetadataScope>,
+    appVersion: String,
     isHandTrackingEnabled: Boolean,
     isAvBackgroundIndexingEnabled: Boolean,
     activeAction: SettingsAction?,
     onHandTrackingChange: (Boolean) -> Unit,
     onAvBackgroundIndexingChange: (Boolean) -> Unit,
-    onAddCurrentMetadataFolder: () -> Unit,
-    onMetadataScopeEnabled: (MetadataScope, Boolean) -> Unit,
-    onMetadataScopeRecursive: (MetadataScope, Boolean) -> Unit,
-    onDeleteMetadataScope: (MetadataScope) -> Unit,
-    onRescanMetadata: () -> Unit,
     onClearArtwork: () -> Unit,
     onClearThumbnails: () -> Unit,
     onClearRecentHistory: () -> Unit,
@@ -2928,17 +2864,6 @@ private fun SettingsPanel(
 
             GitHubRemoteSettingsSection()
 
-            MetadataScopeSettingsSection(
-                servers = servers.filterNot(SavedServer::isLocalStorage),
-                selectedServer = selectedServer?.takeUnless(SavedServer::isLocalStorage),
-                scopes = metadataScopes,
-                onAddCurrentFolder = onAddCurrentMetadataFolder,
-                onEnabledChange = onMetadataScopeEnabled,
-                onRecursiveChange = onMetadataScopeRecursive,
-                onDelete = onDeleteMetadataScope,
-                onRescan = onRescanMetadata,
-            )
-
             HorizontalDivider(color = DividerGray)
 
             Text(
@@ -3046,143 +2971,169 @@ private fun SettingsPanel(
             )
             SettingsValueRow(
                 title = stringResource(R.string.version),
-                value = versionInfo.packageVersionName,
-            )
-            SettingsValueRow(
-                title = stringResource(R.string.play_store_version),
-                value = versionInfo.playStoreVersion,
-            )
-            SettingsValueRow(
-                title = stringResource(R.string.internal_version),
-                value = versionInfo.internalVersion,
-            )
-            SettingsValueRow(
-                title = stringResource(R.string.version_code),
-                value = versionInfo.versionCode,
-            )
-            SettingsValueRow(
-                title = stringResource(R.string.release_channel),
-                value = versionInfo.releaseChannel,
-            )
-            SettingsValueRow(
-                title = stringResource(R.string.git_commit),
-                value = versionInfo.gitSha,
-            )
-            SettingsValueRow(
-                title = stringResource(R.string.signing_certificate_sha256),
-                value = versionInfo.signingCertificateSha256,
-            )
-            SettingsValueRow(
-                title = stringResource(R.string.build_time_utc),
-                value = versionInfo.buildTimeUtc,
+                value = appVersion,
             )
         }
     }
 }
 
 @Composable
-private fun MetadataScopeSettingsSection(
-    servers: List<SavedServer>,
-    selectedServer: SavedServer?,
+private fun MetadataFoldersDialog(
+    server: SavedServer,
     scopes: List<MetadataScope>,
+    onDismiss: () -> Unit,
     onAddCurrentFolder: () -> Unit,
     onEnabledChange: (MetadataScope, Boolean) -> Unit,
     onRecursiveChange: (MetadataScope, Boolean) -> Unit,
     onDelete: (MetadataScope) -> Unit,
     onRescan: () -> Unit,
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text(
-            text = stringResource(R.string.metadata_folders),
-            style = MaterialTheme.typography.titleLarge,
-            color = TextPrimary,
-        )
-        Text(
-            text = stringResource(R.string.metadata_folders_description),
-            style = MaterialTheme.typography.bodySmall,
-            color = TextTertiary,
-        )
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(
-                onClick = onAddCurrentFolder,
-                enabled = selectedServer?.id?.let { it > 0L } == true,
-                colors = ButtonDefaults.buttonColors(containerColor = NetflixRed),
+    androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
+        Card(
+            modifier = Modifier
+                .widthIn(min = 520.dp, max = 680.dp)
+                .heightIn(max = 700.dp),
+            colors = CardDefaults.cardColors(containerColor = CardBackground),
+            shape = RoundedCornerShape(20.dp),
+            elevation = CardDefaults.cardElevation(defaultElevation = 12.dp),
+        ) {
+            Column(
+                modifier = Modifier.padding(24.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
-                Text(stringResource(R.string.add_current_folder))
-            }
-            Button(
-                onClick = onRescan,
-                enabled = selectedServer != null,
-            ) {
-                Text(stringResource(R.string.rescan_metadata))
-            }
-        }
-
-        servers.forEach { server ->
-            val serverScopes = scopes.filter { it.serverId == server.id }
-            Text(
-                text = server.serverName,
-                style = MaterialTheme.typography.titleMedium,
-                color = TextPrimary,
-            )
-            if (serverScopes.isEmpty()) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = stringResource(R.string.metadata_folders),
+                            style = MaterialTheme.typography.headlineSmall,
+                            color = TextPrimary,
+                        )
+                        Text(
+                            text = server.serverName,
+                            style = MaterialTheme.typography.titleMedium,
+                            color = TextSecondary,
+                        )
+                    }
+                    IconButton(onClick = onDismiss) {
+                        Icon(
+                            imageVector = Icons.Filled.Close,
+                            contentDescription = stringResource(R.string.close),
+                            tint = TextSecondary,
+                        )
+                    }
+                }
                 Text(
-                    text = stringResource(R.string.no_metadata_folders),
+                    text = stringResource(R.string.metadata_folders_description),
                     style = MaterialTheme.typography.bodySmall,
                     color = TextTertiary,
                 )
-            }
-            serverScopes.forEach { scope ->
-                Card(
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                    ),
-                ) {
-                    Column(
-                        modifier = Modifier.padding(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = onAddCurrentFolder,
+                        enabled = server.id > 0L,
+                        colors = ButtonDefaults.buttonColors(containerColor = NetflixRed),
                     ) {
-                        Text(
-                            text = scope.displayPath,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                            color = TextPrimary,
-                        )
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(stringResource(R.string.enabled), color = TextSecondary)
-                                Switch(
-                                    checked = scope.enabled,
-                                    onCheckedChange = { onEnabledChange(scope, it) },
-                                )
-                            }
-                            TextButton(
-                                onClick = {
-                                    onRecursiveChange(scope, !scope.includeDescendants)
-                                },
-                            ) {
-                                Text(
-                                    stringResource(
-                                        if (scope.includeDescendants) {
-                                            R.string.include_subfolders
-                                        } else {
-                                            R.string.current_folder_only
-                                        }
-                                    )
-                                )
-                            }
-                            IconButton(onClick = { onDelete(scope) }) {
-                                Icon(
-                                    Icons.Filled.Delete,
-                                    contentDescription = stringResource(R.string.delete),
-                                )
-                            }
+                        Text(stringResource(R.string.add_current_folder))
+                    }
+                    Button(onClick = onRescan) {
+                        Text(stringResource(R.string.rescan_metadata))
+                    }
+                }
+                HorizontalDivider(color = DividerGray)
+
+                if (scopes.isEmpty()) {
+                    Text(
+                        text = stringResource(R.string.no_metadata_folders),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = TextTertiary,
+                    )
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.weight(1f, fill = false),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        items(scopes, key = MetadataScope::id) { scope ->
+                            MetadataScopeCard(
+                                scope = scope,
+                                onEnabledChange = onEnabledChange,
+                                onRecursiveChange = onRecursiveChange,
+                                onDelete = onDelete,
+                            )
                         }
                     }
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                ) {
+                    TextButton(onClick = onDismiss) {
+                        Text(stringResource(R.string.close))
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MetadataScopeCard(
+    scope: MetadataScope,
+    onEnabledChange: (MetadataScope, Boolean) -> Unit,
+    onRecursiveChange: (MetadataScope, Boolean) -> Unit,
+    onDelete: (MetadataScope) -> Unit,
+) {
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+        ),
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                text = scope.displayPath,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                color = TextPrimary,
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(stringResource(R.string.enabled), color = TextSecondary)
+                    Switch(
+                        checked = scope.enabled,
+                        onCheckedChange = { onEnabledChange(scope, it) },
+                    )
+                }
+                TextButton(
+                    onClick = {
+                        onRecursiveChange(scope, !scope.includeDescendants)
+                    },
+                ) {
+                    Text(
+                        stringResource(
+                            if (scope.includeDescendants) {
+                                R.string.include_subfolders
+                            } else {
+                                R.string.current_folder_only
+                            }
+                        )
+                    )
+                }
+                IconButton(onClick = { onDelete(scope) }) {
+                    Icon(
+                        Icons.Filled.Delete,
+                        contentDescription = stringResource(R.string.delete),
+                    )
                 }
             }
         }
@@ -3825,6 +3776,7 @@ fun MainDashboardScreen(
 
     var showAddServerDialog by remember { mutableStateOf(false) }
     var serverToEdit by remember { mutableStateOf<SavedServer?>(null) }
+    var showMetadataFoldersDialog by remember { mutableStateOf(false) }
     var primaryDestination by rememberSaveable {
         mutableStateOf(PrimaryDestination.Home)
     }
@@ -3851,7 +3803,6 @@ fun MainDashboardScreen(
     var settingsFeedback by remember { mutableStateOf<SettingsFeedback?>(null) }
     var pendingHomeVideo by remember { mutableStateOf<LibraryVideoItem?>(null) }
     val dashboardScope = rememberCoroutineScope()
-    val appVersionInfo = remember(context) { resolveAppVersionInfo(context) }
     val shouldShowControllerHandTrackingPrompt =
         hasControllerLikeInputDevice &&
                 uiState.isHandTrackingEnabled &&
@@ -3898,6 +3849,10 @@ fun MainDashboardScreen(
         uiState.isConnected && uiState.selectedServer?.isLocalStorage == true
     val isSmbModeConnected =
         uiState.isConnected && uiState.selectedServer?.isLocalStorage == false
+
+    LaunchedEffect(uiState.selectedServer?.id, uiState.isConnected) {
+        showMetadataFoldersDialog = false
+    }
     val density = LocalDensity.current
     val initialDashboardPanelSize = remember { AppState.dashboardPanelSize.value }
     var dashboardPanelWidth by remember {
@@ -3928,6 +3883,7 @@ fun MainDashboardScreen(
     }
 
     fun connectToSource(server: SavedServer) {
+        showMetadataFoldersDialog = false
         clearAllPreviewItems()
         fileWorkspaceMode = FileWorkspaceMode.Browser
 
@@ -3987,6 +3943,11 @@ fun MainDashboardScreen(
     }
 
     fun selectPrimaryDestination(destination: PrimaryDestination) {
+        if (destination != PrimaryDestination.SmbFiles) {
+            showAddServerDialog = false
+            serverToEdit = null
+            showMetadataFoldersDialog = false
+        }
         if (primaryDestination == destination) return
 
         primaryDestination = destination
@@ -4249,20 +4210,12 @@ fun MainDashboardScreen(
 
                         PrimaryDestination.Settings -> {
                             SettingsPanel(
-                                versionInfo = appVersionInfo,
-                                servers = servers,
-                                selectedServer = uiState.selectedServer,
-                                metadataScopes = metadataScopes,
+                                appVersion = BuildConfig.APP_VERSION,
                                 isHandTrackingEnabled = uiState.isHandTrackingEnabled,
                                 isAvBackgroundIndexingEnabled = uiState.isAvBackgroundIndexingEnabled,
                                 activeAction = activeSettingsAction,
                                 onHandTrackingChange = viewModel::setHandTrackingEnabled,
                                 onAvBackgroundIndexingChange = viewModel::setAvBackgroundIndexingEnabled,
-                                onAddCurrentMetadataFolder = viewModel::addCurrentFolderMetadataScope,
-                                onMetadataScopeEnabled = viewModel::setMetadataScopeEnabled,
-                                onMetadataScopeRecursive = viewModel::setMetadataScopeRecursive,
-                                onDeleteMetadataScope = viewModel::deleteMetadataScope,
-                                onRescanMetadata = viewModel::rescanAvMetadata,
                                 onClearArtwork = {
                                     pendingSettingsAction = SettingsAction.ClearArtwork
                                 },
@@ -4510,9 +4463,9 @@ fun MainDashboardScreen(
                                             },
                                         )
                                         DashboardHeaderChip(
-                                            text = stringResource(R.string.add_current_folder),
-                                            icon = Icons.Filled.Add,
-                                            onClick = viewModel::addCurrentFolderMetadataScope,
+                                            text = stringResource(R.string.metadata_folders),
+                                            icon = Icons.Filled.Settings,
+                                            onClick = { showMetadataFoldersDialog = true },
                                         )
                                         DashboardHeaderChip(
                                             text = stringResource(R.string.add_quick_access),
@@ -4655,9 +4608,9 @@ fun MainDashboardScreen(
                                                 },
                                             )
                                             DashboardHeaderChip(
-                                                text = stringResource(R.string.add_current_folder),
-                                                icon = Icons.Filled.Add,
-                                                onClick = viewModel::addCurrentFolderMetadataScope,
+                                                text = stringResource(R.string.metadata_folders),
+                                                icon = Icons.Filled.Settings,
+                                                onClick = { showMetadataFoldersDialog = true },
                                             )
                                             DashboardHeaderChip(
                                                 text = stringResource(R.string.add_quick_access),
@@ -4722,6 +4675,22 @@ fun MainDashboardScreen(
                     onModeSelected = ::selectPrimaryDestination,
                 )
             }
+        }
+
+        val metadataFoldersServer = uiState.selectedServer?.takeIf {
+            isSmbModeConnected && !it.isLocalStorage
+        }
+        if (showMetadataFoldersDialog && metadataFoldersServer != null) {
+            MetadataFoldersDialog(
+                server = metadataFoldersServer,
+                scopes = metadataScopes.filter { it.serverId == metadataFoldersServer.id },
+                onDismiss = { showMetadataFoldersDialog = false },
+                onAddCurrentFolder = viewModel::addCurrentFolderMetadataScope,
+                onEnabledChange = viewModel::setMetadataScopeEnabled,
+                onRecursiveChange = viewModel::setMetadataScopeRecursive,
+                onDelete = viewModel::deleteMetadataScope,
+                onRescan = viewModel::rescanAvMetadata,
+            )
         }
 
         // Add/Edit Server Dialog

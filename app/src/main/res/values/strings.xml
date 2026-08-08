@@ -95,7 +95,7 @@
     <string name="port_optional">Port (optional)</string>
     <string name="invalid_smb_port">SMB port must be between 1 and 65535</string>
     <string name="metadata_folders">Online metadata folders</string>
-    <string name="metadata_folders_description">For each server, JAVLibrary and AV-Wiki run only in these folders. NFO remains first everywhere.</string>
+    <string name="metadata_folders_description">JAVLibrary and AV-Wiki run only in folders enabled for this server. NFO remains first everywhere.</string>
     <string name="add_current_folder">Add current folder</string>
     <string name="rescan_metadata">Rescan</string>
     <string name="no_metadata_folders">No folders selected for this server.</string>
@@ -192,13 +192,6 @@
     <string name="not_available">N/A</string>
     <string name="never">Never</string>
     <string name="version">Version</string>
-    <string name="play_store_version">Play Store version</string>
-    <string name="internal_version">Internal version</string>
-    <string name="version_code">Version code</string>
-    <string name="release_channel">Release channel</string>
-    <string name="git_commit">Git commit</string>
-    <string name="signing_certificate_sha256">Signing certificate SHA-256</string>
-    <string name="build_time_utc">Build time (UTC)</string>
     <string name="video_thumbnail">Video thumbnail</string>
     <string name="watched_progress_percent">%1$d%% watched</string>
     <string name="youtube">YouTube</string>

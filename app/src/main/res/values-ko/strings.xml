@@ -95,7 +95,7 @@
     <string name="port_optional">포트(선택)</string>
     <string name="invalid_smb_port">SMB 포트는 1에서 65535 사이여야 합니다</string>
     <string name="metadata_folders">온라인 메타데이터 폴더</string>
-    <string name="metadata_folders_description">서버별로 이 폴더 안에서만 JAVLibrary와 AV-Wiki를 사용합니다. NFO는 모든 폴더에서 항상 최우선입니다.</string>
+    <string name="metadata_folders_description">이 서버에서 활성화한 폴더 안에서만 JAVLibrary와 AV-Wiki를 사용합니다. NFO는 모든 폴더에서 항상 최우선입니다.</string>
     <string name="add_current_folder">현재 폴더 추가</string>
     <string name="rescan_metadata">다시 스캔</string>
     <string name="no_metadata_folders">이 서버에 선택된 폴더가 없습니다.</string>
@@ -192,13 +192,6 @@
     <string name="not_available">없음</string>
     <string name="never">없음</string>
     <string name="version">버전</string>
-    <string name="play_store_version">Play Store 버전</string>
-    <string name="internal_version">내부 버전</string>
-    <string name="version_code">버전 코드</string>
-    <string name="release_channel">릴리스 채널</string>
-    <string name="git_commit">Git 커밋</string>
-    <string name="signing_certificate_sha256">서명 인증서 SHA-256</string>
-    <string name="build_time_utc">빌드 시간 (UTC)</string>
     <string name="video_thumbnail">비디오 썸네일</string>
     <string name="watched_progress_percent">%1$d%% 시청함</string>
     <string name="youtube">YouTube</string>
