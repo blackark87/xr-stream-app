@@ -29,6 +29,7 @@ jobs:
       INTERNAL_KEYSTORE_PASSWORD: ${{ secrets.INTERNAL_KEYSTORE_PASSWORD }}
       INTERNAL_KEY_ALIAS: ${{ secrets.INTERNAL_KEY_ALIAS }}
       INTERNAL_KEY_PASSWORD: ${{ secrets.INTERNAL_KEY_PASSWORD }}
+      INTERNAL_GITHUB_PAT: ${{ secrets.INTERNAL_GITHUB_PAT }}
       GH_TOKEN: ${{ github.token }}
 
     steps:
@@ -54,6 +55,7 @@ jobs:
           test -n "$INTERNAL_KEYSTORE_PASSWORD"
           test -n "$INTERNAL_KEY_ALIAS"
           test -n "$INTERNAL_KEY_PASSWORD"
+          test -n "$INTERNAL_GITHUB_PAT"
           INTERNAL_KEYSTORE_FILE="$RUNNER_TEMP/internal.keystore"
           printf '%s' "$INTERNAL_KEYSTORE_BASE64" | base64 --decode > "$INTERNAL_KEYSTORE_FILE"
           chmod 600 "$INTERNAL_KEYSTORE_FILE"

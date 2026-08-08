@@ -4,6 +4,7 @@ import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
+import blackark.app.vr.BuildConfig
 import java.nio.ByteBuffer
 import java.security.KeyStore
 import javax.crypto.Cipher
@@ -11,14 +12,54 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
-class GitHubCredentialStore(context: Context) {
+enum class GitHubTokenSource {
+    SavedOverride,
+    Bundled,
+    Missing,
+}
+
+data class GitHubTokenResolution(
+    val token: String?,
+    val source: GitHubTokenSource,
+)
+
+internal fun resolveGitHubToken(
+    savedToken: String?,
+    bundledToken: String?,
+): GitHubTokenResolution {
+    savedToken?.trim()?.takeIf(String::isNotBlank)?.let { token ->
+        return GitHubTokenResolution(token, GitHubTokenSource.SavedOverride)
+    }
+    bundledToken?.trim()?.takeIf(String::isNotBlank)?.let { token ->
+        return GitHubTokenResolution(token, GitHubTokenSource.Bundled)
+    }
+    return GitHubTokenResolution(null, GitHubTokenSource.Missing)
+}
+
+class GitHubCredentialStore(
+    context: Context,
+    private val bundledToken: String = BuildConfig.BUNDLED_GITHUB_PAT,
+) {
     private val preferences = context.applicationContext.getSharedPreferences(
         PREFERENCES_NAME,
         Context.MODE_PRIVATE,
     )
 
     @Synchronized
-    fun getToken(): String? {
+    fun getToken(): String? = resolution().token
+
+    @Synchronized
+    fun resolution(): GitHubTokenResolution = resolveGitHubToken(
+        savedToken = loadSavedToken(),
+        bundledToken = bundledToken,
+    )
+
+    @Synchronized
+    fun hasSavedOverride(): Boolean = loadSavedToken() != null
+
+    fun hasBundledToken(): Boolean = bundledToken.trim().isNotEmpty()
+
+    private fun loadSavedToken(): String? {
         val encoded = preferences.getString(KEY_TOKEN, null) ?: return null
         return runCatching {
             val packed = Base64.decode(encoded, Base64.NO_WRAP)
@@ -60,7 +101,7 @@ class GitHubCredentialStore(context: Context) {
         preferences.edit().remove(KEY_TOKEN).apply()
     }
 
-    fun hasToken(): Boolean = getToken() != null
+    fun hasToken(): Boolean = resolution().source != GitHubTokenSource.Missing
 
     private fun getOrCreateKey(): SecretKey {
         val keyStore = KeyStore.getInstance(ANDROID_KEY_STORE).apply { load(null) }

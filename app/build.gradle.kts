@@ -19,6 +19,13 @@ val versionProperties = Properties().apply {
     versionPropertiesFile.inputStream().use(::load)
 }
 
+val localSecretsFile = rootProject.file("secrets.local.properties")
+val localSecrets = Properties().apply {
+    if (localSecretsFile.exists()) {
+        localSecretsFile.inputStream().use(::load)
+    }
+}
+
 val playVersionRaw = versionProperties.getProperty("PLAY_VERSION")?.trim().orEmpty()
 check(playVersionRaw.matches(Regex("\\d+\\.\\d+\\.\\d+"))) {
     "PLAY_VERSION must be in MAJOR.MINOR.PATCH format, but was '$playVersionRaw'"
@@ -30,6 +37,17 @@ fun escapeForBuildConfig(value: String): String {
     return value
         .replace("\\", "\\\\")
         .replace("\"", "\\\"")
+}
+
+fun resolveBuildSecret(name: String): String =
+    providers.environmentVariable(name).orNull
+        ?.trim()
+        ?.takeIf(String::isNotBlank)
+        ?: localSecrets.getProperty(name)?.trim().orEmpty()
+
+val bundledGitHubPat = resolveBuildSecret("INTERNAL_GITHUB_PAT")
+check('\n' !in bundledGitHubPat && '\r' !in bundledGitHubPat) {
+    "INTERNAL_GITHUB_PAT must be a single-line value."
 }
 
 fun resolveGitSha(): String {
@@ -117,6 +135,7 @@ android {
         buildConfigField("String", "INTERNAL_RELEASE_CHANNEL", "\"${escapeForBuildConfig(releaseChannel)}\"")
         buildConfigField("String", "INTERNAL_BUILD_TIME_UTC", "\"${escapeForBuildConfig(internalBuildTimeUtc)}\"")
         buildConfigField("String", "INTERNAL_GIT_SHA", "\"${escapeForBuildConfig(internalGitSha)}\"")
+        buildConfigField("String", "BUNDLED_GITHUB_PAT", "\"${escapeForBuildConfig(bundledGitHubPat)}\"")
     }
 
     val internalSigningConfig = if (hasInternalSigningConfiguration) {
@@ -196,6 +215,9 @@ dependencies {
     implementation(libs.androidx.xr.compose.material3)
     implementation(libs.androidx.xr.arcore)
     implementation(libs.androidx.xr.arcore.openxr)
+    // Jetpack XR beta01 transitively requests ARCore 1.53.0, whose malformed
+    // constructor stack maps trigger D8 warnings. ARCore 1.54.0 fixes them.
+    implementation(libs.google.ar.core)
 
     // Media3 ExoPlayer
     implementation(libs.androidx.media3.exoplayer)

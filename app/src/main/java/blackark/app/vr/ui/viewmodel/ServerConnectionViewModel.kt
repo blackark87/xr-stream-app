@@ -35,6 +35,8 @@ class ServerConnectionViewModel(
         loadSavedServers()
     }
 
+    fun loadLastUsedCredentials(): SmbCredentials = credentialStore.loadLastUsed()
+
     private fun loadSavedServers() {
         viewModelScope.launch {
             serverRepository.allServers.collect { servers ->
@@ -78,10 +80,12 @@ class ServerConnectionViewModel(
                     // Save server if requested
                     if (saveCredentials) {
                         val credentialAlias = SmbCredentialStore.aliasForNewServer()
+                        val credentials = SmbCredentials(username, password, domain)
                         credentialStore.save(
                             credentialAlias,
-                            SmbCredentials(username, password, domain),
+                            credentials,
                         )
+                        credentialStore.saveLastUsed(credentials)
                         val server = SavedServer(
                             serverName = serverName,
                             serverAddress = serverAddress,
@@ -126,6 +130,7 @@ class ServerConnectionViewModel(
 
     fun connectToSavedServer(server: SavedServer) {
         val credentials = credentialStore.load(server.credentialAlias)
+        credentialStore.saveLastUsed(credentials)
         connectToServer(
             serverName = server.serverName,
             serverAddress = server.serverAddress,

@@ -19,6 +19,16 @@ Configure these repository Actions secrets before the first release:
 - `INTERNAL_KEYSTORE_PASSWORD`
 - `INTERNAL_KEY_ALIAS`
 - `INTERNAL_KEY_PASSWORD`
+- `INTERNAL_GITHUB_PAT` (fine-grained token for this repository with Contents read access)
+
+For local Android Studio builds, create the ignored `secrets.local.properties` file once:
+
+```properties
+INTERNAL_GITHUB_PAT=github_pat_your_token
+```
+
+The value is compiled into the internal APK as a fallback credential. A token saved from the app's
+Settings screen remains an encrypted override. Neither value is written to Room or build logs.
 
 The keystore must be the same key that signed the APK currently installed on test devices. The
 workflow refuses to publish if its certificate digest differs from the previous manifest release.

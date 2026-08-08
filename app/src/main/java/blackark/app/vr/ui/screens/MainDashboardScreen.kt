@@ -133,6 +133,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.autofill.ContentType
+import androidx.compose.ui.autofill.contentType
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
@@ -147,6 +149,7 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalAutofillManager
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
@@ -203,6 +206,7 @@ import blackark.app.vr.network.SMBFileItem
 import blackark.app.vr.network.SmbEndpointParser
 import blackark.app.vr.player.SMBDataSource
 import blackark.app.vr.remote.RemoteConfigStatus
+import blackark.app.vr.remote.GitHubTokenSource
 import blackark.app.vr.remote.UpdateState
 import blackark.app.vr.ui.ApplyHandTrackingPreference
 import blackark.app.vr.ui.components.EmptyState
@@ -3662,9 +3666,10 @@ private fun GitHubRemoteSettingsSection() {
     val updateState by updateManager.state.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     var tokenInput by rememberSaveable { mutableStateOf("") }
-    var hasToken by remember { mutableStateOf(credentialStore.hasToken()) }
+    var tokenSource by remember { mutableStateOf(credentialStore.resolution().source) }
     var isWorking by remember { mutableStateOf(false) }
     var feedback by remember { mutableStateOf<String?>(null) }
+    val hasToken = tokenSource != GitHubTokenSource.Missing
 
     val statusLabel = when (val current = status) {
         RemoteConfigStatus.Idle -> stringResource(R.string.remote_config_status_idle)
@@ -3709,6 +3714,16 @@ private fun GitHubRemoteSettingsSection() {
             style = MaterialTheme.typography.bodySmall,
             color = TextTertiary,
         )
+        SettingsValueRow(
+            title = stringResource(R.string.github_pat_source),
+            value = stringResource(
+                when (tokenSource) {
+                    GitHubTokenSource.SavedOverride -> R.string.github_pat_source_saved
+                    GitHubTokenSource.Bundled -> R.string.github_pat_source_bundled
+                    GitHubTokenSource.Missing -> R.string.github_pat_source_missing
+                }
+            ),
+        )
         OutlinedTextField(
             value = tokenInput,
             onValueChange = { tokenInput = it },
@@ -3719,7 +3734,11 @@ private fun GitHubRemoteSettingsSection() {
             placeholder = {
                 Text(
                     stringResource(
-                        if (hasToken) R.string.github_pat_saved else R.string.github_pat_placeholder
+                        when (tokenSource) {
+                            GitHubTokenSource.SavedOverride -> R.string.github_pat_saved
+                            GitHubTokenSource.Bundled -> R.string.github_pat_bundled
+                            GitHubTokenSource.Missing -> R.string.github_pat_placeholder
+                        }
                     )
                 )
             },
@@ -3737,7 +3756,7 @@ private fun GitHubRemoteSettingsSection() {
                             .onSuccess {
                                 credentialStore.saveToken(candidate)
                                 tokenInput = ""
-                                hasToken = true
+                                tokenSource = credentialStore.resolution().source
                                 val refreshed = repository.refresh()
                                 updateManager.check(repository.snapshot.value)
                                 feedback = if (refreshed is RemoteConfigStatus.Failed) {
@@ -3777,12 +3796,18 @@ private fun GitHubRemoteSettingsSection() {
                 Text(stringResource(R.string.test_connection))
             }
             TextButton(
-                enabled = hasToken && !isWorking,
+                enabled = tokenSource == GitHubTokenSource.SavedOverride && !isWorking,
                 onClick = {
                     credentialStore.clearToken()
-                    hasToken = false
+                    tokenSource = credentialStore.resolution().source
                     tokenInput = ""
-                    feedback = context.getString(R.string.github_pat_deleted)
+                    feedback = context.getString(
+                        if (tokenSource == GitHubTokenSource.Bundled) {
+                            R.string.github_pat_override_deleted
+                        } else {
+                            R.string.github_pat_deleted
+                        }
+                    )
                 },
             ) {
                 Text(stringResource(R.string.delete), color = NetflixRed)
@@ -4847,7 +4872,7 @@ fun MainDashboardScreen(
                 initialServer = serverToEdit,
                 initialCredentials = serverToEdit
                     ?.let(viewModel::loadCredentials)
-                    ?: SmbCredentials(),
+                    ?: viewModel.loadLastUsedCredentials(),
                 onDismiss = {
                     showAddServerDialog = false
                     serverToEdit = null
@@ -8275,6 +8300,7 @@ private fun AddServerDialog(
     var isTestingConnection by remember { mutableStateOf(false) }
     var connectionError by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
+    val autofillManager = LocalAutofillManager.current
 
     // Use standard Dialog composable
     androidx.compose.ui.window.Dialog(
@@ -8320,7 +8346,9 @@ private fun AddServerDialog(
                         value = username,
                         onValueChange = { username = it },
                         label = { Text(stringResource(R.string.user_id_optional)) },
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .contentType(ContentType.Username),
                         singleLine = true,
                         enabled = !isTestingConnection
                     )
@@ -8328,7 +8356,9 @@ private fun AddServerDialog(
                         value = password,
                         onValueChange = { password = it },
                         label = { Text(stringResource(R.string.password)) },
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .contentType(ContentType.Password),
                         singleLine = true,
                         visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
                         enabled = !isTestingConnection
@@ -8441,6 +8471,7 @@ private fun AddServerDialog(
                                     val result = onTestConnection(serverToSave, credentials)
 
                                     if (result.isSuccess) {
+                                        autofillManager?.commit()
                                         onSave(serverToSave, credentials)
                                     } else {
                                         connectionError = buildString {

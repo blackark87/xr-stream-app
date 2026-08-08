@@ -29,6 +29,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.autofill.ContentType
+import androidx.compose.ui.autofill.contentType
+import androidx.compose.ui.platform.LocalAutofillManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -39,6 +42,7 @@ import blackark.app.vr.data.database.AppDatabase
 import blackark.app.vr.data.database.entity.SavedServer
 import blackark.app.vr.data.repository.ServerRepository
 import blackark.app.vr.data.security.SmbCredentialStore
+import blackark.app.vr.data.security.SmbCredentials
 import blackark.app.vr.network.SmbEndpointParser
 import blackark.app.vr.ui.viewmodel.ServerConnectionViewModel
 
@@ -151,6 +155,7 @@ fun ServerConnectionScreen(
 
     if (showNewServerDialog) {
         NewServerDialog(
+            initialCredentials = viewModel.loadLastUsedCredentials(),
             onDismiss = { showNewServerDialog = false },
             onConnect = { name, address, port, share, username, password, domain, save ->
                 viewModel.connectToServer(
@@ -214,13 +219,15 @@ fun SavedServerCard(
 
 @Composable
 fun NewServerDialog(
+    initialCredentials: SmbCredentials = SmbCredentials(),
     onDismiss: () -> Unit,
     onConnect: (String, String, Int, String, String, String, String, Boolean) -> Unit
 ) {
     var address by remember { mutableStateOf("") }
-    var username by remember { mutableStateOf("") }
-    var password by remember { mutableStateOf("") }
+    var username by remember { mutableStateOf(initialCredentials.username) }
+    var password by remember { mutableStateOf(initialCredentials.password) }
     var error by remember { mutableStateOf<String?>(null) }
+    val autofillManager = LocalAutofillManager.current
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -242,7 +249,9 @@ fun NewServerDialog(
                     value = username,
                     onValueChange = { username = it },
                     label = { Text("User ID (optional)") },
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .contentType(ContentType.Username),
                     singleLine = true,
                 )
                 OutlinedTextField(
@@ -250,7 +259,9 @@ fun NewServerDialog(
                     onValueChange = { password = it },
                     label = { Text("Password") },
                     visualTransformation = PasswordVisualTransformation(),
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .contentType(ContentType.Password),
                     singleLine = true
                 )
                 error?.let { message ->
@@ -265,6 +276,7 @@ fun NewServerDialog(
                         error = failure.message
                         return@Button
                     }
+                    autofillManager?.commit()
                     onConnect(
                         endpoint.suggestedName,
                         endpoint.address,

@@ -10,9 +10,9 @@ import android.os.SystemClock
 import android.util.Log
 import androidx.core.net.toUri
 import androidx.media3.common.MediaItem
-import androidx.media3.common.SeekParameters
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.effect.Presentation
+import androidx.media3.exoplayer.SeekParameters
 import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.inspector.frame.FrameExtractor

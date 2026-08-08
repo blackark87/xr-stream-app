@@ -355,9 +355,12 @@ class MainDashboardViewModel(
     fun loadCredentials(server: SavedServer): SmbCredentials =
         credentialStore.load(server.credentialAlias)
 
+    fun loadLastUsedCredentials(): SmbCredentials = credentialStore.loadLastUsed()
+
     fun addServer(server: SavedServer, credentials: SmbCredentials) {
         viewModelScope.launch {
             credentialStore.save(server.credentialAlias, credentials)
+            credentialStore.saveLastUsed(credentials)
             serverRepository.insertServer(server)
         }
     }
@@ -365,6 +368,7 @@ class MainDashboardViewModel(
     fun updateServer(server: SavedServer, credentials: SmbCredentials) {
         viewModelScope.launch {
             credentialStore.save(server.credentialAlias, credentials)
+            credentialStore.saveLastUsed(credentials)
             serverRepository.updateServer(server)
             if (_uiState.value.selectedServer?.id == server.id) {
                 disconnect()
@@ -460,6 +464,7 @@ class MainDashboardViewModel(
                     if (connectionResult.isSuccess) {
                         smbClient = client
                         AppState.setSMBClient(client, config)
+                        credentialStore.saveLastUsed(credentials)
                     }
                     connectionResult
                 }

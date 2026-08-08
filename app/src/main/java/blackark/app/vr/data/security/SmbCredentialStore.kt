@@ -73,6 +73,14 @@ class SmbCredentialStore(context: Context) {
         if (alias.isNotBlank()) preferences.edit().remove(alias).apply()
     }
 
+    fun loadLastUsed(): SmbCredentials = load(LAST_USED_ALIAS)
+
+    fun saveLastUsed(credentials: SmbCredentials) {
+        if (!credentials.isGuest) {
+            save(LAST_USED_ALIAS, credentials)
+        }
+    }
+
     private fun getOrCreateKey(): SecretKey {
         val keyStore = KeyStore.getInstance(ANDROID_KEY_STORE).apply { load(null) }
         (keyStore.getKey(MASTER_KEY_ALIAS, null) as? SecretKey)?.let { return it }
@@ -114,6 +122,7 @@ class SmbCredentialStore(context: Context) {
         private const val TRANSFORMATION = "AES/GCM/NoPadding"
         private const val TAG_LENGTH_BITS = 128
         private const val PAYLOAD_SEPARATOR = "."
+        private const val LAST_USED_ALIAS = "smb-last-used"
 
         fun aliasForNewServer(): String = "smb-${java.util.UUID.randomUUID()}"
     }

@@ -19,6 +19,8 @@ object AppDataResetCoordinator {
         if (epochPreferences.getInt(KEY_EPOCH, 0) >= CURRENT_EPOCH) return
 
         appContext.deleteDatabase(AppDatabase.DATABASE_NAME)
+        // Device-local encrypted SMB credentials intentionally survive DB/cache resets. The
+        // fixed last-used alias can repopulate the add-server form after the server table resets.
         LEGACY_PREFERENCES.forEach { name ->
             appContext.getSharedPreferences(name, Context.MODE_PRIVATE).edit().clear().commit()
         }
@@ -32,7 +34,6 @@ object AppDataResetCoordinator {
     private val LEGACY_PREFERENCES = listOf(
         "av_library_settings",
         "server_autofill",
-        "encrypted_smb_credentials",
         "image_cache_versions",
     )
     private val CACHE_DIRECTORIES = listOf(
