@@ -2176,7 +2176,7 @@ private fun DashboardPreviewPanel(
 }
 
 @Composable
-private fun MotionVideoPreview(
+internal fun MotionVideoPreview(
     videoPath: String,
     source: String,
     playbackLimitMs: Long? = null,
@@ -2333,7 +2333,7 @@ private fun MotionVideoPreview(
 }
 
 @Composable
-private fun PreviewVolumeControl(
+internal fun PreviewVolumeControl(
     volume: Float,
     onVolumeChange: (Float) -> Unit,
     onVolumeChangeFinished: () -> Unit,
@@ -2378,7 +2378,7 @@ private fun PreviewVolumeControl(
     }
 }
 
-private fun isMotionPreviewEnabled(context: Context, path: String?): Boolean {
+internal fun isMotionPreviewEnabled(context: Context, path: String?): Boolean {
     if (path.isNullOrBlank()) return false
     val appContext = context.applicationContext
     val isSmb = path.startsWith("smb://", ignoreCase = true)
@@ -2388,7 +2388,7 @@ private fun isMotionPreviewEnabled(context: Context, path: String?): Boolean {
 }
 
 @Composable
-private fun ExtraFanartSlideshow(
+internal fun ExtraFanartSlideshow(
     imagePaths: List<String>,
     modifier: Modifier = Modifier,
 ) {
@@ -2435,7 +2435,7 @@ private fun ExtraFanartSlideshow(
     }
 }
 
-private const val PREVIEW_VOLUME_CONTROL_AUTO_HIDE_MS = 5_000L
+internal const val PREVIEW_VOLUME_CONTROL_AUTO_HIDE_MS = 5_000L
 private const val FANART_TRANSITION_DURATION_MS = 300
 
 @Composable
@@ -4570,6 +4570,10 @@ fun MainDashboardScreen(
                                     onAddCastAlias = viewModel::addAvPerformerAliases,
                                     onSaveWorkMetadata = viewModel::saveAvWorkMetadata,
                                     onRefreshMetadata = viewModel::rescanAvMetadata,
+                                    onResolveTrailerPreviewPath =
+                                        viewModel::resolveTrailerPreviewPath,
+                                    onResolveExtraFanartPaths =
+                                        viewModel::resolveExtraFanartPaths,
                                     onPlayPart = { filePath, fileName ->
                                         navController.navigate(
                                             Screen.VideoPlayer.createRoute(filePath, fileName)
@@ -4785,6 +4789,10 @@ fun MainDashboardScreen(
                                     onAddCastAlias = viewModel::addAvPerformerAliases,
                                     onSaveWorkMetadata = viewModel::saveAvWorkMetadata,
                                     onRefreshMetadata = viewModel::rescanAvMetadata,
+                                    onResolveTrailerPreviewPath =
+                                        viewModel::resolveTrailerPreviewPath,
+                                    onResolveExtraFanartPaths =
+                                        viewModel::resolveExtraFanartPaths,
                                     onPlayPart = { filePath, fileName ->
                                         navController.navigate(
                                             Screen.VideoPlayer.createRoute(filePath, fileName)
@@ -5507,6 +5515,8 @@ private fun AvWorkspacePanel(
     onAddCastAlias: (String, String?, String?) -> Unit,
     onSaveWorkMetadata: (String, JvrMovieMetadata) -> Unit,
     onRefreshMetadata: () -> Unit,
+    onResolveTrailerPreviewPath: suspend (String, String) -> String?,
+    onResolveExtraFanartPaths: suspend (String) -> List<String>,
     onPlayPart: (String, String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -5556,6 +5566,8 @@ private fun AvWorkspacePanel(
                 onAddCastAlias = onAddCastAlias,
                 onSaveWorkMetadata = onSaveWorkMetadata,
                 onRefreshMetadata = onRefreshMetadata,
+                onResolveTrailerPreviewPath = onResolveTrailerPreviewPath,
+                onResolveExtraFanartPaths = onResolveExtraFanartPaths,
                 onPlayPart = onPlayPart,
                 showHeader = false,
                 showContainer = false,

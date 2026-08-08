@@ -6,6 +6,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -56,8 +57,10 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -90,12 +93,16 @@ import blackark.app.vr.ui.theme.TextTertiary
 import blackark.app.vr.ui.viewmodel.AvFilterFamily
 import blackark.app.vr.ui.viewmodel.AvLibraryState
 import blackark.app.vr.ui.viewmodel.AvVrFilterOption
+import blackark.app.vr.remote.RuntimeConfigRegistry
+import blackark.app.vr.utils.AppSettingsStore
 import blackark.app.vr.utils.JvrCastMetadata
 import blackark.app.vr.utils.JvrMovieMetadata
 import blackark.app.vr.utils.VideoThumbnailFetcher
+import blackark.app.vr.utils.togglePreviewMute
 import coil3.compose.AsyncImage
 import coil3.request.CachePolicy
 import coil3.request.ImageRequest
+import kotlinx.coroutines.delay
 import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.YearMonth
@@ -121,6 +128,8 @@ fun AvLibraryPanel(
     onAddCastAlias: (String, String?, String?) -> Unit,
     onSaveWorkMetadata: (String, JvrMovieMetadata) -> Unit,
     onRefreshMetadata: () -> Unit,
+    onResolveTrailerPreviewPath: suspend (String, String) -> String?,
+    onResolveExtraFanartPaths: suspend (String) -> List<String>,
     onPlayPart: (String, String) -> Unit,
     showHeader: Boolean = true,
     showContainer: Boolean = true,
@@ -326,6 +335,8 @@ fun AvLibraryPanel(
         AvWorkDetailDialog(
             work = selectedWork,
             onDismiss = { onWorkSelected(null) },
+            onResolveTrailerPreviewPath = onResolveTrailerPreviewPath,
+            onResolveExtraFanartPaths = onResolveExtraFanartPaths,
             onPlayPart = onPlayPart,
         )
     }
@@ -1184,13 +1195,57 @@ private fun AvWorkCard(
     }
 }
 
+private data class AvWorkPreviewSources(
+    val trailerPath: String? = null,
+    val fanartPaths: List<String> = emptyList(),
+)
+
 @Composable
 private fun AvWorkDetailDialog(
     work: AvLibraryWork,
     onDismiss: () -> Unit,
+    onResolveTrailerPreviewPath: suspend (String, String) -> String?,
+    onResolveExtraFanartPaths: suspend (String) -> List<String>,
     onPlayPart: (String, String) -> Unit,
 ) {
+    val context = LocalContext.current.applicationContext
     val sortedParts = remember(work.parts) { work.sortedParts }
+    val representativePath = work.representativePath
+    val representativeFileName = work.representativeFileName
+    val motionPreviewEnabled = remember(context, representativePath) {
+        isMotionPreviewEnabled(context, representativePath)
+    }
+    val previewSources by produceState<AvWorkPreviewSources?>(
+        initialValue = null,
+        work.assetKey,
+        representativePath,
+        representativeFileName,
+        motionPreviewEnabled,
+    ) {
+        if (
+            !motionPreviewEnabled ||
+            representativePath.isNullOrBlank() ||
+            representativeFileName.isNullOrBlank()
+        ) {
+            value = AvWorkPreviewSources()
+            return@produceState
+        }
+
+        val trailerPath = onResolveTrailerPreviewPath(
+            representativePath,
+            representativeFileName,
+        )?.takeIf(String::isNotBlank)
+        val fanartPaths = if (trailerPath == null) {
+            onResolveExtraFanartPaths(representativePath)
+        } else {
+            emptyList()
+        }
+        value = AvWorkPreviewSources(
+            trailerPath = trailerPath,
+            fanartPaths = fanartPaths,
+        )
+    }
+
     Dialog(onDismissRequest = onDismiss) {
         Card(
             modifier = Modifier
@@ -1238,9 +1293,9 @@ private fun AvWorkDetailDialog(
                     }
                 }
 
-                PosterThumbnail(
-                    posterUrls = work.displayPosterUrls,
-                    fallbackThumbnailPath = work.fallbackThumbnailPath,
+                AvWorkMediaPreview(
+                    work = work,
+                    previewSources = previewSources,
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(220.dp),
@@ -1310,6 +1365,144 @@ private fun AvWorkDetailDialog(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun AvWorkMediaPreview(
+    work: AvLibraryWork,
+    previewSources: AvWorkPreviewSources?,
+    modifier: Modifier = Modifier,
+) {
+    val context = LocalContext.current
+    val appContext = context.applicationContext
+    val representativePath = work.representativePath
+    val trailerPath = previewSources?.trailerPath
+    val fanartPaths = previewSources?.fanartPaths.orEmpty()
+    val fallbackVideoPath = representativePath.takeIf {
+        previewSources != null && trailerPath == null && fanartPaths.isEmpty()
+    }
+    val motionPreviewPath = trailerPath ?: fallbackVideoPath
+    val motionPreviewEnabled = remember(appContext, motionPreviewPath) {
+        isMotionPreviewEnabled(appContext, motionPreviewPath)
+    }
+    val showsMotionPreview = motionPreviewEnabled && !motionPreviewPath.isNullOrBlank()
+    var previewVolume by remember(appContext) {
+        mutableStateOf(AppSettingsStore.getPreviewVolume(appContext))
+    }
+    var lastAudiblePreviewVolume by remember(appContext) {
+        mutableStateOf(AppSettingsStore.getLastAudiblePreviewVolume(appContext))
+    }
+    var isPreviewVolumeControlVisible by remember(work.assetKey, motionPreviewPath) {
+        mutableStateOf(showsMotionPreview)
+    }
+    var previewVolumeControlResetToken by remember(work.assetKey, motionPreviewPath) {
+        mutableStateOf(0)
+    }
+    val previewTouchInteractionSource = remember(work.assetKey, motionPreviewPath) {
+        MutableInteractionSource()
+    }
+    val revealPreviewVolumeControl = {
+        isPreviewVolumeControlVisible = true
+        previewVolumeControlResetToken += 1
+    }
+
+    LaunchedEffect(
+        work.assetKey,
+        motionPreviewPath,
+        showsMotionPreview,
+        previewVolumeControlResetToken,
+    ) {
+        if (!showsMotionPreview) {
+            isPreviewVolumeControlVisible = false
+            return@LaunchedEffect
+        }
+        isPreviewVolumeControlVisible = true
+        delay(PREVIEW_VOLUME_CONTROL_AUTO_HIDE_MS)
+        isPreviewVolumeControlVisible = false
+    }
+
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(12.dp))
+            .background(DividerGray.copy(alpha = 0.4f)),
+        contentAlignment = Alignment.Center,
+    ) {
+        PosterThumbnail(
+            posterUrls = work.displayPosterUrls,
+            fallbackThumbnailPath = work.fallbackThumbnailPath,
+            modifier = Modifier.fillMaxSize(),
+        )
+
+        when {
+            motionPreviewEnabled && !trailerPath.isNullOrBlank() -> {
+                MotionVideoPreview(
+                    videoPath = trailerPath,
+                    source = "av-detail-trailer",
+                    previewVolume = previewVolume,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+
+            fanartPaths.isNotEmpty() -> {
+                ExtraFanartSlideshow(
+                    imagePaths = fanartPaths,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+
+            motionPreviewEnabled && !fallbackVideoPath.isNullOrBlank() -> {
+                MotionVideoPreview(
+                    videoPath = fallbackVideoPath,
+                    source = "av-detail-main-fallback",
+                    playbackLimitMs = RuntimeConfigRegistry.current.preview.mainVideoDurationMs,
+                    previewVolume = previewVolume,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+        }
+
+        if (showsMotionPreview) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clickable(
+                        interactionSource = previewTouchInteractionSource,
+                        indication = null,
+                        onClick = revealPreviewVolumeControl,
+                    ),
+            )
+        }
+
+        if (showsMotionPreview && isPreviewVolumeControlVisible) {
+            PreviewVolumeControl(
+                volume = previewVolume,
+                onVolumeChange = { volume ->
+                    revealPreviewVolumeControl()
+                    previewVolume = volume.coerceIn(0f, 1f)
+                    if (previewVolume > 0f) {
+                        lastAudiblePreviewVolume = previewVolume
+                    }
+                },
+                onVolumeChangeFinished = {
+                    revealPreviewVolumeControl()
+                    AppSettingsStore.setPreviewVolume(appContext, previewVolume)
+                },
+                onMuteToggle = {
+                    revealPreviewVolumeControl()
+                    val toggled = togglePreviewMute(
+                        currentVolume = previewVolume,
+                        lastAudibleVolume = lastAudiblePreviewVolume,
+                    )
+                    previewVolume = toggled.volume
+                    lastAudiblePreviewVolume = toggled.lastAudibleVolume
+                    AppSettingsStore.setPreviewVolume(appContext, previewVolume)
+                },
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(12.dp),
+            )
         }
     }
 }

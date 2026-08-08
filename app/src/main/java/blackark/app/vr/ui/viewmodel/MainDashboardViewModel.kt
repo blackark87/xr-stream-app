@@ -51,6 +51,7 @@ import blackark.app.vr.utils.flattenActorContentDirectories
 import blackark.app.vr.utils.isJapanActorFolderPath
 import blackark.app.vr.utils.isTrailerFile
 import blackark.app.vr.utils.resolveParentFolderBaseName
+import blackark.app.vr.utils.resolveTrailerPreviewFile
 import blackark.app.vr.utils.selectFolderRepresentativeVideo
 import jcifs.smb.SmbRandomAccessFile
 import kotlinx.coroutines.CancellationException
@@ -1313,6 +1314,49 @@ class MainDashboardViewModel(
             }
         }
         return deferred.await()
+    }
+
+    suspend fun resolveTrailerPreviewPath(
+        videoPath: String,
+        videoName: String,
+    ): String? {
+        if (videoPath.isBlank() || videoName.isBlank()) return null
+        val selectedServer = _uiState.value.selectedServer ?: return null
+        val activeSmbClient = smbClient
+        val activeLocalClient = localClient
+
+        return withContext(Dispatchers.IO) {
+            val siblings = when {
+                activeLocalClient != null -> {
+                    val parentUri = LocalFileClient.resolveParentDirectoryUri(
+                        rootTreeUri = selectedServer.shareName,
+                        childDocumentUri = videoPath,
+                    ) ?: return@withContext null
+                    activeLocalClient.listFiles(parentUri, includeHidden = true)
+                }
+
+                activeSmbClient != null -> {
+                    val parentPath = videoPath
+                        .trimEnd('/')
+                        .substringBeforeLast('/', "")
+                    if (parentPath.isBlank()) return@withContext null
+                    activeSmbClient.listFiles(parentPath, includeHidden = true)
+                }
+
+                else -> return@withContext null
+            }.getOrNull().orEmpty()
+
+            resolveTrailerPreviewFile(
+                video = SMBFileItem(
+                    name = videoName,
+                    path = videoPath,
+                    isDirectory = false,
+                    size = 0L,
+                    lastModified = 0L,
+                ),
+                siblings = siblings,
+            )?.path
+        }
     }
 
     suspend fun resolveBrowserFolderArtwork(
