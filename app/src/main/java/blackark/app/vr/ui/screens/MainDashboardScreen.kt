@@ -5,9 +5,11 @@
 package blackark.app.vr.ui.screens
 
 import android.annotation.SuppressLint
+import android.app.LocaleManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.LocaleList
 import android.provider.DocumentsContract
 import android.util.Log
 import android.util.TypedValue
@@ -20,6 +22,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
@@ -217,7 +220,6 @@ import blackark.app.vr.ui.theme.CardBackgroundHover
 import blackark.app.vr.ui.theme.DividerGray
 import blackark.app.vr.ui.theme.ErrorRed
 import blackark.app.vr.ui.theme.NetflixRed
-import blackark.app.vr.ui.theme.SuccessGreen
 import blackark.app.vr.ui.theme.TextPrimary
 import blackark.app.vr.ui.theme.TextSecondary
 import blackark.app.vr.ui.theme.TextTertiary
@@ -229,6 +231,7 @@ import blackark.app.vr.ui.viewmodel.FileBrowserViewMode
 import blackark.app.vr.ui.viewmodel.MainDashboardViewModel
 import blackark.app.vr.ui.viewmodel.SubtitleTextSize
 import blackark.app.vr.utils.AppSettingsStore
+import blackark.app.vr.utils.AppThemeMode
 import blackark.app.vr.utils.BrowserFolderArtworkResolution
 import blackark.app.vr.utils.IMMERSIVE_SUBTITLE_DISTANCE_SLIDER_STEPS
 import blackark.app.vr.utils.IMMERSIVE_SUBTITLE_VERTICAL_OFFSET_SLIDER_STEPS
@@ -288,7 +291,6 @@ private enum class PrimaryDestination {
     Home,
     LocalFiles,
     SmbFiles,
-    Library,
     YouTube,
     Settings,
 }
@@ -330,6 +332,45 @@ private enum class SettingsAction {
     ClearFavorites,
 }
 
+private enum class AppLanguage(val languageTag: String?) {
+    SystemDefault(null),
+    Korean("ko"),
+    English("en"),
+}
+
+@Composable
+private fun AppLanguage.localizedLabel(): String = when (this) {
+    AppLanguage.SystemDefault -> stringResource(R.string.language_system_default)
+    AppLanguage.Korean -> stringResource(R.string.language_korean)
+    AppLanguage.English -> stringResource(R.string.language_english)
+}
+
+@Composable
+private fun AppThemeMode.localizedLabel(): String = when (this) {
+    AppThemeMode.SystemDefault -> stringResource(R.string.theme_system_default)
+    AppThemeMode.Light -> stringResource(R.string.theme_light)
+    AppThemeMode.Dark -> stringResource(R.string.theme_dark)
+}
+
+private fun currentAppLanguage(context: Context): AppLanguage {
+    val applicationLocales = context
+        .getSystemService(LocaleManager::class.java)
+        .applicationLocales
+    if (applicationLocales.isEmpty) return AppLanguage.SystemDefault
+
+    return when (applicationLocales[0].language) {
+        AppLanguage.Korean.languageTag -> AppLanguage.Korean
+        AppLanguage.English.languageTag -> AppLanguage.English
+        else -> AppLanguage.SystemDefault
+    }
+}
+
+private fun setAppLanguage(context: Context, language: AppLanguage) {
+    val applicationLocales = language.languageTag?.let(LocaleList::forLanguageTags)
+        ?: LocaleList.getEmptyLocaleList()
+    context.getSystemService(LocaleManager::class.java).applicationLocales = applicationLocales
+}
+
 private data class SettingsFeedback(
     val action: SettingsAction,
     val detail: String? = null,
@@ -369,7 +410,6 @@ private fun PrimaryDestination.icon(): ImageVector = when (this) {
     PrimaryDestination.Home -> Icons.Filled.Home
     PrimaryDestination.LocalFiles -> Icons.Filled.FolderOpen
     PrimaryDestination.SmbFiles -> Icons.Filled.Cloud
-    PrimaryDestination.Library -> Icons.Filled.Favorite
     PrimaryDestination.YouTube -> Icons.Filled.Movie
     PrimaryDestination.Settings -> Icons.Filled.Settings
 }
@@ -379,7 +419,6 @@ private fun PrimaryDestination.localizedLabel(): String = when (this) {
     PrimaryDestination.Home -> stringResource(R.string.home)
     PrimaryDestination.LocalFiles -> stringResource(R.string.local_files)
     PrimaryDestination.SmbFiles -> stringResource(R.string.smb_files)
-    PrimaryDestination.Library -> stringResource(R.string.library)
     PrimaryDestination.YouTube -> stringResource(R.string.youtube)
     PrimaryDestination.Settings -> stringResource(R.string.settings)
 }
@@ -447,7 +486,6 @@ private fun resolveSourceTitle(
     PrimaryDestination.SmbFiles -> selectedServer?.serverName?.takeIf { it.isNotBlank() }
         ?: "SMB Files"
 
-    PrimaryDestination.Library -> "Library"
     PrimaryDestination.YouTube -> "YouTube"
     PrimaryDestination.Settings -> "Settings"
 }
@@ -471,7 +509,6 @@ private fun resolveSourceBreadcrumb(
         else -> null
     }
 
-    PrimaryDestination.Library,
     PrimaryDestination.YouTube,
     PrimaryDestination.Settings -> null
 }
@@ -910,6 +947,14 @@ private fun CompactSourceSwitcherButton(
         ) {
             availableSources.forEach { server ->
                 DropdownMenuItem(
+                    modifier = Modifier.background(
+                        color = if (selectedSource?.id == server.id) {
+                            NetflixRed.copy(alpha = 0.14f)
+                        } else {
+                            Color.Transparent
+                        },
+                        shape = RoundedCornerShape(14.dp),
+                    ),
                     text = {
                         Column {
                             Text(
@@ -939,7 +984,7 @@ private fun CompactSourceSwitcherButton(
                             Icon(
                                 imageVector = Icons.Filled.CheckCircle,
                                 contentDescription = null,
-                                tint = SuccessGreen,
+                                tint = NetflixRed,
                             )
                         }
                     },
@@ -1941,6 +1986,47 @@ private fun DashboardPreviewPanel(
                         .data(previewSpec.model)
                         .diskCachePolicy(CachePolicy.ENABLED)
                         .memoryCachePolicy(CachePolicy.ENABLED)
+                    val showsMotionPreview =
+                        motionPreviewEnabled &&
+                            (
+                                previewSpec.trailerPath != null ||
+                                    (
+                                        extraFanartPaths != null &&
+                                            extraFanartPaths.isNullOrEmpty() &&
+                                            previewSpec.fallbackVideoPath != null
+                                    )
+                            )
+                    var isPreviewVolumeControlVisible by remember(
+                        previewItem.key,
+                        motionPreviewPath,
+                    ) { mutableStateOf(showsMotionPreview) }
+                    var previewVolumeControlResetToken by remember(
+                        previewItem.key,
+                        motionPreviewPath,
+                    ) { mutableStateOf(0) }
+                    val previewTouchInteractionSource = remember(
+                        previewItem.key,
+                        motionPreviewPath,
+                    ) { MutableInteractionSource() }
+                    val revealPreviewVolumeControl = {
+                        isPreviewVolumeControlVisible = true
+                        previewVolumeControlResetToken += 1
+                    }
+
+                    LaunchedEffect(
+                        previewItem.key,
+                        motionPreviewPath,
+                        showsMotionPreview,
+                        previewVolumeControlResetToken,
+                    ) {
+                        if (!showsMotionPreview) {
+                            isPreviewVolumeControlVisible = false
+                            return@LaunchedEffect
+                        }
+                        isPreviewVolumeControlVisible = true
+                        delay(PREVIEW_VOLUME_CONTROL_AUTO_HIDE_MS)
+                        isPreviewVolumeControlVisible = false
+                    }
 
                     if (!previewSpec.diskCacheKey.isNullOrBlank()) {
                         requestBuilder.diskCacheKey(previewSpec.diskCacheKey)
@@ -2002,29 +2088,41 @@ private fun DashboardPreviewPanel(
                             }
                         }
 
-                        val showsMotionPreview =
-                            motionPreviewEnabled &&
-                                (
-                                    previewSpec.trailerPath != null ||
-                                        (
-                                            extraFanartPaths != null &&
-                                                extraFanartPaths.isNullOrEmpty() &&
-                                                previewSpec.fallbackVideoPath != null
-                                        )
-                                )
                         if (showsMotionPreview) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .clickable(
+                                        interactionSource = previewTouchInteractionSource,
+                                        indication = null,
+                                        onClick = revealPreviewVolumeControl,
+                                    ),
+                            )
+                        }
+
+                        AnimatedVisibility(
+                            visible = showsMotionPreview && isPreviewVolumeControlVisible,
+                            enter = fadeIn(animationSpec = tween(180)),
+                            exit = fadeOut(animationSpec = tween(180)),
+                            modifier = Modifier
+                                .align(Alignment.BottomCenter)
+                                .padding(12.dp),
+                        ) {
                             PreviewVolumeControl(
                                 volume = previewVolume,
                                 onVolumeChange = { volume ->
+                                    revealPreviewVolumeControl()
                                     previewVolume = volume.coerceIn(0f, 1f)
                                     if (previewVolume > 0f) {
                                         lastAudiblePreviewVolume = previewVolume
                                     }
                                 },
                                 onVolumeChangeFinished = {
+                                    revealPreviewVolumeControl()
                                     AppSettingsStore.setPreviewVolume(appContext, previewVolume)
                                 },
                                 onMuteToggle = {
+                                    revealPreviewVolumeControl()
                                     val toggled = togglePreviewMute(
                                         currentVolume = previewVolume,
                                         lastAudibleVolume = lastAudiblePreviewVolume,
@@ -2033,9 +2131,6 @@ private fun DashboardPreviewPanel(
                                     lastAudiblePreviewVolume = toggled.lastAudibleVolume
                                     AppSettingsStore.setPreviewVolume(appContext, previewVolume)
                                 },
-                                modifier = Modifier
-                                    .align(Alignment.BottomEnd)
-                                    .padding(12.dp),
                             )
                         }
                     }
@@ -2319,11 +2414,17 @@ private fun ExtraFanartSlideshow(
     AnimatedContent(
         targetState = imagePaths[currentIndex.coerceIn(imagePaths.indices)],
         transitionSpec = {
-            fadeIn(animationSpec = tween(600)) togetherWith
-                fadeOut(animationSpec = tween(600))
+            fadeIn(
+                animationSpec = tween(
+                    durationMillis = FANART_TRANSITION_DURATION_MS,
+                    delayMillis = FANART_TRANSITION_DURATION_MS,
+                ),
+            ) togetherWith fadeOut(
+                animationSpec = tween(FANART_TRANSITION_DURATION_MS),
+            )
         },
         label = "extra-fanart-slideshow",
-        modifier = modifier,
+        modifier = modifier.background(Color.Black),
     ) { imagePath ->
         AsyncImage(
             model = ImageRequest.Builder(context)
@@ -2338,6 +2439,9 @@ private fun ExtraFanartSlideshow(
         )
     }
 }
+
+private const val PREVIEW_VOLUME_CONTROL_AUTO_HIDE_MS = 5_000L
+private const val FANART_TRANSITION_DURATION_MS = 300
 
 @Composable
 private fun rememberPreviewMetadata(previewItem: DashboardPreviewItem?): JvrMovieMetadata? {
@@ -2705,6 +2809,14 @@ private fun SourceSwitcherButton(
         ) {
             availableSources.forEach { server ->
                 DropdownMenuItem(
+                    modifier = Modifier.background(
+                        color = if (selectedSource?.id == server.id) {
+                            NetflixRed.copy(alpha = 0.14f)
+                        } else {
+                            Color.Transparent
+                        },
+                        shape = RoundedCornerShape(14.dp),
+                    ),
                     text = {
                         Column {
                             Text(
@@ -2738,7 +2850,7 @@ private fun SourceSwitcherButton(
                             Icon(
                                 imageVector = Icons.Filled.CheckCircle,
                                 contentDescription = null,
-                                tint = SuccessGreen,
+                                tint = NetflixRed,
                             )
                         }
                     },
@@ -2763,6 +2875,12 @@ private fun SettingsPanel(
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current.applicationContext
+    var selectedAppLanguage by remember {
+        mutableStateOf(currentAppLanguage(context))
+    }
+    var selectedThemeMode by remember {
+        mutableStateOf(AppSettingsStore.getThemeMode(context))
+    }
     val subtitleFonts = remember { SubtitleFontCatalog.availableFonts() }
     var selectedSubtitleFontId by remember {
         mutableStateOf(
@@ -2816,6 +2934,24 @@ private fun SettingsPanel(
                 text = stringResource(R.string.settings),
                 style = MaterialTheme.typography.headlineSmall,
                 color = TextPrimary,
+            )
+
+            HorizontalDivider(color = DividerGray)
+
+            SettingsLanguagePicker(
+                selectedLanguage = selectedAppLanguage,
+                onLanguageSelected = { language ->
+                    selectedAppLanguage = language
+                    setAppLanguage(context, language)
+                },
+            )
+
+            SettingsThemePicker(
+                selectedMode = selectedThemeMode,
+                onModeSelected = { mode ->
+                    selectedThemeMode = mode
+                    AppSettingsStore.setThemeMode(context, mode)
+                },
             )
 
             HorizontalDivider(color = DividerGray)
@@ -3141,6 +3277,186 @@ private fun MetadataScopeCard(
 }
 
 @Composable
+private fun SettingsThemePicker(
+    selectedMode: AppThemeMode,
+    onModeSelected: (AppThemeMode) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+
+    Column(
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            text = stringResource(R.string.theme),
+            style = MaterialTheme.typography.titleMedium,
+            color = TextPrimary,
+        )
+        Text(
+            text = stringResource(R.string.theme_description),
+            style = MaterialTheme.typography.bodyMedium,
+            color = TextSecondary,
+        )
+
+        Box(modifier = Modifier.fillMaxWidth()) {
+            Button(
+                onClick = { expanded = true },
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = CardBackgroundHover,
+                    contentColor = TextPrimary,
+                ),
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+            ) {
+                Text(
+                    text = selectedMode.localizedLabel(),
+                    style = MaterialTheme.typography.bodyLarge,
+                    textAlign = TextAlign.Start,
+                    modifier = Modifier.weight(1f),
+                )
+                Icon(
+                    imageVector = Icons.Filled.KeyboardArrowDown,
+                    contentDescription = null,
+                    tint = TextSecondary,
+                )
+            }
+
+            DropdownMenu(
+                expanded = expanded,
+                onDismissRequest = { expanded = false },
+                modifier = Modifier.widthIn(min = 360.dp, max = 520.dp),
+                shape = RoundedCornerShape(18.dp),
+                containerColor = CardBackgroundHover.copy(alpha = 0.98f),
+                tonalElevation = 8.dp,
+                shadowElevation = 18.dp,
+                border = BorderStroke(1.dp, DividerGray.copy(alpha = 0.85f)),
+            ) {
+                AppThemeMode.entries.forEach { mode ->
+                    DropdownMenuItem(
+                        modifier = Modifier.background(
+                            color = if (mode == selectedMode) {
+                                NetflixRed.copy(alpha = 0.14f)
+                            } else {
+                                Color.Transparent
+                            },
+                            shape = RoundedCornerShape(12.dp),
+                        ),
+                        text = {
+                            Text(
+                                text = mode.localizedLabel(),
+                                color = TextPrimary,
+                            )
+                        },
+                        trailingIcon = {
+                            if (mode == selectedMode) {
+                                Text(
+                                    text = "✓",
+                                    color = NetflixRed,
+                                    style = MaterialTheme.typography.titleMedium,
+                                )
+                            }
+                        },
+                        onClick = {
+                            expanded = false
+                            onModeSelected(mode)
+                        },
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SettingsLanguagePicker(
+    selectedLanguage: AppLanguage,
+    onLanguageSelected: (AppLanguage) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+
+    Column(
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            text = stringResource(R.string.language),
+            style = MaterialTheme.typography.titleMedium,
+            color = TextPrimary,
+        )
+        Text(
+            text = stringResource(R.string.language_description),
+            style = MaterialTheme.typography.bodyMedium,
+            color = TextSecondary,
+        )
+
+        Box(modifier = Modifier.fillMaxWidth()) {
+            Button(
+                onClick = { expanded = true },
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = CardBackgroundHover,
+                    contentColor = TextPrimary,
+                ),
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+            ) {
+                Text(
+                    text = selectedLanguage.localizedLabel(),
+                    style = MaterialTheme.typography.bodyLarge,
+                    textAlign = TextAlign.Start,
+                    modifier = Modifier.weight(1f),
+                )
+                Icon(
+                    imageVector = Icons.Filled.KeyboardArrowDown,
+                    contentDescription = null,
+                    tint = TextSecondary,
+                )
+            }
+
+            DropdownMenu(
+                expanded = expanded,
+                onDismissRequest = { expanded = false },
+                modifier = Modifier.widthIn(min = 360.dp, max = 520.dp),
+                shape = RoundedCornerShape(18.dp),
+                containerColor = CardBackgroundHover.copy(alpha = 0.98f),
+                tonalElevation = 8.dp,
+                shadowElevation = 18.dp,
+                border = BorderStroke(1.dp, DividerGray.copy(alpha = 0.85f)),
+            ) {
+                AppLanguage.entries.forEach { language ->
+                    DropdownMenuItem(
+                        modifier = Modifier.background(
+                            color = if (language == selectedLanguage) {
+                                NetflixRed.copy(alpha = 0.14f)
+                            } else {
+                                Color.Transparent
+                            },
+                            shape = RoundedCornerShape(12.dp),
+                        ),
+                        text = {
+                            Text(
+                                text = language.localizedLabel(),
+                                color = TextPrimary,
+                            )
+                        },
+                        trailingIcon = {
+                            if (language == selectedLanguage) {
+                                Text(
+                                    text = "✓",
+                                    color = NetflixRed,
+                                    style = MaterialTheme.typography.titleMedium,
+                                )
+                            }
+                        },
+                        onClick = {
+                            expanded = false
+                            onLanguageSelected(language)
+                        },
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun SettingsSubtitleFontPicker(
     fonts: List<SubtitleFontOption>,
     selectedFontId: String,
@@ -3198,9 +3514,22 @@ private fun SettingsSubtitleFontPicker(
                 modifier = Modifier
                     .widthIn(min = 360.dp, max = 520.dp)
                     .heightIn(max = 420.dp),
+                shape = RoundedCornerShape(18.dp),
+                containerColor = CardBackgroundHover.copy(alpha = 0.98f),
+                tonalElevation = 8.dp,
+                shadowElevation = 18.dp,
+                border = BorderStroke(1.dp, DividerGray.copy(alpha = 0.85f)),
             ) {
                 fonts.forEach { option ->
                     DropdownMenuItem(
+                        modifier = Modifier.background(
+                            color = if (option.id == selectedFont.id) {
+                                NetflixRed.copy(alpha = 0.14f)
+                            } else {
+                                Color.Transparent
+                            },
+                            shape = RoundedCornerShape(12.dp),
+                        ),
                         text = {
                             SubtitleFontPreviewText(
                                 option = option,
@@ -3217,7 +3546,7 @@ private fun SettingsSubtitleFontPicker(
                             if (option.id == selectedFont.id) {
                                 Text(
                                     text = "✓",
-                                    color = SuccessGreen,
+                                    color = NetflixRed,
                                     style = MaterialTheme.typography.titleMedium,
                                 )
                             }
@@ -3785,14 +4114,7 @@ fun MainDashboardScreen(
     }
     val browserPreviewResetKey =
         "preview:${primaryDestination.name}:${uiState.selectedServer?.id}:${uiState.currentPath}"
-    val libraryPreviewResetKey =
-        "library-preview:${primaryDestination.name}:${uiState.selectedServer?.id}"
     var browserPreviewItem by remember(browserPreviewResetKey) {
-        mutableStateOf<DashboardPreviewItem?>(
-            null
-        )
-    }
-    var libraryPreviewItem by remember(libraryPreviewResetKey) {
         mutableStateOf<DashboardPreviewItem?>(
             null
         )
@@ -3810,7 +4132,6 @@ fun MainDashboardScreen(
 
     fun clearAllPreviewItems() {
         browserPreviewItem = null
-        libraryPreviewItem = null
     }
 
     val localStoragePickerLauncher = rememberLauncherForActivityResult(
@@ -3973,7 +4294,6 @@ fun MainDashboardScreen(
                 viewModel.switchToSmbSource()
             }
 
-            PrimaryDestination.Library,
             PrimaryDestination.YouTube,
             PrimaryDestination.Settings -> Unit
         }
@@ -4177,33 +4497,6 @@ fun MainDashboardScreen(
                                     viewModel.openQuickAccess(folder)
                                 },
                                 onQuickAccessDelete = viewModel::removeQuickAccess,
-                                modifier = Modifier.fillMaxSize(),
-                            )
-                        }
-
-                        PrimaryDestination.Library -> {
-                            LibraryDestinationPanel(
-                                favorites = allFavorites,
-                                viewModel = viewModel,
-                                metadataRefreshToken = uiState.fileMetadataRefreshToken,
-                                dashboardContentWidth = dashboardContentWidth,
-                                previewItem = libraryPreviewItem,
-                                onFavoriteClick = { video ->
-                                    libraryPreviewItem = null
-                                    openHomeVideo(video)
-                                },
-                                onFavoriteToggle = { filePath, fileName, serverAddress, shareName, isFavorite ->
-                                    viewModel.toggleFavoriteEntry(
-                                        filePath = filePath,
-                                        fileName = fileName,
-                                        serverAddress = serverAddress,
-                                        shareName = shareName,
-                                        currentIsFavorite = isFavorite,
-                                    )
-                                },
-                                onPreviewFocused = { preview ->
-                                    libraryPreviewItem = preview
-                                },
                                 modifier = Modifier.fillMaxSize(),
                             )
                         }
@@ -5582,6 +5875,14 @@ private fun FileBrowserPanel(
                         ) {
                             FileBrowserSortMode.entries.forEach { mode ->
                                 DropdownMenuItem(
+                                    modifier = Modifier.background(
+                                        color = if (mode == sortMode) {
+                                            NetflixRed.copy(alpha = 0.14f)
+                                        } else {
+                                            Color.Transparent
+                                        },
+                                        shape = RoundedCornerShape(14.dp),
+                                    ),
                                     text = {
                                         Text(
                                             text = fileBrowserSortLabel(mode),
@@ -5603,7 +5904,7 @@ private fun FileBrowserPanel(
                                             Icon(
                                                 imageVector = Icons.Filled.CheckCircle,
                                                 contentDescription = null,
-                                                tint = SuccessGreen,
+                                                tint = NetflixRed,
                                             )
                                         }
                                     },

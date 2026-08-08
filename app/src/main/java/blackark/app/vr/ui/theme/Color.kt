@@ -27,43 +27,43 @@ private data class StreamingPalette(
     val gradientEnd: Color,
 )
 
-private val WarmLightPalette = StreamingPalette(
-    primary = Color(0xFFD8502F),
-    primaryPressed = Color(0xFFB43D21),
-    contrast = Color(0xFF2C2621),
-    background = Color(0xFFF7F1E7),
-    card = Color(0xFFF2EBDD),
-    cardHover = Color(0xFFE9E0D1),
-    divider = Color(0xFFD1C3B2),
-    textPrimary = Color(0xFF2A241E),
-    textSecondary = Color(0xFF5D554C),
-    textTertiary = Color(0xFF7C7268),
-    accent = Color(0xFFF08A3C),
-    success = Color(0xFF2E7D4B),
-    error = Color(0xFFC62828),
-    gradientStart = Color(0xFFF8F3EA),
-    gradientEnd = Color(0xFFF1E7D8),
+private val VioletLightPalette = StreamingPalette(
+    primary = Color(0xFF6D28D9),
+    primaryPressed = Color(0xFF5521A7),
+    contrast = Color(0xFF17121F),
+    background = Color(0xFFF8F7FC),
+    card = Color(0xFFFFFBFF),
+    cardHover = Color(0xFFF0EBF6),
+    divider = Color(0xFFD8D0E2),
+    textPrimary = Color(0xFF1D1824),
+    textSecondary = Color(0xFF5F5868),
+    textTertiary = Color(0xFF7C7387),
+    accent = Color(0xFF8B5CF6),
+    success = Color(0xFF267A4B),
+    error = Color(0xFFB3261E),
+    gradientStart = Color(0xFFFBF9FF),
+    gradientEnd = Color(0xFFEFEAF6),
 )
-private val WarmDarkPalette = StreamingPalette(
-    primary = Color(0xFFEE7B56),
-    primaryPressed = Color(0xFFCF5F3C),
-    contrast = Color(0xFF181411),
-    background = Color(0xFF161311),
-    card = Color(0xFF21201E),
-    cardHover = Color(0xFF2B2926),
-    divider = Color(0xFF6E655D),
-    textPrimary = Color(0xFFF6F2EE),
-    textSecondary = Color(0xFFD8CFC7),
-    textTertiary = Color(0xFFB6ACA3),
-    accent = Color(0xFFFFB868),
-    success = Color(0xFF7BC690),
-    error = Color(0xFFFF9A8C),
-    gradientStart = Color(0xFF1A1614),
-    gradientEnd = Color(0xFF25211F),
+private val VioletDarkPalette = StreamingPalette(
+    primary = Color(0xFFC4B5FD),
+    primaryPressed = Color(0xFFA78BFA),
+    contrast = Color(0xFF09070D),
+    background = Color(0xFF09070D),
+    card = Color(0xFF15111C),
+    cardHover = Color(0xFF231B2D),
+    divider = Color(0xFF493C59),
+    textPrimary = Color(0xFFF8F5FF),
+    textSecondary = Color(0xFFD4C9E0),
+    textTertiary = Color(0xFFA99CB7),
+    accent = Color(0xFFA78BFA),
+    success = Color(0xFF6ED59A),
+    error = Color(0xFFFFB4AB),
+    gradientStart = Color(0xFF09070D),
+    gradientEnd = Color(0xFF191222),
 )
 
 private val activePalette: StreamingPalette
-    get() = if (StreamingThemeState.isDarkMode) WarmDarkPalette else WarmLightPalette
+    get() = if (StreamingThemeState.isDarkMode) VioletDarkPalette else VioletLightPalette
 
 val NetflixRed: Color
     get() = activePalette.primary

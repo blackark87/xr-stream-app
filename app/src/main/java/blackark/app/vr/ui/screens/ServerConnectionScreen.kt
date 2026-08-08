@@ -33,11 +33,13 @@ import androidx.compose.ui.autofill.ContentType
 import androidx.compose.ui.autofill.contentType
 import androidx.compose.ui.platform.LocalAutofillManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
+import blackark.app.vr.R
 import blackark.app.vr.data.database.AppDatabase
 import blackark.app.vr.data.database.entity.SavedServer
 import blackark.app.vr.data.repository.ServerRepository
@@ -240,8 +242,8 @@ fun NewServerDialog(
                 OutlinedTextField(
                     value = address,
                     onValueChange = { address = it },
-                    label = { Text("SMB address") },
-                    placeholder = { Text("smb://server/share") },
+                    label = { Text(stringResource(R.string.smb_address)) },
+                    placeholder = { Text(stringResource(R.string.smb_address_example)) },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
                 )

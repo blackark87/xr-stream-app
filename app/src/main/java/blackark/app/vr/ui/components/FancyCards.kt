@@ -65,7 +65,6 @@ import blackark.app.vr.ui.theme.DividerGray
 import blackark.app.vr.ui.theme.NetflixDarkRed
 import blackark.app.vr.ui.theme.NetflixRed
 import blackark.app.vr.ui.theme.StreamingBlack
-import blackark.app.vr.ui.theme.SuccessGreen
 import blackark.app.vr.ui.theme.TextPrimary
 import blackark.app.vr.ui.theme.TextSecondary
 import blackark.app.vr.ui.theme.TextTertiary
@@ -171,7 +170,7 @@ fun LocalStorageCard(
                 Icon(
                     imageVector = Icons.Filled.CheckCircle,
                     contentDescription = stringResource(R.string.selected),
-                    tint = SuccessGreen,
+                    tint = NetflixRed,
                     modifier = Modifier.size(24.dp)
                 )
             }

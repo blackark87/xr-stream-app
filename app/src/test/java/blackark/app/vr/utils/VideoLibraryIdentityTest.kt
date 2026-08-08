@@ -8,27 +8,31 @@ import org.junit.Test
 class VideoLibraryIdentityTest {
 
     @Test
-    fun `extract virtual group key supports numeric multipart suffixes`() {
-        assertEquals("CODE-123", extractVirtualGroupKey("CODE-123-01.mp4"))
-        assertEquals(1, extractVirtualGroupPart("CODE-123-01.mp4"))
-        assertEquals("CODE-123", extractVirtualGroupKey("CODE-123_2.mp4"))
-        assertEquals(2, extractVirtualGroupPart("CODE-123_2.mp4"))
+    fun `numeric suffixes remain separate files`() {
+        assertNull(extractVirtualGroupKey("CODE-123-01.mp4"))
+        assertNull(extractVirtualGroupPart("CODE-123-01.mp4"))
+        assertNull(extractVirtualGroupKey("CODE-123-02.mp4"))
+        assertNull(extractVirtualGroupPart("CODE-123-02.mp4"))
+        assertNull(extractVirtualGroupKey("CODE-123_2.mp4"))
+        assertNull(extractVirtualGroupPart("CODE-123_2.mp4"))
     }
 
     @Test
-    fun `extract virtual group key supports alias multipart suffixes`() {
-        assertEquals("CODE-123", extractVirtualGroupKey("CODE-123-cd1.mp4"))
-        assertEquals(1, extractVirtualGroupPart("CODE-123-cd1.mp4"))
+    fun `extract virtual group key supports explicit multipart markers`() {
         assertEquals("CODE-123", extractVirtualGroupKey("CODE-123 pt02.mp4"))
         assertEquals(2, extractVirtualGroupPart("CODE-123 pt02.mp4"))
-        assertEquals("CODE-123", extractVirtualGroupKey("CODE-123_part3.mp4"))
-        assertEquals(3, extractVirtualGroupPart("CODE-123_part3.mp4"))
         assertEquals("CODE-123", extractVirtualGroupKey("CODE-123-pt-1.mp4"))
         assertEquals(1, extractVirtualGroupPart("CODE-123-pt-1.mp4"))
-        assertEquals("CODE-123", extractVirtualGroupKey("CODE-123_part-2.mp4"))
-        assertEquals(2, extractVirtualGroupPart("CODE-123_part-2.mp4"))
-        assertEquals("CODE-123", extractVirtualGroupKey("CODE-123-cd-1.mp4"))
-        assertEquals(1, extractVirtualGroupPart("CODE-123-cd-1.mp4"))
+        assertEquals("CODE-123", extractVirtualGroupKey("CODE-123_PT10.mp4"))
+        assertEquals(10, extractVirtualGroupPart("CODE-123_PT10.mp4"))
+        assertEquals("CODE-123", extractVirtualGroupKey("CODE-123-cd1.mp4"))
+        assertEquals(1, extractVirtualGroupPart("CODE-123-cd1.mp4"))
+        assertEquals("CODE-123", extractVirtualGroupKey("CODE-123-cd-2.mp4"))
+        assertEquals(2, extractVirtualGroupPart("CODE-123-cd-2.mp4"))
+        assertEquals("CODE-123", extractVirtualGroupKey("CODE-123_part3.mp4"))
+        assertEquals(3, extractVirtualGroupPart("CODE-123_part3.mp4"))
+        assertEquals("CODE-123", extractVirtualGroupKey("CODE-123-part-4.mp4"))
+        assertEquals(4, extractVirtualGroupPart("CODE-123-part-4.mp4"))
     }
 
     @Test
@@ -47,6 +51,8 @@ class VideoLibraryIdentityTest {
                 video("CODE-123-pt-1.mp4"),
                 video("SINGLE-001-pt-1.mp4"),
                 video("PLAIN-100.mp4"),
+                video("SEPARATE-200-01.mp4"),
+                video("SEPARATE-200-02.mp4"),
             )
         )
 

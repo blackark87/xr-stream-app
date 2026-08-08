@@ -9,17 +9,17 @@ class LocalNfoMetadataResolverTest {
     @Test
     fun `multipart nfo candidates prefer exact part stem before base stem`() {
         assertEquals(
-            listOf("CODE-123-cd1.nfo", "CODE-123.nfo", "movie.nfo", "info.nfo"),
-            buildNfoCandidateNames("CODE-123-cd1.mp4"),
+            listOf("CODE-123-pt1.nfo", "CODE-123.nfo", "movie.nfo", "info.nfo"),
+            buildNfoCandidateNames("CODE-123-pt1.mp4"),
         )
     }
 
     @Test
     fun `multipart poster candidates prioritize content poster then content image and generic poster`() {
-        val candidates = buildPosterCandidateNames("CODE-123_part02.mp4")
-        assertEquals("CODE-123_part02-poster.jpg", candidates[0])
+        val candidates = buildPosterCandidateNames("CODE-123_pt02.mp4")
+        assertEquals("CODE-123_pt02-poster.jpg", candidates[0])
         assertEquals("CODE-123-poster.jpg", candidates[4])
-        assertEquals("CODE-123_part02.jpg", candidates[8])
+        assertEquals("CODE-123_pt02.jpg", candidates[8])
         assertEquals("CODE-123.jpg", candidates[12])
         assertEquals("poster.jpg", candidates[16])
         assertEquals("fanart.jpg", candidates[20])

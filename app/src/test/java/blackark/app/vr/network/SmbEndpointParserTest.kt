@@ -24,6 +24,15 @@ class SmbEndpointParserTest {
     }
 
     @Test
+    fun `fully qualified domain uses SMB default port`() {
+        val endpoint = SmbEndpointParser.parse("nas.example.com").getOrThrow()
+
+        assertEquals("nas.example.com", endpoint.address)
+        assertEquals(445, endpoint.port)
+        assertEquals("", endpoint.shareName)
+    }
+
+    @Test
     fun `credentials embedded in address are rejected`() {
         assertTrue(SmbEndpointParser.parse("smb://user@server/share").isFailure)
     }

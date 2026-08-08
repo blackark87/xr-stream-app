@@ -10,6 +10,7 @@ import android.view.MotionEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -21,6 +22,8 @@ import androidx.navigation.compose.rememberNavController
 import blackark.app.vr.ui.navigation.AppNavigation
 import blackark.app.vr.ui.theme.XRStreamTheme
 import blackark.app.vr.remote.RuntimeConfigRegistry
+import blackark.app.vr.utils.AppSettingsStore
+import blackark.app.vr.utils.AppThemeMode
 import kotlin.math.abs
 
 class MainActivity : ComponentActivity() {
@@ -35,9 +38,15 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        AppSettingsStore.initializeThemeMode(this)
 
         setContent {
-            XRStreamTheme(darkTheme = false) {
+            val useDarkTheme = when (AppSettingsStore.themeMode) {
+                AppThemeMode.SystemDefault -> isSystemInDarkTheme()
+                AppThemeMode.Light -> false
+                AppThemeMode.Dark -> true
+            }
+            XRStreamTheme(darkTheme = useDarkTheme) {
                 val context = androidx.compose.ui.platform.LocalContext.current
                 var hasHeadTrackingPermission by remember {
                     mutableStateOf(

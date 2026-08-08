@@ -6,7 +6,7 @@ import blackark.app.vr.remote.RuntimeConfigRegistry
 
 private val bundledVideoFileCodePattern = Regex("""(?i)([a-z]{2,10})[-_ ]?(\d{2,6})(?!\d)""")
 private val multipartVideoPattern = Regex(
-    """^(.*?)[ _-](?:(?:cd|pt|part)[ _-]?)?(\d{1,2})$""",
+    """^(.*?)[ _-](?:pt|cd|part)[ _-]?(\d{1,2})$""",
     RegexOption.IGNORE_CASE,
 )
 

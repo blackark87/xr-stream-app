@@ -1,7 +1,16 @@
 package blackark.app.vr.utils
 
 import android.content.Context
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import blackark.app.vr.remote.RuntimeConfigRegistry
+
+enum class AppThemeMode {
+    SystemDefault,
+    Light,
+    Dark,
+}
 
 internal data class PreviewVolumeToggleResult(
     val volume: Float,
@@ -33,6 +42,7 @@ object AppSettingsStore {
 
     private const val PREFS_NAME = "av_library_settings"
     private const val KEY_BACKGROUND_INDEXING_ENABLED = "background_indexing_enabled"
+    private const val KEY_THEME_MODE = "theme_mode"
     private const val KEY_HAND_TRACKING_ENABLED = "hand_tracking_enabled"
     private const val KEY_PLAYBACK_UI_HEAD_FOLLOW_ENABLED =
         "playback_ui_head_follow_enabled"
@@ -55,6 +65,27 @@ object AppSettingsStore {
 
     private fun prefs(context: Context) =
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+
+    var themeMode by mutableStateOf(AppThemeMode.SystemDefault)
+        private set
+
+    fun initializeThemeMode(context: Context) {
+        themeMode = getThemeMode(context)
+    }
+
+    fun getThemeMode(context: Context): AppThemeMode {
+        val storedValue = prefs(context).getString(KEY_THEME_MODE, null)
+        return AppThemeMode.entries.firstOrNull { it.name == storedValue }
+            ?: AppThemeMode.SystemDefault
+    }
+
+    fun setThemeMode(context: Context, mode: AppThemeMode) {
+        themeMode = mode
+        prefs(context)
+            .edit()
+            .putString(KEY_THEME_MODE, mode.name)
+            .apply()
+    }
 
     fun isBackgroundIndexingEnabled(context: Context): Boolean {
         return prefs(context).getBoolean(

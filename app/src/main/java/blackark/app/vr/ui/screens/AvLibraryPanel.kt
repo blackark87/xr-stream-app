@@ -576,11 +576,22 @@ private fun VrFilterTrigger(
             onDismissRequest = { expanded = false },
             containerColor = CardBackgroundHover,
             shape = RoundedCornerShape(16.dp),
+            tonalElevation = 8.dp,
+            shadowElevation = 18.dp,
+            border = BorderStroke(1.dp, DividerGray.copy(alpha = 0.85f)),
             modifier = Modifier
                 .background(CardBackgroundHover)
                 .widthIn(min = 180.dp, max = 220.dp),
         ) {
             DropdownMenuItem(
+                modifier = Modifier.background(
+                    color = if (selectedVrFilter == AvVrFilterOption.All) {
+                        NetflixRed.copy(alpha = 0.14f)
+                    } else {
+                        Color.Transparent
+                    },
+                    shape = RoundedCornerShape(12.dp),
+                ),
                 text = { Text("All content") },
                 onClick = {
                     expanded = false
@@ -588,6 +599,14 @@ private fun VrFilterTrigger(
                 },
             )
             DropdownMenuItem(
+                modifier = Modifier.background(
+                    color = if (selectedVrFilter == AvVrFilterOption.VrOnly) {
+                        NetflixRed.copy(alpha = 0.14f)
+                    } else {
+                        Color.Transparent
+                    },
+                    shape = RoundedCornerShape(12.dp),
+                ),
                 text = { Text("VR only") },
                 onClick = {
                     expanded = false
@@ -595,6 +614,14 @@ private fun VrFilterTrigger(
                 },
             )
             DropdownMenuItem(
+                modifier = Modifier.background(
+                    color = if (selectedVrFilter == AvVrFilterOption.NonVrOnly) {
+                        NetflixRed.copy(alpha = 0.14f)
+                    } else {
+                        Color.Transparent
+                    },
+                    shape = RoundedCornerShape(12.dp),
+                ),
                 text = { Text("Non-VR only") },
                 onClick = {
                     expanded = false
@@ -626,11 +653,22 @@ private fun StudioFilterTrigger(
             onDismissRequest = { expanded = false },
             containerColor = CardBackgroundHover,
             shape = RoundedCornerShape(16.dp),
+            tonalElevation = 8.dp,
+            shadowElevation = 18.dp,
+            border = BorderStroke(1.dp, DividerGray.copy(alpha = 0.85f)),
             modifier = Modifier
                 .background(CardBackgroundHover)
                 .widthIn(min = 200.dp, max = 260.dp),
         ) {
             DropdownMenuItem(
+                modifier = Modifier.background(
+                    color = if (selectedStudio == null) {
+                        NetflixRed.copy(alpha = 0.14f)
+                    } else {
+                        Color.Transparent
+                    },
+                    shape = RoundedCornerShape(12.dp),
+                ),
                 text = { Text("All studios") },
                 onClick = {
                     expanded = false
@@ -639,6 +677,14 @@ private fun StudioFilterTrigger(
             )
             studios.forEach { studio ->
                 DropdownMenuItem(
+                    modifier = Modifier.background(
+                        color = if (selectedStudio == studio) {
+                            NetflixRed.copy(alpha = 0.14f)
+                        } else {
+                            Color.Transparent
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                    ),
                     text = { Text(studio) },
                     onClick = {
                         expanded = false
@@ -796,6 +842,9 @@ private fun ReleaseDateFilterTrigger(
             onDismissRequest = { expanded = false },
             containerColor = CardBackgroundHover,
             shape = RoundedCornerShape(18.dp),
+            tonalElevation = 8.dp,
+            shadowElevation = 18.dp,
+            border = BorderStroke(1.dp, DividerGray.copy(alpha = 0.85f)),
             modifier = Modifier
                 .background(CardBackgroundHover)
                 .widthIn(min = 252.dp, max = 280.dp),
@@ -1084,6 +1133,9 @@ private fun AvWorkCard(
                             onDismissRequest = { menuExpanded = false },
                             containerColor = CardBackgroundHover,
                             shape = RoundedCornerShape(14.dp),
+                            tonalElevation = 8.dp,
+                            shadowElevation = 18.dp,
+                            border = BorderStroke(1.dp, DividerGray.copy(alpha = 0.85f)),
                         ) {
                             DropdownMenuItem(
                                 text = { Text("Edit metadata") },
@@ -1114,6 +1166,9 @@ private fun AvWorkCard(
                         onDismissRequest = { menuExpanded = false },
                         containerColor = CardBackgroundHover,
                         shape = RoundedCornerShape(14.dp),
+                        tonalElevation = 8.dp,
+                        shadowElevation = 18.dp,
+                        border = BorderStroke(1.dp, DividerGray.copy(alpha = 0.85f)),
                     ) {
                         DropdownMenuItem(
                             text = { Text("Edit metadata") },
@@ -1447,6 +1502,9 @@ private fun EditAvMetadataDialog(
                             onDismissRequest = { existingCastMenuExpanded = false },
                             containerColor = CardBackgroundHover,
                             shape = RoundedCornerShape(14.dp),
+                            tonalElevation = 8.dp,
+                            shadowElevation = 18.dp,
+                            border = BorderStroke(1.dp, DividerGray.copy(alpha = 0.85f)),
                             modifier = Modifier
                                 .background(CardBackgroundHover)
                                 .widthIn(min = 260.dp, max = 360.dp),
@@ -1461,6 +1519,14 @@ private fun EditAvMetadataDialog(
                                         it.performerId == option.performerId
                                     }
                                     DropdownMenuItem(
+                                        modifier = Modifier.background(
+                                            color = if (isSelected) {
+                                                NetflixRed.copy(alpha = 0.14f)
+                                            } else {
+                                                Color.Transparent
+                                            },
+                                            shape = RoundedCornerShape(12.dp),
+                                        ),
                                         text = {
                                             Row(
                                                 modifier = Modifier.fillMaxWidth(),
@@ -1734,6 +1800,9 @@ private fun CastFilterCell(
                 onDismissRequest = { menuExpanded = false },
                 containerColor = CardBackgroundHover,
                 shape = RoundedCornerShape(14.dp),
+                tonalElevation = 8.dp,
+                shadowElevation = 18.dp,
+                border = BorderStroke(1.dp, DividerGray.copy(alpha = 0.85f)),
             ) {
                 if (mergeTargetCast?.performerId == cast.performerId) {
                     DropdownMenuItem(
