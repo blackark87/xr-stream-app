@@ -22,7 +22,6 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
@@ -2100,14 +2099,7 @@ private fun DashboardPreviewPanel(
                             )
                         }
 
-                        AnimatedVisibility(
-                            visible = showsMotionPreview && isPreviewVolumeControlVisible,
-                            enter = fadeIn(animationSpec = tween(180)),
-                            exit = fadeOut(animationSpec = tween(180)),
-                            modifier = Modifier
-                                .align(Alignment.BottomCenter)
-                                .padding(12.dp),
-                        ) {
+                        if (showsMotionPreview && isPreviewVolumeControlVisible) {
                             PreviewVolumeControl(
                                 volume = previewVolume,
                                 onVolumeChange = { volume ->
@@ -2131,6 +2123,9 @@ private fun DashboardPreviewPanel(
                                     lastAudiblePreviewVolume = toggled.lastAudibleVolume
                                     AppSettingsStore.setPreviewVolume(appContext, previewVolume)
                                 },
+                                modifier = Modifier
+                                    .align(Alignment.BottomCenter)
+                                    .padding(12.dp),
                             )
                         }
                     }
