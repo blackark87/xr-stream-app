@@ -241,6 +241,7 @@ object VideoFramePreviewExtractor {
         currentSession.cache.clear()
         runCatching { currentSession.extractor.close() }
         preparedSession = null
+        Log.d(TAG, "Released Media3 frame extractor for path=${currentSession.videoPath}")
     }
 
     private fun extractFallbackFrame(

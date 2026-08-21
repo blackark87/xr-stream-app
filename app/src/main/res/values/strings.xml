@@ -66,7 +66,7 @@
     <string name="connecting_to_source">Connecting to source...</string>
     <string name="connection_failed_prefix">Connection failed:</string>
     <string name="connection_failed_message">Connection failed: %1$s</string>
-    <string name="controller_detected_hand_tracking_message">A controller was detected. Disable hand tracking to reduce accidental playback gestures? You can change this later in Settings.</string>
+    <string name="controller_detected_hand_tracking_message">A controller was detected. Disable hand tracking for this app session to prevent accidental playback gestures? It turns back on from Settings or after restarting the app.</string>
     <string name="controller_detected_hand_tracking_title">Controller detected</string>
     <string name="delete">Delete</string>
     <string name="delete_selected_files_message">This will permanently delete %1$d file(s).</string>
@@ -81,7 +81,7 @@
     <string name="files">Files</string>
     <string name="files_selected_count">%1$d selected</string>
     <string name="hand_tracking">Hand tracking</string>
-    <string name="hand_tracking_description">Allows hand input throughout the app. Turn this off only if you want controller-only XR input. On by default.</string>
+    <string name="hand_tracking_description">Allows hand input throughout the app. Turning it off blocks hand gestures on playback screens for this app session and it turns back on after restart.</string>
     <string name="playback_ui_head_follow">360° playback controls head-follow</string>
     <string name="playback_ui_head_follow_description">Repositions playback controls when your view shifts during 360° video. Controls stay fixed in 2D and 180° video.</string>
     <string name="ip_address">Server address (IP or domain)</string>
@@ -108,6 +108,8 @@
     <string name="smb_hover_preview_description">Allows hover video playback over the network. Static thumbnails remain available when off.</string>
     <string name="preview_mute">Mute preview</string>
     <string name="preview_unmute">Unmute preview</string>
+    <string name="preview_play">Play preview</string>
+    <string name="preview_pause">Pause preview</string>
     <string name="library">Library</string>
     <string name="local_files">Local Files</string>
     <string name="local_folder_ready">Saved local folder</string>
@@ -151,6 +153,7 @@
     <string name="theme_light">Light</string>
     <string name="theme_dark">Dark</string>
     <string name="subtitle_settings">Subtitles</string>
+    <string name="subtitle_available">Subtitles available</string>
     <string name="subtitle_font">Subtitle font</string>
     <string name="subtitle_font_description">Choose from fonts on this device that support Korean text.</string>
     <string name="subtitle_font_preview">가나다라마바사 ABC abc 123</string>

@@ -1,5 +1,6 @@
 package blackark.app.vr
 
+import android.annotation.SuppressLint
 import android.hardware.input.InputManager
 import android.os.Bundle
 import android.os.SystemClock
@@ -33,12 +34,16 @@ class MainActivity : ComponentActivity() {
 
     private val activeControllerDeviceIds = mutableSetOf<Int>()
     private var lastControllerAxisLogAtMs = 0L
+    private var lastControllerRawLogAtMs = 0L
+    private var lastControllerRawLogSignature: String? = null
     private val controllerAxisResolver = ControllerAxisResolver()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         AppSettingsStore.initializeThemeMode(this)
+        AppSettingsStore.initializeHandTrackingForSession(this)
+        logControllerInputState("activity-created")
 
         setContent {
             val useDarkTheme = when (AppSettingsStore.themeMode) {
@@ -99,10 +104,12 @@ class MainActivity : ComponentActivity() {
                     val inputManager = getSystemService(InputManager::class.java)
                     val listener = object : InputManager.InputDeviceListener {
                         override fun onInputDeviceAdded(deviceId: Int) {
+                            logControllerDeviceChange("added", deviceId)
                             hasControllerLikeInputDevice = hasConnectedControllerLikeInputDevice()
                         }
 
                         override fun onInputDeviceRemoved(deviceId: Int) {
+                            Log.i(CONTROLLER_INPUT_TAG, "device removed deviceId=$deviceId")
                             controllerAxisResolver.clearDevice(deviceId)
                             if (activeControllerDeviceIds.remove(deviceId) && activeControllerDeviceIds.isEmpty()) {
                                 AppState.controllerAxisEvents.tryEmit(
@@ -117,6 +124,7 @@ class MainActivity : ComponentActivity() {
                         }
 
                         override fun onInputDeviceChanged(deviceId: Int) {
+                            logControllerDeviceChange("changed", deviceId)
                             controllerAxisResolver.clearDevice(deviceId)
                             hasControllerLikeInputDevice = hasConnectedControllerLikeInputDevice()
                         }
@@ -139,38 +147,81 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        logControllerInputState("activity-resumed")
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        Log.i(CONTROLLER_INPUT_TAG, "window-focus hasFocus=$hasFocus")
+    }
+
     private fun handleGlobalKeyEvent(event: KeyEvent): Boolean {
         AppState.keyEvents.tryEmit(event)
-        return AppState.consumePlaybackBackKeyEvents.value &&
+        val consumed = AppState.consumePlaybackBackKeyEvents.value &&
                 (event.keyCode == KeyEvent.KEYCODE_BUTTON_B ||
                         event.keyCode == KeyEvent.KEYCODE_BACK)
+        Log.d(
+            CONTROLLER_INPUT_TAG,
+            "key-global action=${keyActionLogValue(event.action)} " +
+                "code=${KeyEvent.keyCodeToString(event.keyCode)} deviceId=${event.deviceId} " +
+                "name=${event.device?.name.orEmpty()} source=0x${event.source.toString(16)} " +
+                "repeat=${event.repeatCount} consumed=$consumed",
+        )
+        return consumed
     }
 
-    override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
+    @SuppressLint("RestrictedApi")
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        Log.d(
+            CONTROLLER_INPUT_TAG,
+            "key-dispatch action=${keyActionLogValue(event.action)} " +
+                "code=${KeyEvent.keyCodeToString(event.keyCode)} deviceId=${event.deviceId} " +
+                "name=${event.device?.name.orEmpty()} source=0x${event.source.toString(16)} " +
+                "repeat=${event.repeatCount}",
+        )
+        onUserInteraction()
         if (handleGlobalKeyEvent(event)) {
             return true
         }
-        return super.onKeyDown(keyCode, event)
-    }
-
-    override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean {
-        if (handleGlobalKeyEvent(event)) {
+        if (window.superDispatchKeyEvent(event)) {
             return true
         }
-        return super.onKeyUp(keyCode, event)
+        val decorView = window.decorView
+        return event.dispatch(this, decorView.keyDispatcherState, this)
     }
 
     override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {
         if (
-            event.action != MotionEvent.ACTION_MOVE &&
-            event.action != MotionEvent.ACTION_HOVER_MOVE
+            event.actionMasked != MotionEvent.ACTION_MOVE &&
+            event.actionMasked != MotionEvent.ACTION_HOVER_MOVE
         ) {
+            logRawControllerMotion(event, reason = "unsupported-action", force = true)
             return super.dispatchGenericMotionEvent(event)
         }
 
         val samples = controllerAxisResolver.resolveSamples(event)
         if (samples.isEmpty()) {
+            logRawControllerMotion(event, reason = "unresolved-axes")
             return super.dispatchGenericMotionEvent(event)
+        }
+
+        val resolvedHasSignal = samples.any { sample ->
+            abs(sample.x) >= RuntimeConfigRegistry.current.controller.axisEmitThreshold ||
+                abs(sample.y) >= RuntimeConfigRegistry.current.controller.axisEmitThreshold
+        }
+        val rawHasSignal = SUPPORTED_CONTROLLER_AXIS_PAIRS.any { pair ->
+            abs(event.getAxisValue(pair.xAxis)) >=
+                RuntimeConfigRegistry.current.controller.axisProfileThreshold ||
+                abs(event.getAxisValue(pair.yAxis)) >=
+                RuntimeConfigRegistry.current.controller.axisProfileThreshold
+        }
+        if (rawHasSignal && !resolvedHasSignal) {
+            logRawControllerMotion(
+                event,
+                reason = "resolved-below-threshold:${samples.last().profileLabel}",
+            )
         }
 
         var consumed = false
@@ -236,6 +287,94 @@ class MainActivity : ComponentActivity() {
 
     private fun isControllerLikeInputDevice(device: InputDevice): Boolean {
         return ControllerAxisResolver.isControllerLikeInputDevice(device)
+    }
+
+    private fun logControllerDeviceChange(change: String, deviceId: Int) {
+        val device = InputDevice.getDevice(deviceId)
+        if (device == null) {
+            Log.i(CONTROLLER_INPUT_TAG, "device $change deviceId=$deviceId unavailable")
+            return
+        }
+        val ranges = device.motionRanges.joinToString(separator = ",") { range ->
+            "${MotionEvent.axisToString(range.axis)}@0x${range.source.toString(16)}" +
+                "[${range.min},${range.max};flat=${range.flat}]"
+        }
+        Log.i(
+            CONTROLLER_INPUT_TAG,
+            "device $change deviceId=$deviceId name=${device.name} " +
+                "sources=0x${device.sources.toString(16)} controllerLike=${isControllerLikeInputDevice(device)} " +
+                "ranges=$ranges",
+        )
+    }
+
+    private fun logControllerInputState(reason: String) {
+        val devices = InputDevice.getDeviceIds()
+            .map { deviceId -> InputDevice.getDevice(deviceId) }
+            .filterNotNull()
+        val controllerDevices = devices.filter(::isControllerLikeInputDevice)
+        Log.i(
+            CONTROLLER_INPUT_TAG,
+            "input-state reason=$reason hasWindowFocus=${hasWindowFocus()} " +
+                "deviceCount=${devices.size} controllerCount=${controllerDevices.size} " +
+                "controllers=${controllerDevices.joinToString(separator = ",") { device ->
+                    "${device.id}:${device.name}:0x${device.sources.toString(16)}"
+                }}",
+        )
+        controllerDevices.forEach { device ->
+            logControllerDeviceChange("present-$reason", device.id)
+        }
+    }
+
+    private fun keyActionLogValue(action: Int): String = when (action) {
+        KeyEvent.ACTION_DOWN -> "DOWN"
+        KeyEvent.ACTION_UP -> "UP"
+        KeyEvent.ACTION_MULTIPLE -> "MULTIPLE"
+        else -> action.toString()
+    }
+
+    private fun logRawControllerMotion(
+        event: MotionEvent,
+        reason: String,
+        force: Boolean = false,
+    ) {
+        val now = SystemClock.elapsedRealtime()
+        val signature = "$reason:${event.actionMasked}:${event.deviceId}:${event.source}"
+        val logIntervalMs = RuntimeConfigRegistry.current.controller.logIntervalMs
+        if (
+            !force &&
+            signature == lastControllerRawLogSignature &&
+            now - lastControllerRawLogAtMs < logIntervalMs
+        ) {
+            return
+        }
+        lastControllerRawLogAtMs = now
+        lastControllerRawLogSignature = signature
+
+        val axes = listOf(
+            MotionEvent.AXIS_X,
+            MotionEvent.AXIS_Y,
+            MotionEvent.AXIS_HAT_X,
+            MotionEvent.AXIS_HAT_Y,
+            MotionEvent.AXIS_Z,
+            MotionEvent.AXIS_RZ,
+            MotionEvent.AXIS_RX,
+            MotionEvent.AXIS_RY,
+            MotionEvent.AXIS_HSCROLL,
+            MotionEvent.AXIS_VSCROLL,
+        ).joinToString(separator = ",") { axis ->
+            "${MotionEvent.axisToString(axis)}=${"%.3f".format(event.getAxisValue(axis))}"
+        }
+        val ranges = event.device?.motionRanges.orEmpty().joinToString(separator = ",") { range ->
+            "${MotionEvent.axisToString(range.axis)}@0x${range.source.toString(16)}" +
+                "[${range.min},${range.max};flat=${range.flat}]"
+        }
+        Log.w(
+            CONTROLLER_INPUT_TAG,
+            "motion-raw reason=$reason action=${MotionEvent.actionToString(event.action)} " +
+                "deviceId=${event.deviceId} name=${event.device?.name.orEmpty()} " +
+                "source=0x${event.source.toString(16)} pointers=${event.pointerCount} " +
+                "history=${event.historySize} axes={$axes} ranges={$ranges}",
+        )
     }
 
 }

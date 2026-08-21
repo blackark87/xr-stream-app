@@ -1272,6 +1272,23 @@ class MainDashboardViewModel(
         return resolution.metadata
     }
 
+    suspend fun resolveBrowserFileNfoTitle(file: SMBFileItem): String? {
+        if (file.isDirectory || !SMBClient.isVideoFile(file.name)) return null
+
+        val fallbackCode = extractNormalizedCodeFromFileName(file.name)
+            ?: file.name.substringBeforeLast('.', file.name)
+                .trim()
+                .uppercase()
+                .takeIf { it.isNotBlank() }
+            ?: return null
+        return createLocalNfoMetadataResolver()
+            .resolve(video = file, fallbackCode = fallbackCode)
+            .metadata
+            ?.title
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+    }
+
     suspend fun resolveActorFolderArtwork(folder: SMBFileItem): String? {
         return resolveBrowserFolderArtwork(
             folder = folder,

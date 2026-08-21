@@ -120,4 +120,74 @@ class PlaybackControlsVisibilityPolicyTest {
             ),
         )
     }
+
+    @Test
+    fun `vertical controller axis elevates immersive view anchor but keeps 2D volume`() {
+        assertEquals(
+            ControllerVerticalAxisTarget.Volume,
+            resolveControllerVerticalAxisTarget(VideoFormat.Format2D),
+        )
+        assertEquals(
+            ControllerVerticalAxisTarget.ImmersiveViewAnchorElevation,
+            resolveControllerVerticalAxisTarget(VideoFormat.Format180),
+        )
+        assertEquals(
+            ControllerVerticalAxisTarget.ImmersiveViewAnchorElevation,
+            resolveControllerVerticalAxisTarget(VideoFormat.Format360),
+        )
+    }
+
+    @Test
+    fun `immersive view anchor elevation steps in both directions and remains clamped`() {
+        assertEquals(2.5f, stepImmersiveViewAnchorElevationDegrees(0f, direction = 1), 0f)
+        assertEquals(-2.5f, stepImmersiveViewAnchorElevationDegrees(0f, direction = -1), 0f)
+        assertEquals(
+            MAX_IMMERSIVE_VIEW_ANCHOR_ELEVATION_DEGREES,
+            stepImmersiveViewAnchorElevationDegrees(
+                MAX_IMMERSIVE_VIEW_ANCHOR_ELEVATION_DEGREES,
+                direction = 1,
+            ),
+            0f,
+        )
+        assertEquals(
+            MIN_IMMERSIVE_VIEW_ANCHOR_ELEVATION_DEGREES,
+            stepImmersiveViewAnchorElevationDegrees(
+                MIN_IMMERSIVE_VIEW_ANCHOR_ELEVATION_DEGREES,
+                direction = -1,
+            ),
+            0f,
+        )
+    }
+
+    @Test
+    fun `menus input locks and navigation block controller playback axes`() {
+        assertTrue(
+            shouldBlockControllerAxisPlaybackInput(
+                controlsInputLocked = false,
+                navigationExitPending = false,
+                activePlaybackMenu = PlaybackMenu.Display,
+            )
+        )
+        assertTrue(
+            shouldBlockControllerAxisPlaybackInput(
+                controlsInputLocked = true,
+                navigationExitPending = false,
+                activePlaybackMenu = PlaybackMenu.None,
+            )
+        )
+        assertTrue(
+            shouldBlockControllerAxisPlaybackInput(
+                controlsInputLocked = false,
+                navigationExitPending = true,
+                activePlaybackMenu = PlaybackMenu.None,
+            )
+        )
+        assertFalse(
+            shouldBlockControllerAxisPlaybackInput(
+                controlsInputLocked = false,
+                navigationExitPending = false,
+                activePlaybackMenu = PlaybackMenu.None,
+            )
+        )
+    }
 }

@@ -27,6 +27,7 @@ data class SMBFileItem(
     val size: Long,
     val lastModified: Long,
     val trailerPath: String? = null,
+    val subtitlePath: String? = null,
 )
 
 class SMBClient(private val config: SMBConfig) {
@@ -118,7 +119,7 @@ class SMBClient(private val config: SMBConfig) {
                         println("SMBClient: Error accessing file: ${e.message}")
                         null // Skip files that can't be accessed
                     }
-                } ?: emptyList()
+                }?.let(::attachKoreanSubtitleSidecarPaths) ?: emptyList()
 
                 println("SMBClient: Found ${files.size} files")
                 Result.success(files)

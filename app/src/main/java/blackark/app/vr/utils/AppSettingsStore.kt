@@ -69,6 +69,15 @@ object AppSettingsStore {
     var themeMode by mutableStateOf(AppThemeMode.SystemDefault)
         private set
 
+    @Volatile
+    private var isHandTrackingSessionInitialized = false
+
+    @Volatile
+    private var handTrackingEnabledForSession = true
+
+    @Volatile
+    private var controllerHandTrackingPromptHandledForSession = false
+
     fun initializeThemeMode(context: Context) {
         themeMode = getThemeMode(context)
     }
@@ -158,18 +167,30 @@ object AppSettingsStore {
         prefs(context).edit().putString("$KEY_LAST_FOLDER_PREFIX$serverId", path).apply()
     }
 
+    @Synchronized
+    fun initializeHandTrackingForSession(context: Context) {
+        if (isHandTrackingSessionInitialized) return
+
+        handTrackingEnabledForSession = RuntimeConfigRegistry.current.defaults.handTrackingEnabled
+        controllerHandTrackingPromptHandledForSession = false
+        isHandTrackingSessionInitialized = true
+
+        // Controller-only input is intentionally session-scoped. Clear legacy persisted values so
+        // an earlier choice cannot leave the next app process without hand input or its prompt.
+        prefs(context).edit()
+            .remove(KEY_HAND_TRACKING_ENABLED)
+            .remove(KEY_CONTROLLER_HAND_TRACKING_PROMPT_HANDLED)
+            .apply()
+    }
+
     fun isHandTrackingEnabled(context: Context): Boolean {
-        return prefs(context).getBoolean(
-            KEY_HAND_TRACKING_ENABLED,
-            RuntimeConfigRegistry.current.defaults.handTrackingEnabled,
-        )
+        initializeHandTrackingForSession(context)
+        return handTrackingEnabledForSession
     }
 
     fun setHandTrackingEnabled(context: Context, enabled: Boolean) {
-        prefs(context)
-            .edit()
-            .putBoolean(KEY_HAND_TRACKING_ENABLED, enabled)
-            .apply()
+        initializeHandTrackingForSession(context)
+        handTrackingEnabledForSession = enabled
     }
 
     fun isPlaybackUiHeadFollowEnabled(context: Context): Boolean =
@@ -186,14 +207,13 @@ object AppSettingsStore {
     }
 
     fun isControllerHandTrackingPromptHandled(context: Context): Boolean {
-        return prefs(context).getBoolean(KEY_CONTROLLER_HAND_TRACKING_PROMPT_HANDLED, false)
+        initializeHandTrackingForSession(context)
+        return controllerHandTrackingPromptHandledForSession
     }
 
     fun setControllerHandTrackingPromptHandled(context: Context, handled: Boolean) {
-        prefs(context)
-            .edit()
-            .putBoolean(KEY_CONTROLLER_HAND_TRACKING_PROMPT_HANDLED, handled)
-            .apply()
+        initializeHandTrackingForSession(context)
+        controllerHandTrackingPromptHandledForSession = handled
     }
 
     fun getLocalStorageTreeUri(context: Context): String? {

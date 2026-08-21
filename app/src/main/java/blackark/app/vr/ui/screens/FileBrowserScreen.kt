@@ -207,6 +207,7 @@ fun FileBrowserScreen(
                             isDirectory = file.isDirectory,
                             isVideoFile = isVideo,
                             fileSize = if (!file.isDirectory) formatFileSize(file.size) else null,
+                            hasSubtitle = file.subtitlePath != null,
                             videoPath = if (isVideo) file.path else null,
                             onClick = {
                                 if (file.isDirectory) {

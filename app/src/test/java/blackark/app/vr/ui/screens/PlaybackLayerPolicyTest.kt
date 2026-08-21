@@ -1,6 +1,8 @@
 package blackark.app.vr.ui.screens
 
 import androidx.compose.ui.unit.dp
+import androidx.xr.runtime.math.Pose
+import androidx.xr.runtime.math.Quaternion
 import androidx.xr.runtime.math.Vector3
 import androidx.xr.scenecore.InputEvent
 import blackark.app.vr.ui.viewmodel.PlaybackMenu
@@ -47,7 +49,7 @@ class PlaybackLayerPolicyTest {
     }
 
     @Test
-    fun `visible controls keep background toggle behind controls`() {
+    fun `visible controls disable the head-follow background input plane`() {
         val policy = resolvePlaybackLayerPolicy(
             isSurfaceReady = true,
             isImmersive = true,
@@ -58,7 +60,7 @@ class PlaybackLayerPolicyTest {
 
         assertTrue(policy.retainBackgroundInputLayer)
         assertFalse(policy.showHiddenControlsInputOverlay)
-        assertTrue(policy.enableBackgroundToggleInput)
+        assertFalse(policy.enableBackgroundToggleInput)
         assertTrue(policy.showControlsLayer)
     }
 
@@ -193,87 +195,51 @@ class PlaybackLayerPolicyTest {
     }
 
     @Test
-    fun `format policy follows 180 video and only 360 controls`() {
-        assertEquals(
-            PlaybackFollowPolicy(follow180Video = false, followPlaybackControls = false),
-            resolvePlaybackFollowPolicy(
-                videoFormat = VideoFormat.Format2D,
-                playbackControlsHeadFollowEnabled = true,
-            ),
+    fun `immersive elevation raises and lowers the centered view anchor`() {
+        val raisedForward = resolveImmersiveVideoRotation(
+            videoFormat = VideoFormat.Format180,
+            anchorRotation = null,
+            elevationDegrees = 15f,
+        ) * Vector3.Forward
+        val loweredForward = resolveImmersiveVideoRotation(
+            videoFormat = VideoFormat.Format360,
+            anchorRotation = Quaternion.Identity,
+            elevationDegrees = -15f,
+        ) * Vector3.Forward
+
+        assertTrue(raisedForward.y > 0f)
+        assertTrue(loweredForward.y < 0f)
+    }
+
+    @Test
+    fun `immersive elevation moves playback UI around the viewer without offsetting its radius`() {
+        val anchor = Quaternion.fromAxisAngle(Vector3.Up, 35f)
+        val basePose = Pose(
+            translation = (anchor * Vector3.Forward) * 1_000f,
+            rotation = anchor,
         )
+
+        val elevatedPose = resolveElevatedPlaybackPose(basePose, elevationDegrees = 15f)
+
+        assertTrue(elevatedPose.translation.y > basePose.translation.y)
         assertEquals(
-            PlaybackFollowPolicy(follow180Video = true, followPlaybackControls = false),
-            resolvePlaybackFollowPolicy(
-                videoFormat = VideoFormat.Format180,
-                playbackControlsHeadFollowEnabled = true,
-            ),
-        )
-        assertEquals(
-            PlaybackFollowPolicy(follow180Video = false, followPlaybackControls = true),
-            resolvePlaybackFollowPolicy(
-                videoFormat = VideoFormat.Format360,
-                playbackControlsHeadFollowEnabled = true,
-            ),
-        )
-        assertFalse(
-            resolvePlaybackFollowPolicy(
-                videoFormat = VideoFormat.Format360,
-                playbackControlsHeadFollowEnabled = false,
-            ).followPlaybackControls
+            basePose.translation.lengthSquared,
+            elevatedPose.translation.lengthSquared,
+            0.1f,
         )
     }
 
     @Test
-    fun `head follow stays still in dead zone and throughout interaction`() {
-        val forward = Vector3.Forward
+    fun `zero immersive elevation leaves the view anchor unchanged`() {
+        val forward = resolveImmersiveVideoRotation(
+            videoFormat = VideoFormat.Format360,
+            anchorRotation = Quaternion.Identity,
+            elevationDegrees = 0f,
+        ) * Vector3.Forward
 
-        assertFalse(
-            shouldUpdatePlaybackUiHeadFollow(
-                currentForward = forward,
-                targetForward = Vector3(x = 0.1f, y = 0f, z = -0.995f),
-                interactionLocked = false,
-            )
-        )
-        assertTrue(
-            shouldUpdatePlaybackUiHeadFollow(
-                currentForward = forward,
-                targetForward = Vector3.Right,
-                interactionLocked = false,
-            )
-        )
-        assertFalse(
-            shouldUpdatePlaybackUiHeadFollow(
-                currentForward = forward,
-                targetForward = Vector3.Right,
-                interactionLocked = true,
-            )
-        )
+        assertEquals(Vector3.Forward.x, forward.x, 0f)
+        assertEquals(Vector3.Forward.y, forward.y, 0f)
+        assertEquals(Vector3.Forward.z, forward.z, 0f)
     }
 
-    @Test
-    fun `180 video only retargets outside thirty degree dead zone`() {
-        val forward = Vector3.Forward
-
-        assertFalse(
-            shouldUpdate180VideoHeadFollow(
-                currentForward = forward,
-                targetForward = Vector3(x = 0.4f, y = 0f, z = -0.9165f),
-                interactionLocked = false,
-            )
-        )
-        assertTrue(
-            shouldUpdate180VideoHeadFollow(
-                currentForward = forward,
-                targetForward = Vector3.Right,
-                interactionLocked = false,
-            )
-        )
-        assertFalse(
-            shouldUpdate180VideoHeadFollow(
-                currentForward = forward,
-                targetForward = Vector3.Right,
-                interactionLocked = true,
-            )
-        )
-    }
 }

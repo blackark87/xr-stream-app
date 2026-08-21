@@ -87,6 +87,8 @@ import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.MovieCreation
 import androidx.compose.material.icons.filled.North
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SortByAlpha
@@ -1417,6 +1419,17 @@ private fun HomeVideoCard(
         ArtworkState.Missing
     }
     val metadata = metadataState.resolvedValueOrNull()
+    val nfoTitle = if (
+        artworkPolicy == VideoArtworkPolicy.GeneratedFrameOnly && sourceMatches
+    ) {
+        rememberVideoFileNfoTitle(
+            viewModel = viewModel,
+            file = file,
+            refreshToken = metadataRefreshToken,
+        )
+    } else {
+        null
+    }
     var posterFailureCount by remember(
         video.filePath,
         metadata?.posterUrl,
@@ -1469,9 +1482,12 @@ private fun HomeVideoCard(
 
         VideoArtworkSelection.Placeholder -> null
     }
-    val displayTitle = metadata?.title?.takeIf { it.isNotBlank() }
-        ?: video.resolvedTitle?.takeIf { it.isNotBlank() }
-        ?: video.fileName.substringBeforeLast('.', video.fileName)
+    val displayTitle = resolveHomeVideoDisplayTitle(
+        fileName = video.fileName,
+        metadataTitle = metadata?.title,
+        nfoTitle = nfoTitle,
+        resolvedTitle = video.resolvedTitle,
+    )
     val sourceLabel = metadata?.studio?.takeIf { it.isNotBlank() }
         ?: if (video.filePath.startsWith("smb://", ignoreCase = true)) {
             video.shareName.takeIf { it.isNotBlank() } ?: video.serverAddress
@@ -1995,6 +2011,10 @@ private fun DashboardPreviewPanel(
                                             previewSpec.fallbackVideoPath != null
                                     )
                             )
+                    var isPreviewPlaybackRequested by remember(
+                        previewItem.key,
+                        motionPreviewPath,
+                    ) { mutableStateOf(true) }
                     var isPreviewVolumeControlVisible by remember(
                         previewItem.key,
                         motionPreviewPath,
@@ -2016,6 +2036,7 @@ private fun DashboardPreviewPanel(
                         previewItem.key,
                         motionPreviewPath,
                         showsMotionPreview,
+                        isPreviewPlaybackRequested,
                         previewVolumeControlResetToken,
                     ) {
                         if (!showsMotionPreview) {
@@ -2023,6 +2044,9 @@ private fun DashboardPreviewPanel(
                             return@LaunchedEffect
                         }
                         isPreviewVolumeControlVisible = true
+                        if (!isPreviewPlaybackRequested) {
+                            return@LaunchedEffect
+                        }
                         delay(PREVIEW_VOLUME_CONTROL_AUTO_HIDE_MS)
                         isPreviewVolumeControlVisible = false
                     }
@@ -2062,6 +2086,11 @@ private fun DashboardPreviewPanel(
                                     videoPath = previewSpec.trailerPath,
                                     source = "trailer",
                                     previewVolume = previewVolume,
+                                    playbackRequested = isPreviewPlaybackRequested,
+                                    interactivePlayback = true,
+                                    onPlaybackCompleted = {
+                                        isPreviewPlaybackRequested = false
+                                    },
                                     modifier = Modifier.fillMaxSize(),
                                 )
                             }
@@ -2082,6 +2111,11 @@ private fun DashboardPreviewPanel(
                                     playbackLimitMs =
                                         RuntimeConfigRegistry.current.preview.mainVideoDurationMs,
                                     previewVolume = previewVolume,
+                                    playbackRequested = isPreviewPlaybackRequested,
+                                    interactivePlayback = true,
+                                    onPlaybackCompleted = {
+                                        isPreviewPlaybackRequested = false
+                                    },
                                     modifier = Modifier.fillMaxSize(),
                                 )
                             }
@@ -2102,6 +2136,12 @@ private fun DashboardPreviewPanel(
                         if (showsMotionPreview && isPreviewVolumeControlVisible) {
                             PreviewVolumeControl(
                                 volume = previewVolume,
+                                playbackRequested = isPreviewPlaybackRequested,
+                                onPlaybackToggle = {
+                                    revealPreviewVolumeControl()
+                                    isPreviewPlaybackRequested =
+                                        !isPreviewPlaybackRequested
+                                },
                                 onVolumeChange = { volume ->
                                     revealPreviewVolumeControl()
                                     previewVolume = volume.coerceIn(0f, 1f)
@@ -2181,6 +2221,9 @@ internal fun MotionVideoPreview(
     source: String,
     playbackLimitMs: Long? = null,
     previewVolume: Float,
+    playbackRequested: Boolean = true,
+    interactivePlayback: Boolean = false,
+    onPlaybackCompleted: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -2195,11 +2238,14 @@ internal fun MotionVideoPreview(
 
     var previewPlayer by remember(videoPath, source) { mutableStateOf<ExoPlayer?>(null) }
     var hasRenderedFirstFrame by remember(videoPath, source) { mutableStateOf(false) }
+    val currentPlaybackRequested by rememberUpdatedState(playbackRequested)
+    val currentOnPlaybackCompleted by rememberUpdatedState(onPlaybackCompleted)
     LaunchedEffect(videoPath, source, playbackLimitMs, focusDelayMs) {
         delay(focusDelayMs)
         val readySignal = CompletableDeferred<Boolean>()
         val firstFrameSignal = CompletableDeferred<Unit>()
         val endedSignal = CompletableDeferred<Unit>()
+        val failureSignal = CompletableDeferred<Unit>()
         val player = runCatching {
             val builder = ExoPlayer.Builder(appContext)
             if (isSmb) {
@@ -2225,6 +2271,9 @@ internal fun MotionVideoPreview(
                         if (playbackState == Player.STATE_ENDED && !endedSignal.isCompleted) {
                             endedSignal.complete(Unit)
                         }
+                        if (playbackState == Player.STATE_ENDED && interactivePlayback) {
+                            currentOnPlaybackCompleted()
+                        }
                     }
 
                     override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
@@ -2235,6 +2284,8 @@ internal fun MotionVideoPreview(
                         )
                         if (!readySignal.isCompleted) readySignal.complete(false)
                         if (!endedSignal.isCompleted) endedSignal.complete(Unit)
+                        if (!failureSignal.isCompleted) failureSignal.complete(Unit)
+                        if (interactivePlayback) currentOnPlaybackCompleted()
                     }
 
                     override fun onRenderedFirstFrame() {
@@ -2271,37 +2322,46 @@ internal fun MotionVideoPreview(
             }
 
             player.seekTo(0L)
-            player.play()
-
-            val renderedFirstFrame = withTimeoutOrNull(10_000L) {
-                firstFrameSignal.await()
-                true
-            } == true
-            if (!renderedFirstFrame) {
-                Log.w(
-                    "MotionVideoPreview",
-                    "Preview first frame timed out source=$source path=$videoPath",
-                )
-                return@LaunchedEffect
+            if (currentPlaybackRequested) {
+                player.play()
+            } else {
+                player.pause()
             }
 
             Log.d(
                 "MotionVideoPreview",
-                "Playing source=$source path=$videoPath startMs=0 limitMs=$playbackLimitMs",
+                "Ready source=$source path=$videoPath startMs=0 limitMs=$playbackLimitMs " +
+                    "playbackRequested=$currentPlaybackRequested",
             )
-            if (playbackLimitMs == null) {
-                endedSignal.await()
+            if (interactivePlayback) {
+                failureSignal.await()
             } else {
-                val endedNaturally = withTimeoutOrNull(playbackLimitMs) {
-                    endedSignal.await()
+                val renderedFirstFrame = withTimeoutOrNull(10_000L) {
+                    firstFrameSignal.await()
                     true
                 } == true
-                if (!endedNaturally) {
-                    player.pause()
-                    Log.d(
+                if (!renderedFirstFrame) {
+                    Log.w(
                         "MotionVideoPreview",
-                        "Playback limit reached source=$source path=$videoPath limitMs=$playbackLimitMs",
+                        "Preview first frame timed out source=$source path=$videoPath",
                     )
+                    return@LaunchedEffect
+                }
+
+                if (playbackLimitMs == null) {
+                    endedSignal.await()
+                } else {
+                    val endedNaturally = withTimeoutOrNull(playbackLimitMs) {
+                        endedSignal.await()
+                        true
+                    } == true
+                    if (!endedNaturally) {
+                        player.pause()
+                        Log.d(
+                            "MotionVideoPreview",
+                            "Playback limit reached source=$source path=$videoPath limitMs=$playbackLimitMs",
+                        )
+                    }
                 }
             }
         } finally {
@@ -2314,6 +2374,49 @@ internal fun MotionVideoPreview(
 
     LaunchedEffect(previewPlayer, previewVolume) {
         previewPlayer?.volume = previewVolume.coerceIn(0f, 1f)
+    }
+
+    LaunchedEffect(
+        previewPlayer,
+        playbackRequested,
+        interactivePlayback,
+        playbackLimitMs,
+    ) {
+        val player = previewPlayer ?: return@LaunchedEffect
+        if (!interactivePlayback) return@LaunchedEffect
+
+        if (playbackRequested) {
+            if (shouldRestartMotionPreview(player.playbackState, player.currentPosition, playbackLimitMs)) {
+                player.seekTo(0L)
+            }
+            player.play()
+        } else {
+            player.pause()
+        }
+    }
+
+    LaunchedEffect(
+        previewPlayer,
+        playbackLimitMs,
+        interactivePlayback,
+        playbackRequested,
+    ) {
+        val player = previewPlayer ?: return@LaunchedEffect
+        val limitMs = playbackLimitMs ?: return@LaunchedEffect
+        if (!interactivePlayback || !playbackRequested) return@LaunchedEffect
+
+        while (true) {
+            delay(PREVIEW_PLAYBACK_LIMIT_POLL_MS)
+            if (hasMotionPreviewReachedLimit(player.playbackState, player.currentPosition, limitMs)) {
+                player.pause()
+                currentOnPlaybackCompleted()
+                Log.d(
+                    "MotionVideoPreview",
+                    "Playback limit reached source=$source path=$videoPath limitMs=$limitMs",
+                )
+                return@LaunchedEffect
+            }
+        }
     }
 
     previewPlayer?.let { player ->
@@ -2332,12 +2435,29 @@ internal fun MotionVideoPreview(
     }
 }
 
+internal fun shouldRestartMotionPreview(
+    playbackState: Int,
+    currentPositionMs: Long,
+    playbackLimitMs: Long?,
+): Boolean =
+    playbackState == Player.STATE_ENDED ||
+        (playbackLimitMs != null && currentPositionMs >= playbackLimitMs)
+
+internal fun hasMotionPreviewReachedLimit(
+    playbackState: Int,
+    currentPositionMs: Long,
+    playbackLimitMs: Long,
+): Boolean =
+    playbackState != Player.STATE_ENDED && currentPositionMs >= playbackLimitMs
+
 @Composable
 internal fun PreviewVolumeControl(
     volume: Float,
     onVolumeChange: (Float) -> Unit,
     onVolumeChangeFinished: () -> Unit,
     onMuteToggle: () -> Unit,
+    playbackRequested: Boolean = true,
+    onPlaybackToggle: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     Surface(
@@ -2349,6 +2469,24 @@ internal fun PreviewVolumeControl(
             modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            onPlaybackToggle?.let { togglePlayback ->
+                IconButton(
+                    onClick = togglePlayback,
+                    modifier = Modifier.size(40.dp),
+                ) {
+                    Icon(
+                        imageVector = if (playbackRequested) {
+                            Icons.Filled.Pause
+                        } else {
+                            Icons.Filled.PlayArrow
+                        },
+                        contentDescription = stringResource(
+                            if (playbackRequested) R.string.preview_pause else R.string.preview_play,
+                        ),
+                        tint = Color.White,
+                    )
+                }
+            }
             IconButton(
                 onClick = onMuteToggle,
                 modifier = Modifier.size(40.dp),
@@ -2365,7 +2503,7 @@ internal fun PreviewVolumeControl(
                 value = volume.coerceIn(0f, 1f),
                 onValueChange = onVolumeChange,
                 onValueChangeFinished = onVolumeChangeFinished,
-                modifier = Modifier.width(150.dp),
+                modifier = Modifier.width(if (onPlaybackToggle == null) 150.dp else 110.dp),
             )
             Text(
                 text = "${(volume * 100).toInt()}%",
@@ -2436,6 +2574,7 @@ internal fun ExtraFanartSlideshow(
 }
 
 internal const val PREVIEW_VOLUME_CONTROL_AUTO_HIDE_MS = 5_000L
+private const val PREVIEW_PLAYBACK_LIMIT_POLL_MS = 100L
 private const val FANART_TRANSITION_DURATION_MS = 300
 
 @Composable
@@ -2907,10 +3046,6 @@ private fun SettingsPanel(
     var smbHoverPreviewEnabled by remember {
         mutableStateOf(AppSettingsStore.isSmbHoverPreviewEnabled(context))
     }
-    var playbackUiHeadFollowEnabled by remember {
-        mutableStateOf(AppSettingsStore.isPlaybackUiHeadFollowEnabled(context))
-    }
-
     Card(
         modifier = modifier,
         colors = CardDefaults.cardColors(
@@ -2956,15 +3091,6 @@ private fun SettingsPanel(
                 description = stringResource(R.string.hand_tracking_description),
                 checked = isHandTrackingEnabled,
                 onCheckedChange = onHandTrackingChange,
-            )
-            SettingsToggleRow(
-                title = stringResource(R.string.playback_ui_head_follow),
-                description = stringResource(R.string.playback_ui_head_follow_description),
-                checked = playbackUiHeadFollowEnabled,
-                onCheckedChange = { enabled ->
-                    playbackUiHeadFollowEnabled = enabled
-                    AppSettingsStore.setPlaybackUiHeadFollowEnabled(context, enabled)
-                },
             )
             SettingsToggleRow(
                 title = stringResource(R.string.av_background_indexing),
@@ -5210,6 +5336,9 @@ private data class VirtualVideoGroup(
 ) {
     val fileCount: Int
         get() = files.size
+
+    val hasSubtitle: Boolean
+        get() = files.any { file -> file.subtitlePath != null }
 }
 
 private sealed interface FileBrowserDisplayItem {
@@ -5308,6 +5437,33 @@ private fun rememberVideoFileMetadata(
 
     return metadataState.value
 }
+
+@Composable
+private fun rememberVideoFileNfoTitle(
+    viewModel: MainDashboardViewModel,
+    file: SMBFileItem,
+    refreshToken: Long,
+): String? {
+    val title by produceState<String?>(
+        initialValue = null,
+        file.path,
+        file.lastModified,
+        refreshToken,
+    ) {
+        value = viewModel.resolveBrowserFileNfoTitle(file)
+    }
+    return title
+}
+
+internal fun resolveHomeVideoDisplayTitle(
+    fileName: String,
+    metadataTitle: String?,
+    nfoTitle: String?,
+    resolvedTitle: String?,
+): String = metadataTitle?.takeIf { it.isNotBlank() }
+    ?: nfoTitle?.takeIf { it.isNotBlank() }
+    ?: resolvedTitle?.takeIf { it.isNotBlank() }
+    ?: fileName.substringBeforeLast('.', fileName)
 
 @Composable
 private fun rememberGroupMetadata(
@@ -6854,6 +7010,9 @@ private fun VirtualGroupListCard(
                         overflow = TextOverflow.Ellipsis
                     )
                 }
+                if (group.hasSubtitle) {
+                    SubtitleAvailabilityRow()
+                }
             }
 
             Icon(
@@ -7222,6 +7381,9 @@ private fun VirtualGroupThumbnailCard(
                     overflow = TextOverflow.Ellipsis
                 )
             }
+            if (group.hasSubtitle) {
+                SubtitleAvailabilityRow()
+            }
         }
 
         GroupHoverPreviewPopup(
@@ -7412,6 +7574,7 @@ private fun FileListEntryCard(
         isDirectory = file.isDirectory,
         isVideoFile = isVideoFile,
         supportingText = detailText,
+        hasSubtitle = file.subtitlePath != null,
         isFavorite = isFavorite,
         videoPath = if (isVideoFile) file.path else null,
         thumbnailModel = when {
@@ -7886,6 +8049,9 @@ private fun FileThumbnailCard(
                     color = TextTertiary
                 )
             }
+            if (file.subtitlePath != null) {
+                SubtitleAvailabilityRow()
+            }
         }
     }
 
@@ -7896,6 +8062,18 @@ private fun FileThumbnailCard(
         previewSpec = previewSpec,
         anchorBounds = popupAnchorBounds,
         onClick = onPopupClick,
+    )
+}
+
+@Composable
+private fun SubtitleAvailabilityRow() {
+    Spacer(modifier = Modifier.height(2.dp))
+    Text(
+        text = stringResource(R.string.subtitle_available),
+        style = MaterialTheme.typography.labelSmall,
+        color = AccentGold,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
     )
 }
 

@@ -14,6 +14,7 @@ import androidx.core.net.toUri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.media3.common.C
+import androidx.media3.common.Format
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
@@ -24,6 +25,10 @@ import androidx.media3.common.text.CueGroup
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.DecoderReuseEvaluation
+import androidx.media3.exoplayer.analytics.AnalyticsListener
+import androidx.media3.exoplayer.source.LoadEventInfo
+import androidx.media3.exoplayer.source.MediaLoadData
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import blackark.app.vr.data.database.entity.RecentVideo
 import blackark.app.vr.data.repository.VideoDisplaySettingsRepository
@@ -73,12 +78,52 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import java.io.IOException
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
 private const val PLAYER_LOG_TAG = "VideoPlayerViewModel"
 private const val SUBTITLE_LOG_PREFIX = "[SubtitleDebug]"
 private const val PLAYBACK_CONTROL_LOG_PREFIX = "[PlaybackControlDebug]"
+private const val PLAYBACK_DIAGNOSTIC_LOG_PREFIX = "[PlaybackDiagnostic]"
+private const val CONTROLLER_INPUT_LOG_TAG = "ControllerInputDebug"
+internal const val MIN_IMMERSIVE_VIEW_ANCHOR_ELEVATION_DEGREES = -45f
+internal const val MAX_IMMERSIVE_VIEW_ANCHOR_ELEVATION_DEGREES = 45f
+internal const val IMMERSIVE_VIEW_ANCHOR_ELEVATION_STEP_DEGREES = 2.5f
+
+internal enum class ControllerVerticalAxisTarget {
+    Volume,
+    ImmersiveViewAnchorElevation,
+}
+
+internal fun resolveControllerVerticalAxisTarget(
+    videoFormat: VideoFormat,
+): ControllerVerticalAxisTarget =
+    if (videoFormat == VideoFormat.Format2D) {
+        ControllerVerticalAxisTarget.Volume
+    } else {
+        ControllerVerticalAxisTarget.ImmersiveViewAnchorElevation
+    }
+
+internal fun stepImmersiveViewAnchorElevationDegrees(
+    currentDegrees: Float,
+    direction: Int,
+    stepDegrees: Float = IMMERSIVE_VIEW_ANCHOR_ELEVATION_STEP_DEGREES,
+): Float =
+    (currentDegrees + stepDegrees * direction.coerceIn(-1, 1))
+        .coerceIn(
+            MIN_IMMERSIVE_VIEW_ANCHOR_ELEVATION_DEGREES,
+            MAX_IMMERSIVE_VIEW_ANCHOR_ELEVATION_DEGREES,
+        )
+
+internal fun shouldBlockControllerAxisPlaybackInput(
+    controlsInputLocked: Boolean,
+    navigationExitPending: Boolean,
+    activePlaybackMenu: PlaybackMenu,
+): Boolean =
+    controlsInputLocked ||
+        navigationExitPending ||
+        activePlaybackMenu != PlaybackMenu.None
 
 internal enum class ControlsVisibilityBlockReason(val logValue: String) {
     NavigationExit("navigation-exit"),
@@ -155,6 +200,7 @@ data class VideoPlayerState(
     val stereoMode: StereoMode = StereoMode.Mono,
     val activePlaybackMenu: PlaybackMenu = PlaybackMenu.None,
     val zoomLevel: Float = 1.0f,
+    val immersiveViewAnchorElevationDegrees: Float = 0.0f,
     val playlist: List<SMBFileItem> = emptyList(),
     val currentPlaylistIndex: Int = -1,
     val canPlayPrevious: Boolean = false,
@@ -320,6 +366,8 @@ class VideoPlayerViewModel(
     private var pendingStereoModeToPersist: StereoMode? = null
     private var lastHandledKeyEventTimeMs = Long.MIN_VALUE
     private var lastHandledKeyCode = Int.MIN_VALUE
+    private var lastControllerRouteLogAtMs = 0L
+    private var lastControllerRouteLogSignature: String? = null
     private var hasDispatchedNavigateBack = false
     private val releaseMutex = Mutex()
     // XR controllers need additional time to acquire small spatial button targets.
@@ -396,10 +444,9 @@ class VideoPlayerViewModel(
 
     fun recenterView() {
         blackark.app.vr.AppState.resetDashboardPanelPlacement()
-        val headFollowEnabled = appContext?.let(AppSettingsStore::isPlaybackUiHeadFollowEnabled)
-            ?: true
         _state.value = _state.value.copy(
             zoomLevel = 1.0f,
+            immersiveViewAnchorElevationDegrees = 0.0f,
             immersiveUiHorizontalOffsetMeters = 0.0f,
             recenterRequestId = _state.value.recenterRequestId + 1L,
         )
@@ -408,8 +455,8 @@ class VideoPlayerViewModel(
         }
         Log.i(
             PLAYER_LOG_TAG,
-            "$PLAYBACK_CONTROL_LOG_PREFIX recenter headFollow=$headFollowEnabled " +
-                "horizontalOffset=0.0m",
+            "$PLAYBACK_CONTROL_LOG_PREFIX recenter horizontalOffset=0.0m " +
+                "viewAnchorElevation=0.0deg",
         )
         scheduleControlsAutoHideIfNeeded()
     }
@@ -776,9 +823,6 @@ class VideoPlayerViewModel(
                 "resume=$seekPreviewResumePlayback format=${currentState.videoFormat}",
         )
         cancelControlsAutoHide()
-        if (generatedSeekPreviewEnabled) {
-            enqueueThumbnailPreview(startPosition)
-        }
     }
 
     private fun enqueueThumbnailPreview(targetPositionMs: Long) {
@@ -914,20 +958,36 @@ class VideoPlayerViewModel(
         val player = exoPlayer
         val targetPosition = clampSeekPosition(currentState.seekPreviewTargetPositionMs)
         val resumePlayback = seekPreviewResumePlayback
+        val previewVideoPath = currentState.videoFile?.path
+        val restoreGeneration = playerGeneration
 
         cancelSeekRepeat()
         cancelThumbnailPreview()
 
-        if (commit && player != null) {
-            player.seekTo(targetPosition)
-        }
-
         if (restorePlayback && player != null) {
-            if (resumePlayback) {
-                player.play()
-            } else {
-                player.pause()
+            // A cancelled FrameExtractor request can keep its SMB read alive until the extractor
+            // itself is closed. Close it before seeking/resuming the primary player so preview and
+            // playback never compete for the same SMB connection bandwidth.
+            viewModelScope.launch {
+                VideoFramePreviewExtractor.release(previewVideoPath)
+                if (
+                    restoreGeneration != playerGeneration ||
+                    exoPlayer !== player ||
+                    _state.value.seekPreviewActive
+                ) {
+                    return@launch
+                }
+                if (commit) {
+                    player.seekTo(targetPosition)
+                }
+                if (resumePlayback) {
+                    player.play()
+                } else {
+                    player.pause()
+                }
             }
+        } else if (commit && player != null) {
+            player.seekTo(targetPosition)
         }
 
         _state.value = currentState.copy(
@@ -979,10 +1039,23 @@ class VideoPlayerViewModel(
     }
 
     fun handlePlaybackVerticalScroll(delta: Float) {
-        if (_state.value.controlsInputLocked || _state.value.seekPreviewActive) {
+        val currentState = _state.value
+        val verticalTarget = resolveControllerVerticalAxisTarget(currentState.videoFormat)
+        Log.d(
+            CONTROLLER_INPUT_LOG_TAG,
+            "compose-scroll-route axis=vertical delta=${"%.3f".format(delta)} " +
+                "target=$verticalTarget controlsVisible=${currentState.showControls} " +
+                "inputLocked=${currentState.controlsInputLocked} " +
+                "seekPreview=${currentState.seekPreviewActive} menu=${currentState.activePlaybackMenu}",
+        )
+        if (
+            currentState.controlsInputLocked ||
+            currentState.seekPreviewActive ||
+            currentState.activePlaybackMenu != PlaybackMenu.None
+        ) {
             return
         }
-        if (revealControlsIfHidden()) {
+        if (verticalTarget == ControllerVerticalAxisTarget.Volume && revealControlsIfHidden()) {
             return
         }
         handlePlaybackScrollDelta(
@@ -993,10 +1066,10 @@ class VideoPlayerViewModel(
             apply = { direction ->
                 lastPlaybackVerticalDirection = direction
                 lastPlaybackVerticalScrollAtMs = SystemClock.elapsedRealtime()
-                if (direction > 0) {
-                    stepVolume(direction = 1)
-                } else {
-                    stepVolume(direction = -1)
+                when (verticalTarget) {
+                    ControllerVerticalAxisTarget.Volume -> stepVolume(direction)
+                    ControllerVerticalAxisTarget.ImmersiveViewAnchorElevation ->
+                        applyControllerVerticalStep(direction)
                 }
             },
         )
@@ -1093,24 +1166,53 @@ class VideoPlayerViewModel(
     }
 
     private fun handleControllerAxisEvent(event: blackark.app.vr.ControllerAxisEvent) {
+        val currentState = _state.value
         if (exoPlayer == null) {
+            logControllerAxisRoute(event, currentState, outcome = "ignored:no-player")
+            return
+        }
+
+        if (
+            shouldBlockControllerAxisPlaybackInput(
+                controlsInputLocked = currentState.controlsInputLocked,
+                navigationExitPending = currentState.navigationExitPending,
+                activePlaybackMenu = currentState.activePlaybackMenu,
+            )
+        ) {
+            val reasons = buildList {
+                if (currentState.controlsInputLocked) add("input-lock")
+                if (currentState.navigationExitPending) add("navigation-exit")
+                if (currentState.activePlaybackMenu != PlaybackMenu.None) {
+                    add("menu-${currentState.activePlaybackMenu}")
+                }
+            }
+            logControllerAxisRoute(
+                event,
+                currentState,
+                outcome = "blocked:${reasons.joinToString(separator = "+")}",
+            )
+            resetControllerAxisMotionState()
             return
         }
 
         val x = event.x.coerceIn(-1f, 1f)
         val y = event.y.coerceIn(-1f, 1f)
 
-        when (resolveControllerAxisInputGate(
+        val inputGate = resolveControllerAxisInputGate(
             showControls = _state.value.showControls,
             x = x,
             y = y,
             engageThreshold = controllerAxisEngageThreshold,
-        )) {
-            ControllerAxisInputGate.Ignore -> return
+        )
+        when (inputGate) {
+            ControllerAxisInputGate.Ignore -> {
+                logControllerAxisRoute(event, currentState, outcome = "gate:ignore")
+                return
+            }
             ControllerAxisInputGate.RevealAndHandle -> {
                 revealControlsIfHidden()
                 Log.d(
-                    "ControllerInputDebug",
+                    CONTROLLER_INPUT_LOG_TAG,
                     "first axis input revealed controls and continues x=$x y=$y",
                 )
             }
@@ -1134,6 +1236,14 @@ class VideoPlayerViewModel(
             else -> controllerAxisMode
         }
 
+        logControllerAxisRoute(
+            event = event,
+            state = currentState,
+            outcome =
+                "gate:${inputGate.name} mode:${controllerAxisMode.name} " +
+                    "verticalTarget:${resolveControllerVerticalAxisTarget(currentState.videoFormat).name}",
+        )
+
         when (controllerAxisMode) {
             ControllerAxisMode.Horizontal -> {
                 cancelVolumeRepeat()
@@ -1147,7 +1257,7 @@ class VideoPlayerViewModel(
                 }
                 cancelSeekRepeat()
                 seekDirection = 0
-                handleVolumeFromAxis(y)
+                handleVerticalAxis(y)
             }
 
             ControllerAxisMode.None -> {
@@ -1157,6 +1267,33 @@ class VideoPlayerViewModel(
                 resetControllerAxisState()
             }
         }
+    }
+
+    private fun logControllerAxisRoute(
+        event: blackark.app.vr.ControllerAxisEvent,
+        state: VideoPlayerState,
+        outcome: String,
+    ) {
+        val now = SystemClock.elapsedRealtime()
+        val signature =
+            "$outcome:${state.showControls}:${state.controlsInputLocked}:" +
+                "${state.activePlaybackMenu}:${state.videoFormat}"
+        if (
+            signature == lastControllerRouteLogSignature &&
+            now - lastControllerRouteLogAtMs < RuntimeConfigRegistry.current.controller.logIntervalMs
+        ) {
+            return
+        }
+        lastControllerRouteLogAtMs = now
+        lastControllerRouteLogSignature = signature
+        Log.d(
+            CONTROLLER_INPUT_LOG_TAG,
+            "axis-route outcome=$outcome x=${"%.3f".format(event.x)} " +
+                "y=${"%.3f".format(event.y)} controlsVisible=${state.showControls} " +
+                "inputLocked=${state.controlsInputLocked} seekPreview=${state.seekPreviewActive} " +
+                "menu=${state.activePlaybackMenu} navigationExit=${state.navigationExitPending} " +
+                "format=${state.videoFormat}",
+        )
     }
 
     private fun handleSeekFromAxis(xAxis: Float) {
@@ -1230,7 +1367,7 @@ class VideoPlayerViewModel(
         seekRepeatJob = null
     }
 
-    private fun handleVolumeFromAxis(yAxis: Float) {
+    private fun handleVerticalAxis(yAxis: Float) {
         val desiredDirection = when {
             yAxis <= -controllerAxisEngageThreshold -> 1
             yAxis >= controllerAxisEngageThreshold -> -1
@@ -1246,7 +1383,7 @@ class VideoPlayerViewModel(
 
         if (desiredDirection != volumeDirection) {
             volumeDirection = desiredDirection
-            applyVolumeStep(desiredDirection)
+            applyControllerVerticalStep(desiredDirection)
             startVolumeRepeat(desiredDirection)
             return
         }
@@ -1264,7 +1401,7 @@ class VideoPlayerViewModel(
                 controllerAxisMode == ControllerAxisMode.Vertical &&
                 volumeDirection == direction
             ) {
-                applyVolumeStep(direction)
+                applyControllerVerticalStep(direction)
                 delay(controllerVolumeRepeatMs)
             }
         }
@@ -1283,6 +1420,33 @@ class VideoPlayerViewModel(
         Log.d("ControllerInputDebug", "volume direction=$direction value=$newVolume")
     }
 
+    private fun applyControllerVerticalStep(direction: Int) {
+        when (resolveControllerVerticalAxisTarget(_state.value.videoFormat)) {
+            ControllerVerticalAxisTarget.Volume -> applyVolumeStep(direction)
+            ControllerVerticalAxisTarget.ImmersiveViewAnchorElevation -> {
+                val newElevation = stepImmersiveViewAnchorElevationDegrees(
+                    currentDegrees = _state.value.immersiveViewAnchorElevationDegrees,
+                    direction = direction,
+                )
+                _state.value = _state.value.copy(
+                    immersiveViewAnchorElevationDegrees = newElevation
+                )
+                Log.d(
+                    "ControllerInputDebug",
+                    "immersive-view-anchor-elevation direction=$direction degrees=$newElevation",
+                )
+            }
+        }
+    }
+
+    private fun applyControllerVerticalKeyStep(direction: Int) {
+        when (resolveControllerVerticalAxisTarget(_state.value.videoFormat)) {
+            ControllerVerticalAxisTarget.Volume -> stepVolume(direction)
+            ControllerVerticalAxisTarget.ImmersiveViewAnchorElevation ->
+                applyControllerVerticalStep(direction)
+        }
+    }
+
     private fun stepVolume(direction: Int, step: Float = 0.05f) {
         if (exoPlayer == null) return
         val delta = if (direction > 0) step else -step
@@ -1290,12 +1454,16 @@ class VideoPlayerViewModel(
         setVolume(newVolume)
     }
 
-    private fun resetControllerAxisState() {
+    private fun resetControllerAxisMotionState() {
         controllerAxisMode = ControllerAxisMode.None
         seekDirection = 0
         volumeDirection = 0
         cancelSeekRepeat()
         cancelVolumeRepeat()
+    }
+
+    private fun resetControllerAxisState() {
+        resetControllerAxisMotionState()
         cancelThumbnailPreview()
     }
 
@@ -1373,8 +1541,9 @@ class VideoPlayerViewModel(
             android.view.KeyEvent.KEYCODE_DPAD_CENTER,
             android.view.KeyEvent.KEYCODE_ENTER,
             android.view.KeyEvent.KEYCODE_NUMPAD_ENTER -> {
-                toggleControls()
-                true
+                // When controls are already visible, let the focused Compose/spatial target own
+                // the select press. Handling it globally would also hide the controls.
+                revealControlsIfHidden()
             }
 
             android.view.KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> {
@@ -1400,7 +1569,9 @@ class VideoPlayerViewModel(
 
             android.view.KeyEvent.KEYCODE_DPAD_LEFT,
             android.view.KeyEvent.KEYCODE_SYSTEM_NAVIGATION_LEFT -> {
-                if (revealControlsIfHidden()) {
+                if (_state.value.activePlaybackMenu != PlaybackMenu.None) {
+                    false
+                } else if (revealControlsIfHidden()) {
                     true
                 } else {
                     seekBackward()
@@ -1410,7 +1581,9 @@ class VideoPlayerViewModel(
 
             android.view.KeyEvent.KEYCODE_DPAD_RIGHT,
             android.view.KeyEvent.KEYCODE_SYSTEM_NAVIGATION_RIGHT -> {
-                if (revealControlsIfHidden()) {
+                if (_state.value.activePlaybackMenu != PlaybackMenu.None) {
+                    false
+                } else if (revealControlsIfHidden()) {
                     true
                 } else {
                     seekForward()
@@ -1420,20 +1593,22 @@ class VideoPlayerViewModel(
 
             android.view.KeyEvent.KEYCODE_DPAD_UP,
             android.view.KeyEvent.KEYCODE_SYSTEM_NAVIGATION_UP -> {
-                if (revealControlsIfHidden()) {
-                    true
+                if (_state.value.activePlaybackMenu != PlaybackMenu.None) {
+                    false
                 } else {
-                    stepVolume(direction = 1)
+                    revealControlsIfHidden()
+                    applyControllerVerticalKeyStep(direction = 1)
                     true
                 }
             }
 
             android.view.KeyEvent.KEYCODE_DPAD_DOWN,
             android.view.KeyEvent.KEYCODE_SYSTEM_NAVIGATION_DOWN -> {
-                if (revealControlsIfHidden()) {
-                    true
+                if (_state.value.activePlaybackMenu != PlaybackMenu.None) {
+                    false
                 } else {
-                    stepVolume(direction = -1)
+                    revealControlsIfHidden()
+                    applyControllerVerticalKeyStep(direction = -1)
                     true
                 }
             }
@@ -1452,7 +1627,32 @@ class VideoPlayerViewModel(
             lastHandledKeyCode = event.keyCode
         }
 
+        val routedState = _state.value
+        Log.d(
+            CONTROLLER_INPUT_LOG_TAG,
+            "key-route code=${android.view.KeyEvent.keyCodeToString(event.keyCode)} " +
+                "handled=$handled controlsVisible=${routedState.showControls} " +
+                "inputLocked=${routedState.controlsInputLocked} menu=${routedState.activePlaybackMenu} " +
+                "format=${routedState.videoFormat}",
+        )
+
         return handled
+    }
+
+    private fun playbackDiagnosticSnapshot(player: Player, fileName: String): String =
+        "file=$fileName state=${playbackStateLogValue(player.playbackState)} " +
+            "playWhenReady=${player.playWhenReady} isPlaying=${player.isPlaying} " +
+            "isLoading=${player.isLoading} suppression=${player.playbackSuppressionReason} " +
+            "positionMs=${player.currentPosition} bufferedPositionMs=${player.bufferedPosition} " +
+            "totalBufferedMs=${player.totalBufferedDuration} durationMs=${player.duration} " +
+            "speed=${player.playbackParameters.speed}"
+
+    private fun playbackStateLogValue(playbackState: Int): String = when (playbackState) {
+        Player.STATE_IDLE -> "IDLE"
+        Player.STATE_BUFFERING -> "BUFFERING"
+        Player.STATE_READY -> "READY"
+        Player.STATE_ENDED -> "ENDED"
+        else -> playbackState.toString()
     }
 
     fun initializePlayer(
@@ -1558,6 +1758,7 @@ class VideoPlayerViewModel(
                     videoFile = videoFile,
                     stereoMode = initialStereoMode,
                     videoFormat = initialVideoFormat,
+                    immersiveViewAnchorElevationDegrees = 0.0f,
                     activePlaybackMenu = PlaybackMenu.None,
                     playlist = emptyList(),
                     currentPlaylistIndex = -1,
@@ -1580,13 +1781,6 @@ class VideoPlayerViewModel(
                     audioTracks = emptyList(),
                     textTracks = emptyList(),
                 )
-                viewModelScope.launch {
-                    VideoFramePreviewExtractor.prepare(
-                        context = context.applicationContext,
-                        videoPath = videoFile.path,
-                    )
-                }
-
                 // Save to recent videos immediately to ensure we have an ID for updates.
                 saveToRecentVideos(videoFile, playbackSource, savedVideo)
 
@@ -1678,8 +1872,39 @@ class VideoPlayerViewModel(
                         }
                         // Set up player listener
                         addListener(object : Player.Listener {
+                            private var hasReachedReady = false
+                            private var rebufferStartedAtMs: Long? = null
+
                             override fun onPlaybackStateChanged(playbackState: Int) {
                                 if (initializationGeneration != playerGeneration) return
+                                val now = SystemClock.elapsedRealtime()
+                                val diagnosticEvent = when (playbackState) {
+                                    Player.STATE_BUFFERING -> {
+                                        if (hasReachedReady && rebufferStartedAtMs == null) {
+                                            rebufferStartedAtMs = now
+                                            "rebuffer-start"
+                                        } else {
+                                            "buffering"
+                                        }
+                                    }
+
+                                    Player.STATE_READY -> {
+                                        hasReachedReady = true
+                                        rebufferStartedAtMs?.let { startedAtMs ->
+                                            rebufferStartedAtMs = null
+                                            "rebuffer-end durationMs=${now - startedAtMs}"
+                                        } ?: "ready"
+                                    }
+
+                                    Player.STATE_ENDED -> "ended"
+                                    Player.STATE_IDLE -> "idle"
+                                    else -> "state-$playbackState"
+                                }
+                                Log.i(
+                                    PLAYER_LOG_TAG,
+                                    "$PLAYBACK_DIAGNOSTIC_LOG_PREFIX event=$diagnosticEvent " +
+                                        playbackDiagnosticSnapshot(this@apply, videoFile.name),
+                                )
                                 when (playbackState) {
                                     Player.STATE_READY -> {
                                         _state.value = _state.value.copy(
@@ -1706,8 +1931,24 @@ class VideoPlayerViewModel(
                                 }
                             }
 
+                            override fun onIsLoadingChanged(isLoading: Boolean) {
+                                if (initializationGeneration != playerGeneration) return
+                                Log.i(
+                                    PLAYER_LOG_TAG,
+                                    "$PLAYBACK_DIAGNOSTIC_LOG_PREFIX event=loading-changed " +
+                                        "isLoading=$isLoading " +
+                                        playbackDiagnosticSnapshot(this@apply, videoFile.name),
+                                )
+                            }
+
                             override fun onIsPlayingChanged(isPlaying: Boolean) {
                                 if (initializationGeneration != playerGeneration) return
+                                Log.i(
+                                    PLAYER_LOG_TAG,
+                                    "$PLAYBACK_DIAGNOSTIC_LOG_PREFIX event=is-playing-changed " +
+                                        "isPlaying=$isPlaying " +
+                                        playbackDiagnosticSnapshot(this@apply, videoFile.name),
+                                )
                                 _state.value = _state.value.copy(isPlaying = isPlaying)
                                 if (isPlaying) {
                                     scheduleControlsAutoHideIfNeeded()
@@ -1717,6 +1958,31 @@ class VideoPlayerViewModel(
                                 ) {
                                     keepControlsVisibleWhileNotPlaying()
                                 }
+                            }
+
+                            override fun onPlayWhenReadyChanged(
+                                playWhenReady: Boolean,
+                                reason: Int,
+                            ) {
+                                if (initializationGeneration != playerGeneration) return
+                                Log.i(
+                                    PLAYER_LOG_TAG,
+                                    "$PLAYBACK_DIAGNOSTIC_LOG_PREFIX event=play-when-ready-changed " +
+                                        "playWhenReady=$playWhenReady reason=$reason " +
+                                        playbackDiagnosticSnapshot(this@apply, videoFile.name),
+                                )
+                            }
+
+                            override fun onPlaybackSuppressionReasonChanged(
+                                playbackSuppressionReason: Int,
+                            ) {
+                                if (initializationGeneration != playerGeneration) return
+                                Log.i(
+                                    PLAYER_LOG_TAG,
+                                    "$PLAYBACK_DIAGNOSTIC_LOG_PREFIX event=suppression-changed " +
+                                        "reason=$playbackSuppressionReason " +
+                                        playbackDiagnosticSnapshot(this@apply, videoFile.name),
+                                )
                             }
 
                             override fun onCues(cueGroup: CueGroup) {
@@ -1828,7 +2094,9 @@ class VideoPlayerViewModel(
                                 if (initializationGeneration != playerGeneration) return
                                 Log.e(
                                     PLAYER_LOG_TAG,
-                                    "$SUBTITLE_LOG_PREFIX player error code=${error.errorCodeName}",
+                                    "$PLAYBACK_DIAGNOSTIC_LOG_PREFIX event=player-error " +
+                                        "code=${error.errorCodeName} " +
+                                        playbackDiagnosticSnapshot(this@apply, videoFile.name),
                                     error,
                                 )
                                 _state.value = _state.value.copy(
@@ -1836,6 +2104,142 @@ class VideoPlayerViewModel(
                                     error = error.message ?: "Playback error occurred",
                                     showControls = true,
                                     activePlaybackMenu = PlaybackMenu.None,
+                                )
+                            }
+                        })
+                        addAnalyticsListener(object : AnalyticsListener {
+                            private var lastBandwidthLogAtMs = 0L
+                            private var lastFrameOffsetLogAtMs = 0L
+
+                            override fun onVideoDecoderInitialized(
+                                eventTime: AnalyticsListener.EventTime,
+                                decoderName: String,
+                                initializedTimestampMs: Long,
+                                initializationDurationMs: Long,
+                            ) {
+                                if (initializationGeneration != playerGeneration) return
+                                Log.i(
+                                    PLAYER_LOG_TAG,
+                                    "$PLAYBACK_DIAGNOSTIC_LOG_PREFIX event=video-decoder-initialized " +
+                                        "decoder=$decoderName initializationMs=$initializationDurationMs " +
+                                        playbackDiagnosticSnapshot(this@apply, videoFile.name),
+                                )
+                            }
+
+                            override fun onVideoInputFormatChanged(
+                                eventTime: AnalyticsListener.EventTime,
+                                format: Format,
+                                decoderReuseEvaluation: DecoderReuseEvaluation?,
+                            ) {
+                                if (initializationGeneration != playerGeneration) return
+                                Log.i(
+                                    PLAYER_LOG_TAG,
+                                    "$PLAYBACK_DIAGNOSTIC_LOG_PREFIX event=video-format-changed " +
+                                        "mime=${format.sampleMimeType} codecs=${format.codecs} " +
+                                        "size=${format.width}x${format.height} fps=${format.frameRate} " +
+                                        "averageBitrate=${format.averageBitrate} maxInputSize=${format.maxInputSize} " +
+                                        "decoderReuse=${decoderReuseEvaluation?.result}",
+                                )
+                            }
+
+                            override fun onDroppedVideoFrames(
+                                eventTime: AnalyticsListener.EventTime,
+                                droppedFrames: Int,
+                                elapsedMs: Long,
+                            ) {
+                                if (initializationGeneration != playerGeneration) return
+                                Log.w(
+                                    PLAYER_LOG_TAG,
+                                    "$PLAYBACK_DIAGNOSTIC_LOG_PREFIX event=dropped-video-frames " +
+                                        "count=$droppedFrames elapsedMs=$elapsedMs " +
+                                        playbackDiagnosticSnapshot(this@apply, videoFile.name),
+                                )
+                            }
+
+                            override fun onAudioUnderrun(
+                                eventTime: AnalyticsListener.EventTime,
+                                bufferSize: Int,
+                                bufferSizeMs: Long,
+                                elapsedSinceLastFeedMs: Long,
+                            ) {
+                                if (initializationGeneration != playerGeneration) return
+                                Log.w(
+                                    PLAYER_LOG_TAG,
+                                    "$PLAYBACK_DIAGNOSTIC_LOG_PREFIX event=audio-underrun " +
+                                        "bufferSize=$bufferSize bufferSizeMs=$bufferSizeMs " +
+                                        "elapsedSinceLastFeedMs=$elapsedSinceLastFeedMs " +
+                                        playbackDiagnosticSnapshot(this@apply, videoFile.name),
+                                )
+                            }
+
+                            override fun onBandwidthEstimate(
+                                eventTime: AnalyticsListener.EventTime,
+                                totalLoadTimeMs: Int,
+                                totalBytesLoaded: Long,
+                                bitrateEstimate: Long,
+                            ) {
+                                if (initializationGeneration != playerGeneration) return
+                                val now = SystemClock.elapsedRealtime()
+                                if (now - lastBandwidthLogAtMs < 2_000L) return
+                                lastBandwidthLogAtMs = now
+                                Log.i(
+                                    PLAYER_LOG_TAG,
+                                    "$PLAYBACK_DIAGNOSTIC_LOG_PREFIX event=bandwidth-estimate " +
+                                        "sampleLoadMs=$totalLoadTimeMs sampleBytes=$totalBytesLoaded " +
+                                        "estimatedBitsPerSecond=$bitrateEstimate " +
+                                        playbackDiagnosticSnapshot(this@apply, videoFile.name),
+                                )
+                            }
+
+                            override fun onVideoFrameProcessingOffset(
+                                eventTime: AnalyticsListener.EventTime,
+                                totalProcessingOffsetUs: Long,
+                                frameCount: Int,
+                            ) {
+                                if (initializationGeneration != playerGeneration) return
+                                val now = SystemClock.elapsedRealtime()
+                                if (now - lastFrameOffsetLogAtMs < 2_000L) return
+                                lastFrameOffsetLogAtMs = now
+                                val averageOffsetUs =
+                                    if (frameCount == 0) 0L else totalProcessingOffsetUs / frameCount
+                                Log.i(
+                                    PLAYER_LOG_TAG,
+                                    "$PLAYBACK_DIAGNOSTIC_LOG_PREFIX event=video-frame-processing-offset " +
+                                        "frameCount=$frameCount totalOffsetUs=$totalProcessingOffsetUs " +
+                                        "averageOffsetUs=$averageOffsetUs " +
+                                        playbackDiagnosticSnapshot(this@apply, videoFile.name),
+                                )
+                            }
+
+                            override fun onLoadError(
+                                eventTime: AnalyticsListener.EventTime,
+                                loadEventInfo: LoadEventInfo,
+                                mediaLoadData: MediaLoadData,
+                                error: IOException,
+                                wasCanceled: Boolean,
+                            ) {
+                                if (initializationGeneration != playerGeneration) return
+                                Log.e(
+                                    PLAYER_LOG_TAG,
+                                    "$PLAYBACK_DIAGNOSTIC_LOG_PREFIX event=load-error " +
+                                        "uri=${loadEventInfo.uri} bytes=${loadEventInfo.bytesLoaded} " +
+                                        "loadDurationMs=${loadEventInfo.loadDurationMs} " +
+                                        "dataType=${mediaLoadData.dataType} trackType=${mediaLoadData.trackType} " +
+                                        "wasCanceled=$wasCanceled",
+                                    error,
+                                )
+                            }
+
+                            override fun onVideoCodecError(
+                                eventTime: AnalyticsListener.EventTime,
+                                videoCodecError: Exception,
+                            ) {
+                                if (initializationGeneration != playerGeneration) return
+                                Log.e(
+                                    PLAYER_LOG_TAG,
+                                    "$PLAYBACK_DIAGNOSTIC_LOG_PREFIX event=video-codec-error " +
+                                        playbackDiagnosticSnapshot(this@apply, videoFile.name),
+                                    videoCodecError,
                                 )
                             }
                         })

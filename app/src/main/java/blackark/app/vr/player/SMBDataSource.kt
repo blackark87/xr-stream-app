@@ -5,6 +5,7 @@
 package blackark.app.vr.player
 
 import android.net.Uri
+import android.os.SystemClock
 import android.util.Log
 import androidx.media3.common.C
 import androidx.media3.datasource.BaseDataSource
@@ -21,6 +22,7 @@ import java.io.IOException
 import java.util.Properties
 
 private const val TAG = "SMBDataSource"
+private const val SMB_IO_BUFFER_SIZE = 1024 * 1024
 
 class SMBDataSource(
     private val smbConfig: SMBConfig
@@ -36,6 +38,13 @@ class SMBDataSource(
     private var bytesRemaining: Long = 0
     private var opened = false
     private var currentUri: Uri? = null
+    private val readAheadBuffer = ByteArray(SMB_IO_BUFFER_SIZE)
+    private var readAheadOffset = 0
+    private var readAheadLength = 0
+    private var remoteReadCount = 0L
+    private var remoteBytesRead = 0L
+    private var remoteReadElapsedMs = 0L
+    private var lastRemoteStatsLogTimeMs = 0L
 
     @Throws(IOException::class)
     override fun open(dataSpec: DataSpec): Long {
@@ -61,8 +70,11 @@ class SMBDataSource(
                     setProperty("jcifs.smb.client.minVersion", "SMB202")
                     setProperty("jcifs.smb.client.maxVersion", "SMB311")
                     setProperty("jcifs.resolveOrder", "DNS")
-                    // Set SMB buffer size to 1MB (SMB 3.x default)
-                    setProperty("jcifs.smb.client.bufferSize", "1048576")  // 1MB
+                    // SmbRandomAccessFile derives each SMB read request from these negotiated
+                    // send/receive sizes. "jcifs.smb.client.bufferSize" is not an I/O buffer
+                    // setting in jcifs-ng 2.1.10 and left reads at the 65,535-byte default.
+                    setProperty("jcifs.smb.client.snd_buf_size", SMB_IO_BUFFER_SIZE.toString())
+                    setProperty("jcifs.smb.client.rcv_buf_size", SMB_IO_BUFFER_SIZE.toString())
                 }
 
                 val baseContext = BaseContext(PropertyConfiguration(props))
@@ -119,6 +131,8 @@ class SMBDataSource(
             } else {
                 fileLength - dataSpec.position
             }
+            readAheadOffset = 0
+            readAheadLength = 0
 
             opened = true
             transferStarted(dataSpec)
@@ -134,6 +148,11 @@ class SMBDataSource(
                 )
             }
             Log.e(TAG, "Error opening: ${e.message}", e)
+            runCatching { randomAccessFile?.close() }
+            randomAccessFile = null
+            smbFile = null
+            runCatching { cifsContext?.close() }
+            cifsContext = null
             throw IOException("Failed to open SMB data source", e)
         }
     }
@@ -153,18 +172,32 @@ class SMBDataSource(
             return 0
         }
 
-        if (bytesRemaining == 0L) {
-            return C.RESULT_END_OF_INPUT
-        }
-
-        val bytesToRead = if (bytesRemaining == C.LENGTH_UNSET.toLong()) {
-            length
-        } else {
-            minOf(bytesRemaining, length.toLong()).toInt()
-        }
-
         val bytesRead = try {
-            randomAccessFile?.read(buffer, offset, bytesToRead) ?: C.RESULT_END_OF_INPUT
+            if (readAheadOffset >= readAheadLength) {
+                if (bytesRemaining == 0L) {
+                    return C.RESULT_END_OF_INPUT
+                }
+                readAheadLength = fillReadAheadBuffer()
+                readAheadOffset = 0
+                if (readAheadLength <= 0) {
+                    return C.RESULT_END_OF_INPUT
+                }
+            }
+
+            val bufferedBytes = readAheadLength - readAheadOffset
+            val bytesToCopy = if (bytesRemaining == C.LENGTH_UNSET.toLong()) {
+                minOf(length, bufferedBytes)
+            } else {
+                minOf(length.toLong(), bufferedBytes.toLong(), bytesRemaining).toInt()
+            }
+            readAheadBuffer.copyInto(
+                destination = buffer,
+                destinationOffset = offset,
+                startIndex = readAheadOffset,
+                endIndex = readAheadOffset + bytesToCopy,
+            )
+            readAheadOffset += bytesToCopy
+            bytesToCopy
         } catch (e: InterruptedException) {
             // Player is being closed, return end of input gracefully
             Log.d(TAG, "Read interrupted (player closing)")
@@ -176,6 +209,7 @@ class SMBDataSource(
                 return C.RESULT_END_OF_INPUT
             }
             Log.e(TAG, "SMB error reading stream: ${e.message}", e)
+            invalidateConnectionAfterReadFailure()
             throw IOException("SMB error reading stream", e)
         } catch (e: IOException) {
             // Check if it's an interrupted exception wrapped in IOException
@@ -184,6 +218,7 @@ class SMBDataSource(
                 return C.RESULT_END_OF_INPUT
             }
             Log.e(TAG, "Error reading from SMB stream: ${e.message}", e)
+            invalidateConnectionAfterReadFailure()
             throw IOException("Error reading from SMB stream", e)
         }
 
@@ -215,6 +250,60 @@ class SMBDataSource(
         return bytesRead
     }
 
+    private fun fillReadAheadBuffer(): Int {
+        val file = randomAccessFile ?: return C.RESULT_END_OF_INPUT
+        val targetLength = if (bytesRemaining == C.LENGTH_UNSET.toLong()) {
+            readAheadBuffer.size
+        } else {
+            minOf(bytesRemaining, readAheadBuffer.size.toLong()).toInt()
+        }
+        var filled = 0
+        var requestCount = 0
+        val startedAtMs = SystemClock.elapsedRealtime()
+        while (filled < targetLength) {
+            val count = file.read(readAheadBuffer, filled, targetLength - filled)
+            if (count <= 0) break
+            filled += count
+            requestCount++
+        }
+        val elapsedMs = SystemClock.elapsedRealtime() - startedAtMs
+        remoteReadCount += requestCount
+        remoteBytesRead += filled
+        remoteReadElapsedMs += elapsedMs
+        val nowMs = SystemClock.elapsedRealtime()
+        if (nowMs - lastRemoteStatsLogTimeMs >= 1_000L) {
+            val effectiveMbps =
+                if (remoteReadElapsedMs == 0L) {
+                    0.0
+                } else {
+                    remoteBytesRead * 8.0 / remoteReadElapsedMs / 1_000.0
+                }
+            Log.d(
+                TAG,
+                "Read-ahead stats remoteReads=$remoteReadCount " +
+                    "remoteBytes=$remoteBytesRead remoteElapsedMs=$remoteReadElapsedMs " +
+                    "effectiveMbps=${"%.2f".format(java.util.Locale.US, effectiveMbps)} " +
+                    "lastFillBytes=$filled lastFillRequests=$requestCount lastFillMs=$elapsedMs",
+            )
+            lastRemoteStatsLogTimeMs = nowMs
+        }
+        return if (filled == 0) C.RESULT_END_OF_INPUT else filled
+    }
+
+    private fun invalidateConnectionAfterReadFailure() {
+        runCatching { randomAccessFile?.close() }
+        randomAccessFile = null
+        smbFile = null
+        runCatching { cifsContext?.close() }
+        cifsContext = null
+        readAheadOffset = 0
+        readAheadLength = 0
+        if (opened) {
+            opened = false
+            transferEnded()
+        }
+    }
+
     override fun getUri(): Uri? {
         return currentUri
     }
@@ -240,8 +329,12 @@ class SMBDataSource(
         } finally {
             randomAccessFile = null
             smbFile = null
+            runCatching { cifsContext?.close() }
+            cifsContext = null
             bytesRemaining = 0
             currentUri = null
+            readAheadOffset = 0
+            readAheadLength = 0
 
             if (opened) {
                 opened = false

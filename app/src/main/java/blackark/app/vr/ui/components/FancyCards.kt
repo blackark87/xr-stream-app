@@ -530,6 +530,7 @@ fun FancyFileCard(
     isVideoFile: Boolean,
     fileSize: String? = null,
     supportingText: String? = null,
+    hasSubtitle: Boolean = false,
     isFavorite: Boolean = false,
     videoPath: String? = null,
     thumbnailModel: Any? = null,
@@ -670,6 +671,14 @@ fun FancyFileCard(
                         text = detailText,
                         style = MaterialTheme.typography.labelSmall,
                         color = TextTertiary
+                    )
+                }
+                if (hasSubtitle) {
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = stringResource(R.string.subtitle_available),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AccentGold,
                     )
                 }
             }

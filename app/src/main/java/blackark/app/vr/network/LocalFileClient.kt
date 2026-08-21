@@ -156,7 +156,7 @@ class LocalFileClient(
                     IllegalStateException("Directory query failed")
                 )
 
-                Result.success(files)
+                Result.success(attachKoreanSubtitleSidecarPaths(files))
             } catch (e: Exception) {
                 Result.failure(e)
             }

@@ -66,7 +66,7 @@
     <string name="connecting_to_server">서버에 연결하는 중...</string>
     <string name="connection_failed_prefix">연결 실패:</string>
     <string name="connection_failed_message">연결 실패: %1$s</string>
-    <string name="controller_detected_hand_tracking_message">컨트롤러가 감지되었습니다. 우발적인 재생 제스처를 줄이기 위해 핸드 트래킹을 끌까요? 이 설정은 나중에 설정에서 변경할 수 있습니다.</string>
+    <string name="controller_detected_hand_tracking_message">컨트롤러가 감지되었습니다. 우발적인 재생 제스처를 막기 위해 이번 앱 실행 동안 핸드 트래킹을 끌까요? 설정에서 다시 켜거나 앱을 재시작하면 복원됩니다.</string>
     <string name="controller_detected_hand_tracking_title">컨트롤러 감지됨</string>
     <string name="delete">삭제</string>
     <string name="delete_selected_files_message">%1$d개 파일을 영구적으로 삭제합니다.</string>
@@ -81,7 +81,7 @@
     <string name="files">파일</string>
     <string name="files_selected_count">%1$d개 선택됨</string>
     <string name="hand_tracking">핸드 트래킹</string>
-    <string name="hand_tracking_description">앱 전체에서 손 입력을 허용합니다. 컨트롤러만으로 XR 입력을 사용하려는 경우에만 이 옵션을 끄세요. 기본값은 켜짐입니다.</string>
+    <string name="hand_tracking_description">앱 전체에서 손 입력을 허용합니다. 끄면 이번 앱 실행 동안 재생 화면의 손 제스처가 차단되며, 앱을 재시작하면 다시 켜집니다.</string>
     <string name="playback_ui_head_follow">360° 재생 컨트롤 시야 추적</string>
     <string name="playback_ui_head_follow_description">360° 영상에서 시야가 크게 바뀌면 재생 컨트롤을 다시 맞춥니다. 2D와 180° 영상의 컨트롤은 고정됩니다.</string>
     <string name="ip_address">서버 주소(IP 또는 도메인)</string>
@@ -108,6 +108,8 @@
     <string name="smb_hover_preview_description">네트워크 영상 미리보기를 허용합니다. 꺼도 정적 썸네일은 유지됩니다.</string>
     <string name="preview_mute">미리보기 음소거</string>
     <string name="preview_unmute">미리보기 음소거 해제</string>
+    <string name="preview_play">미리보기 재생</string>
+    <string name="preview_pause">미리보기 일시정지</string>
     <string name="library">라이브러리</string>
     <string name="local_files">로컬 파일</string>
     <string name="local_folder_ready">로컬 폴더 준비됨</string>
@@ -158,6 +160,7 @@
     <string name="sort_newest">최신순</string>
     <string name="sort_oldest">오래된순</string>
     <string name="subtitle_settings">자막</string>
+    <string name="subtitle_available">자막 있음</string>
     <string name="subtitle_font">자막 글꼴</string>
     <string name="subtitle_font_description">이 기기에 설치된 글꼴 중 한글을 지원하는 글꼴을 선택합니다.</string>
     <string name="subtitle_font_preview">가나다라마바사 ABC abc 123</string>

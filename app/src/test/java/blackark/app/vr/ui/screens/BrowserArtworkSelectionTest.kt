@@ -9,6 +9,20 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class BrowserArtworkSelectionTest {
+
+    @Test
+    fun `continue watching title prefers connected NFO title over stored file title`() {
+        assertEquals(
+            "NFO Movie Title",
+            resolveHomeVideoDisplayTitle(
+                fileName = "CODE-123.mp4",
+                metadataTitle = null,
+                nfoTitle = "NFO Movie Title",
+                resolvedTitle = "CODE-123",
+            ),
+        )
+    }
+
     @Test
     fun `poster failures advance through provider candidates before frame extraction`() {
         val metadata = JvrMovieMetadata(
