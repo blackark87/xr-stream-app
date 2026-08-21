@@ -15,19 +15,20 @@ internal fun resolvePlaybackLayerPolicy(
     seekPreviewActive: Boolean,
     navigationExitPending: Boolean = false,
 ): PlaybackLayerPolicy {
+    val needsBackgroundPointerLayer = isImmersive
     val canHandleBackgroundToggle =
         isSurfaceReady &&
+            needsBackgroundPointerLayer &&
             !controlsInputLocked &&
             !seekPreviewActive &&
             !navigationExitPending
     return PlaybackLayerPolicy(
-        // Keep the entity parented through ExoPlayer BUFFERING transitions. Input is disabled
-        // below while the surface is not ready, but queued XR events can still finish safely.
-        retainBackgroundInputLayer = isImmersive,
+        // Retain one stable hit plane for screen clicks/touches throughout immersive playback.
+        // The controls panel is placed in front of it, so buttons still receive input first.
+        retainBackgroundInputLayer = needsBackgroundPointerLayer,
         showHiddenControlsInputOverlay =
-            isImmersive && canHandleBackgroundToggle && !showControls,
-        enableBackgroundToggleInput =
-            isImmersive && canHandleBackgroundToggle && !showControls,
+            canHandleBackgroundToggle && !showControls,
+        enableBackgroundToggleInput = canHandleBackgroundToggle,
         showControlsLayer = isSurfaceReady && showControls,
     )
 }

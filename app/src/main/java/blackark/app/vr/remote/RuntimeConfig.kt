@@ -222,10 +222,10 @@ data class RuntimeConfig(
             val minDistance = minOf(firstDistanceBound, secondDistanceBound)
             val maxDistance = maxOf(firstDistanceBound, secondDistanceBound)
             val firstVerticalBound = candidate.minVerticalOffsetMeters.coerceFiniteIn(
-                -1f, 0f, defaults.minVerticalOffsetMeters,
+                -0.30f, 0f, defaults.minVerticalOffsetMeters,
             )
             val secondVerticalBound = candidate.maxVerticalOffsetMeters.coerceFiniteIn(
-                0f, 1f, defaults.maxVerticalOffsetMeters,
+                0f, 0.30f, defaults.maxVerticalOffsetMeters,
             )
             val minVertical = minOf(firstVerticalBound, secondVerticalBound)
             val maxVertical = maxOf(firstVerticalBound, secondVerticalBound)
@@ -244,7 +244,7 @@ data class RuntimeConfig(
                 minDistanceMeters = minDistance,
                 maxDistanceMeters = maxDistance,
                 defaultVerticalOffsetMeters = candidate.defaultVerticalOffsetMeters
-                    .coerceFiniteIn(-0.5f, 0.5f, defaults.defaultVerticalOffsetMeters)
+                    .coerceFiniteIn(-0.30f, 0.30f, defaults.defaultVerticalOffsetMeters)
                     .coerceIn(minVertical, maxVertical),
                 minVerticalOffsetMeters = minVertical,
                 maxVerticalOffsetMeters = maxVertical,
@@ -340,8 +340,8 @@ data class SubtitleRuntimeConfig(
     val minDistanceMeters: Float = 0.7f,
     val maxDistanceMeters: Float = 2.0f,
     val defaultVerticalOffsetMeters: Float = 0.15f,
-    val minVerticalOffsetMeters: Float = -0.15f,
-    val maxVerticalOffsetMeters: Float = 0.15f,
+    val minVerticalOffsetMeters: Float = -0.30f,
+    val maxVerticalOffsetMeters: Float = 0.30f,
     val defaultHorizontalOffsetMeters: Float = 0f,
     val minHorizontalOffsetMeters: Float = -0.30f,
     val maxHorizontalOffsetMeters: Float = 0.30f,

@@ -27,6 +27,21 @@ class PlaybackLayerPolicyTest {
     }
 
     @Test
+    fun `playback center removes pitch while preserving horizontal direction`() {
+        val levelForward = resolveLevelPlaybackForward(
+            Vector3(x = 0.3f, y = 0.8f, z = -0.4f),
+        )
+        val rotation = resolveHeadFollowPanelRotation(levelForward)
+        val panelUp = rotation * Vector3.Up
+
+        assertEquals(0f, levelForward.y, 0.0001f)
+        assertEquals(1f, levelForward.length, 0.0001f)
+        assertEquals(0f, panelUp.x, 0.0001f)
+        assertEquals(1f, panelUp.y, 0.0001f)
+        assertEquals(0f, panelUp.z, 0.0001f)
+    }
+
+    @Test
     fun `spatial release toggles controls without requiring a hit position`() {
         assertTrue(isSpatialToggleClick(InputEvent.Action.UP))
         assertFalse(isSpatialToggleClick(InputEvent.Action.DOWN))
@@ -49,7 +64,7 @@ class PlaybackLayerPolicyTest {
     }
 
     @Test
-    fun `visible controls disable the head-follow background input plane`() {
+    fun `visible controls retain background toggle input behind the controls`() {
         val policy = resolvePlaybackLayerPolicy(
             isSurfaceReady = true,
             isImmersive = true,
@@ -60,7 +75,7 @@ class PlaybackLayerPolicyTest {
 
         assertTrue(policy.retainBackgroundInputLayer)
         assertFalse(policy.showHiddenControlsInputOverlay)
-        assertFalse(policy.enableBackgroundToggleInput)
+        assertTrue(policy.enableBackgroundToggleInput)
         assertTrue(policy.showControlsLayer)
     }
 
@@ -149,7 +164,7 @@ class PlaybackLayerPolicyTest {
     }
 
     @Test
-    fun `immersive subtitle entity is retained while controls take input`() {
+    fun `immersive subtitle entity stays retained but content is hidden behind controls`() {
         assertTrue(shouldRetainImmersiveSubtitlePanel(subtitlesPresent = true))
         assertTrue(
             shouldShowImmersiveSubtitlePanel(
@@ -161,6 +176,12 @@ class PlaybackLayerPolicyTest {
             shouldShowImmersiveSubtitlePanel(
                 subtitlesPresent = true,
                 showControls = true,
+            )
+        )
+        assertFalse(
+            shouldShowImmersiveSubtitlePanel(
+                subtitlesPresent = false,
+                showControls = false,
             )
         )
         assertFalse(shouldRetainImmersiveSubtitlePanel(subtitlesPresent = false))

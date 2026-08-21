@@ -926,7 +926,9 @@ fun XRPlaybackControls(
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.End,
+                        // Keep Recenter on the panel's horizontal center. With gaze input, placing
+                        // it on the right biases the live head pose and causes cumulative drift.
+                        horizontalArrangement = Arrangement.Center,
                     ) {
                         Button(onClick = videoPlayerViewModel::recenterView) {
                             Text("Recenter")

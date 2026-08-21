@@ -63,8 +63,8 @@
       "minDistanceMeters": 0.7,
       "maxDistanceMeters": 2.0,
       "defaultVerticalOffsetMeters": 0.15,
-      "minVerticalOffsetMeters": -0.15,
-      "maxVerticalOffsetMeters": 0.15,
+      "minVerticalOffsetMeters": -0.30,
+      "maxVerticalOffsetMeters": 0.30,
       "defaultHorizontalOffsetMeters": 0.0,
       "minHorizontalOffsetMeters": -0.30,
       "maxHorizontalOffsetMeters": 0.30

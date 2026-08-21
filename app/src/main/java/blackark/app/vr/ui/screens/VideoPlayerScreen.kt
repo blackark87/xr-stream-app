@@ -166,10 +166,16 @@ private val IMMERSIVE_MENU_FRONT_OFFSET: Dp
     get() = RuntimeConfigRegistry.current.headFollow.menuFrontOffsetDp.dp
 private val IMMERSIVE_BACKGROUND_INPUT_PANEL_WIDTH = 2400.dp
 private val IMMERSIVE_BACKGROUND_INPUT_PANEL_HEIGHT = 1400.dp
+private const val IMMERSIVE_BACKGROUND_INPUT_CONTROLS_CLEARANCE_DP = 200f
 // The retained input plane follows the viewer so hidden controls can be revealed in any direction.
-// Its InteractionPolicy is disabled while controls are visible so it cannot steal their ray input.
+// Keep it behind the controls so the Android surface never sits close to the viewer or wins a
+// control-button ray hit during a visibility transition.
 private val IMMERSIVE_BACKGROUND_INPUT_FOLLOW_DISTANCE: Dp
-    get() = RuntimeConfigRegistry.current.headFollow.backgroundInputDistanceDp.dp
+    get() = RuntimeConfigRegistry.current.headFollow.backgroundInputDistanceDp
+        .coerceAtLeast(
+            MIN_HEAD_RELATIVE_CONTROLS_DISTANCE_DP +
+                IMMERSIVE_BACKGROUND_INPUT_CONTROLS_CLEARANCE_DP,
+        ).dp
 private const val IMMERSIVE_BACKGROUND_INPUT_FACTOR = 0.90f
 private val IMMERSIVE_SUBTITLE_PANEL_WIDTH = 1280.dp
 private val IMMERSIVE_SUBTITLE_PANEL_HEIGHT = 720.dp
@@ -393,6 +399,24 @@ private data class HeadFollowPose(
     val forward: Vector3,
 )
 
+internal fun resolveLevelPlaybackForward(viewForward: Vector3): Vector3 {
+    val horizontalForward = Vector3(viewForward.x, 0f, viewForward.z)
+    return if (horizontalForward.lengthSquared < 1e-6f) {
+        Vector3.Forward
+    } else {
+        horizontalForward.toNormalized()
+    }
+}
+
+private fun HeadFollowPose.toLevelPlaybackCenter(): HeadFollowPose {
+    val levelForward = resolveLevelPlaybackForward(forward)
+    return HeadFollowPose(
+        translationMeters = translationMeters,
+        rotation = resolveHeadFollowPanelRotation(levelForward),
+        forward = levelForward,
+    )
+}
+
 private fun HeadFollowPose.withViewAnchorElevation(
     elevationDegrees: Float,
 ): HeadFollowPose {
@@ -444,6 +468,9 @@ fun VideoPlayerScreen(
 
     val playerState by videoPlayerViewModel.state.collectAsState()
     val dashboardPanelPose by blackark.app.vr.AppState.dashboardPanelPose.collectAsState()
+    var playbackSessionCenterPose by remember(videoFilePath, videoFileName) {
+        mutableStateOf<HeadFollowPose?>(null)
+    }
     val requestNavigateBackState =
         rememberUpdatedState {
             videoPlayerViewModel.requestNavigateBack(source = "system-on-back-invoked")
@@ -523,18 +550,24 @@ fun VideoPlayerScreen(
             isHandTrackingEnabled = isHandTrackingEnabled,
             hasHandTrackingPermission = hasHandTrackingPermission,
             dashboardPanelPose = dashboardPanelPose,
+            playbackSessionCenterPose = playbackSessionCenterPose,
+            onPlaybackSessionCenterPoseChanged = { pose ->
+                playbackSessionCenterPose = pose
+            },
         )
     }
 }
 
 @OptIn(UnstableApi::class)
 @Composable
-fun SpatialVideoPlayerContent(
+private fun SpatialVideoPlayerContent(
     videoPlayerViewModel: VideoPlayerViewModel,
     playerState: VideoPlayerState,
     isHandTrackingEnabled: Boolean,
     hasHandTrackingPermission: Boolean,
     dashboardPanelPose: Pose?,
+    playbackSessionCenterPose: HeadFollowPose?,
+    onPlaybackSessionCenterPoseChanged: (HeadFollowPose) -> Unit,
 ) {
     val exoPlayer by videoPlayerViewModel.playerFlow.collectAsState()
     val showControls = playerState.showControls
@@ -587,9 +620,9 @@ fun SpatialVideoPlayerContent(
         modifier = buildHiddenSpatialPanelAnchorModifier(),
     )
 
-    val enableImmersiveBackgroundHeadFollow =
-        shouldUseImmersiveDome && playbackLayerPolicy.retainBackgroundInputLayer
-    val enableImmersiveHeadFollow = enableImmersiveBackgroundHeadFollow
+    // Recenter and controller-only playback still need the viewer pose even when the large
+    // hand-input SpatialPanel is intentionally omitted.
+    val enableImmersiveHeadFollow = shouldUseImmersiveDome
 
     val needsDeviceTracking = enableImmersiveHeadFollow
     var deviceTrackingReady by remember(session) {
@@ -675,60 +708,93 @@ fun SpatialVideoPlayerContent(
         }
     }
 
+    // The center is owned by VideoPlayerScreen, above Subspace, so surface/loading recreation does
+    // not capture a second center. Recenter never samples the gaze directed at its own button.
     var fixedImmersiveControlsPose by remember { mutableStateOf<HeadFollowPose?>(null) }
     var fixedImmersiveMediaPose by remember { mutableStateOf<HeadFollowPose?>(null) }
-    var immersiveRecenterCandidatePose by remember { mutableStateOf<HeadFollowPose?>(null) }
     var capturedMediaRecenterRequestId by remember { mutableStateOf(0L) }
+    var activitySpaceOriginChangeId by remember { mutableStateOf(0L) }
     val isImmersiveFormat =
         playerState.videoFormat == VideoFormat.Format180 ||
             playerState.videoFormat == VideoFormat.Format360
+    val latestImmersiveHeadPose = rememberUpdatedState(immersiveBackgroundHeadPose)
 
-    // Freeze the last viewing pose from before the controls appeared. The Recenter button lives on
-    // the right side of the controls, so sampling the live head pose on button-up causes cumulative
-    // rightward drift as the viewer turns toward that button for every click.
-    LaunchedEffect(showControls, immersiveBackgroundHeadPose, isImmersiveFormat) {
-        if (isImmersiveFormat && !showControls && immersiveBackgroundHeadPose != null) {
-            immersiveRecenterCandidatePose = immersiveBackgroundHeadPose
+    // The system changes ActivitySpace's origin when the user invokes the OS-level recenter flow.
+    // Treat that event as the only reason, other than starting playback, to replace the fixed center.
+    DisposableEffect(session, isImmersiveFormat) {
+        val activeSession = session
+        if (activeSession == null || !isImmersiveFormat) {
+            onDispose {}
+        } else {
+            val mainHandler = Handler(Looper.getMainLooper())
+            val originChangedListener = Runnable {
+                mainHandler.post {
+                    activitySpaceOriginChangeId += 1L
+                }
+            }
+            activeSession.scene.activitySpace.addOriginChangedListener(originChangedListener)
+            onDispose {
+                activeSession.scene.activitySpace.removeOriginChangedListener(originChangedListener)
+            }
         }
     }
+
+    LaunchedEffect(activitySpaceOriginChangeId) {
+        if (activitySpaceOriginChangeId == 0L) return@LaunchedEffect
+
+        // Allow device tracking to publish a pose in the activity space with the new origin.
+        delay(100.milliseconds)
+        val refreshedCenterPose = latestImmersiveHeadPose.value
+        if (refreshedCenterPose == null) {
+            Log.w(
+                TAG,
+                "[PlaybackControlDebug] activity-space origin changed without a tracked pose",
+            )
+            return@LaunchedEffect
+        }
+        val levelCenterPose = refreshedCenterPose.toLevelPlaybackCenter()
+        onPlaybackSessionCenterPoseChanged(levelCenterPose)
+        fixedImmersiveMediaPose = levelCenterPose
+        fixedImmersiveControlsPose = levelCenterPose
+        Log.i(
+            TAG,
+            "[PlaybackControlDebug] refreshed fixed center after OS origin change " +
+                "changeId=$activitySpaceOriginChangeId forward=${levelCenterPose.forward}",
+        )
+    }
+
     LaunchedEffect(
         playerState.recenterRequestId,
         immersiveBackgroundHeadPose,
         playerState.videoFormat,
     ) {
         if (isImmersiveFormat && immersiveBackgroundHeadPose != null) {
-            val capturedPose = immersiveBackgroundHeadPose ?: return@LaunchedEffect
-            if (fixedImmersiveControlsPose == null) {
-                fixedImmersiveControlsPose = capturedPose
-                if (immersiveRecenterCandidatePose == null) {
-                    immersiveRecenterCandidatePose = capturedPose
+            val currentPose = immersiveBackgroundHeadPose ?: return@LaunchedEffect
+            val fixedCenterPose = playbackSessionCenterPose ?: currentPose
+                .toLevelPlaybackCenter()
+                .also { initialPose ->
+                    onPlaybackSessionCenterPoseChanged(initialPose)
+                    Log.i(
+                        TAG,
+                        "[PlaybackControlDebug] captured playback-session fixed center " +
+                            "translationMeters=${initialPose.translationMeters} " +
+                            "forward=${initialPose.forward} " +
+                            "controlsDistanceDp=${IMMERSIVE_CONTROLS_FOLLOW_DISTANCE.value}",
+                    )
                 }
-                Log.i(
-                    TAG,
-                    "[PlaybackControlDebug] captured fixed immersive controls pose " +
-                        "translationMeters=${capturedPose.translationMeters} " +
-                        "forward=${capturedPose.forward} " +
-                        "controlsDistanceDp=${IMMERSIVE_CONTROLS_FOLLOW_DISTANCE.value}",
-                )
-            }
             if (
                 fixedImmersiveMediaPose == null ||
                 playerState.recenterRequestId > capturedMediaRecenterRequestId
             ) {
-                val usePreControlsPose =
-                    fixedImmersiveMediaPose != null && immersiveRecenterCandidatePose != null
-                val recenterPose =
-                    if (usePreControlsPose) immersiveRecenterCandidatePose ?: capturedPose
-                    else capturedPose
-                fixedImmersiveMediaPose = recenterPose
-                fixedImmersiveControlsPose = recenterPose
+                fixedImmersiveMediaPose = fixedCenterPose
+                fixedImmersiveControlsPose = fixedCenterPose
                 capturedMediaRecenterRequestId = playerState.recenterRequestId
                 Log.i(
                     TAG,
                     "[PlaybackControlDebug] applied immersive recenter pose " +
                         "requestId=${playerState.recenterRequestId} " +
-                        "forward=${recenterPose.forward} controlsPoseUpdated=true " +
-                        "source=${if (usePreControlsPose) "pre-controls" else "live"}",
+                        "forward=${fixedCenterPose.forward} controlsPoseUpdated=true " +
+                        "source=playback-session-center",
                 )
             }
         }
@@ -739,8 +805,8 @@ fun SpatialVideoPlayerContent(
             VideoFormat.Format360 -> fixedImmersiveControlsPose
             VideoFormat.Format2D -> null
         }
-    // Browser panel placement can be stale after the XR origin is recentered. Recenter updates
-    // media, subtitles, and controls together from the frozen pre-controls viewing pose.
+    // Browser panel placement can be stale after the XR origin is recentered. App Recenter restores
+    // media, subtitles, and controls together from the playback-session fixed center.
     val immersivePlaybackDashboardPose =
         dashboardPanelPose.takeIf { playbackControlsHeadPose == null }
     val visiblePlaybackDashboardPose =
@@ -774,10 +840,8 @@ fun SpatialVideoPlayerContent(
             )
         }
 
-    // Keep this sole spatial InteractionPolicy owner parented across ExoPlayer buffering and
-    // surface replacement. Move the retained surface off-screen whenever hidden-controls input is
-    // inactive: disabling InteractionPolicy alone does not stop a nearer SpatialPanel from winning
-    // the controller ray hit ahead of the playback controls.
+    // Keep one stable screen-sized hit plane behind the controls. Empty-screen clicks and touches
+    // toggle the playback UI in both directions, while the nearer controls panel owns button hits.
     if (shouldUseImmersiveDome && playbackLayerPolicy.retainBackgroundInputLayer) {
         SpatialPanel(
             modifier =
@@ -853,26 +917,42 @@ fun SpatialVideoPlayerContent(
         if (isSurfaceReady) {
             val showImmersiveSubtitleContent =
                 shouldShowImmersiveSubtitlePanel(subtitlesPresent, showControls)
-            // Keep the visual subtitle entity parented across controls visibility changes, but do
-            // not attach an InteractionPolicy. Background input belongs to the retained plane.
-            // Move the subtitle surface off-screen while inactive so it cannot cover controls.
+            val immersiveSubtitleInteractionPolicy =
+                rememberClickInteractionPolicy(
+                    isEnabled =
+                        showImmersiveSubtitleContent &&
+                            playbackLayerPolicy.enableBackgroundToggleInput,
+                    isHandTrackingEnabled = isHandTrackingEnabled,
+                ) {
+                    videoPlayerViewModel.setControlsVisibility(
+                        visible = true,
+                        source = "immersive-subtitle-panel",
+                    )
+                }
+            // Keep one subtitle entity for the playback lifetime. When controls are visible, move
+            // that same entity off-screen and remove its spatial input component in one
+            // recomposition. Recreating the entity left a stale Android surface in the hit stack
+            // during transitions, where it could sit in front of the playback controls.
             if (shouldRetainImmersiveSubtitlePanel(subtitlesPresent)) {
                 SpatialPanel(
-                    modifier = if (showImmersiveSubtitleContent) {
-                        buildImmersiveSubtitleModifier(
-                            dashboardPanelPose = immersivePlaybackDashboardPose,
-                            fallbackAnchorPose = fixedImmersiveMediaPose,
-                            density = density,
-                            distanceMeters = playerState.immersiveSubtitleDistanceMeters,
-                            horizontalOffsetMeters = playerState.immersiveUiHorizontalOffsetMeters,
-                            verticalOffsetMeters =
-                                playerState.immersiveSubtitleVerticalOffsetMeters,
-                            viewAnchorElevationDegrees =
-                                playerState.immersiveViewAnchorElevationDegrees,
-                        )
-                    } else {
-                        buildHiddenSpatialPanelAnchorModifier()
-                    },
+                    modifier =
+                        if (showImmersiveSubtitleContent) {
+                            buildImmersiveSubtitleModifier(
+                                dashboardPanelPose = immersivePlaybackDashboardPose,
+                                fallbackAnchorPose = fixedImmersiveMediaPose,
+                                density = density,
+                                distanceMeters = playerState.immersiveSubtitleDistanceMeters,
+                                horizontalOffsetMeters =
+                                    playerState.immersiveUiHorizontalOffsetMeters,
+                                verticalOffsetMeters =
+                                    playerState.immersiveSubtitleVerticalOffsetMeters,
+                                viewAnchorElevationDegrees =
+                                    playerState.immersiveViewAnchorElevationDegrees,
+                            )
+                        } else {
+                            buildHiddenSpatialPanelAnchorModifier()
+                        },
+                    interactionPolicy = immersiveSubtitleInteractionPolicy,
                 ) {
                     if (showImmersiveSubtitleContent) {
                         SubtitleCueOverlay(

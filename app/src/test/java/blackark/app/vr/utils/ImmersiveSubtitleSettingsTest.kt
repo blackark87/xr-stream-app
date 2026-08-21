@@ -105,9 +105,11 @@ class ImmersiveSubtitleSettingsTest {
 
     @Test
     fun `subtitle vertical offset defaults upward and is clamped`() {
-        assertEquals(29, IMMERSIVE_SUBTITLE_VERTICAL_OFFSET_SLIDER_STEPS)
+        assertEquals(-0.30f, MIN_IMMERSIVE_SUBTITLE_VERTICAL_OFFSET_METERS, 0.0001f)
+        assertEquals(0.30f, MAX_IMMERSIVE_SUBTITLE_VERTICAL_OFFSET_METERS, 0.0001f)
+        assertEquals(11, IMMERSIVE_SUBTITLE_VERTICAL_OFFSET_SLIDER_STEPS)
         assertEquals(
-            0.01f,
+            0.05f,
             (MAX_IMMERSIVE_SUBTITLE_VERTICAL_OFFSET_METERS -
                     MIN_IMMERSIVE_SUBTITLE_VERTICAL_OFFSET_METERS) /
                     (IMMERSIVE_SUBTITLE_VERTICAL_OFFSET_SLIDER_STEPS + 1),
