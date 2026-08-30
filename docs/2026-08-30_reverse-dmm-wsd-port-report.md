@@ -13,7 +13,7 @@ DMM VR Player에서 WSD 권리 확인과 loopback 재생 경계를 식별하고,
 ## 2. 범위와 권한
 
 - case: `xr-stream-app-dmm-port`
-- 로컬 범위 계약: [scope.md](../../reverse-skill/work/xr-stream-app-dmm-port/scope.md)
+- 저장소 내 범위 계약: [DMM_WSD_SCOPE.md](./DMM_WSD_SCOPE.md)
 - `auth.status`: `granted` (`own_system`)
 - `network_profile`: `lab_only`
 - in scope: 사용자가 보유한 DMM APK, 공개 테스트 WSDCF, `xr-stream-app`
@@ -69,41 +69,38 @@ flowchart LR
 
 ### E-001 — WSD loopback 경계
 
-- `source_ref`: 원 APK WSD DEX 정적 분석, `DmmWsdRuntime.kt`
+- `source_ref`: [정적 증거 요약](./DMM_WSD_STATIC_EVIDENCE.md#wsd-권리와-loopback-경계), `DmmWsdRuntime.kt`
 - `content_hash`: 런타임 DEX는 E-006/E-008의 SHA-256 참조
 - `repro_command`:
 
   ```bash
-  cd ../reverse-skill
-  rg -n 'DcfHttpServer|onRightsChecked|requestFirst|requestNext' work/dmm-vr-player/evidence work/dmm-vr-player/report
-  cd ../xr-stream-app
-  rg -n 'onAcquireRights|onRightsChecked|PlaybackSource.Direct' app/src/main/java
+  rg -n 'onAcquireRights|onRightsChecked|openAsync|WsdRightsAcquiringSession' app/src/main/java/blackark/app/vr/dmm/DmmWsdRuntime.kt
+  rg -n '127\.0\.0\.1|localhost' app/src/main/res/xml/network_security_config.xml
+  strings app/src/main/assets/dmm/wsd-runtime.dex | rg 'WsdVideoInteraction|WsdRightsAcquiringSession'
   ```
 
 - 관찰: WSD callback이 권리 필요 여부와 loopback 재생 URI를 분리하며, target 앱은 후자를 Direct playback source로 전달한다.
 
 ### E-002 — 원 앱의 SessionID 경계
 
-- `source_ref`: 원 APK의 인증 SDK 정적 분석
-- `content_hash`: n/a; 사용자 제공 APK case evidence에 보관
+- `source_ref`: [정적 증거 요약](./DMM_WSD_STATIC_EVIDENCE.md#원-앱의-sessionid-경계)
+- `content_hash`: n/a; 원본 APK는 저장소에 포함하지 않고 탈민감 결과를 위 저장소 문서에 보존
 - `repro_command`:
 
   ```bash
-  cd ../reverse-skill
-  rg -n 'issueSessionId|unique_id|secure_id|dmm_app_uid|secid' work/dmm-vr-player/evidence/E-016.md work/dmm-vr-player/evidence/E-017.md
+  rg -n 'issueSessionId|unique_id|secure_id|dmm_app_uid|secid' docs/DMM_WSD_STATIC_EVIDENCE.md
   ```
 
 - 관찰: 원 앱 네이티브 경로는 SessionID 응답을 권리 페이지 쿠키로 연결했다. 이것은 현재 web-only 경로가 기기에서 실패할 때 비교할 기준이며, 현재 코드가 해당 값을 생성한다는 뜻은 아니다.
 
 ### E-003 — 원 앱의 구매/URL API 경계
 
-- `source_ref`: IL2CPP metadata/method map 및 원 APK 정적 분석
-- `content_hash`: n/a; case artifact에 보관
+- `source_ref`: [정적 증거 요약](./DMM_WSD_STATIC_EVIDENCE.md#원-앱의-native-api-경계)
+- `content_hash`: n/a; 원본 IL2CPP 산출물은 저장소에 포함하지 않고 탈민감 결과를 위 저장소 문서에 보존
 - `repro_command`:
 
   ```bash
-  cd ../reverse-skill
-  rg -n 'purchase/list/vr|playableprovider/(stream|download)/vr' work/xr-stream-app-dmm-port/artifacts/dmm-api-static-summary.txt
+  rg -n 'purchase/list/vr|playableprovider/(stream|download)/vr' docs/DMM_WSD_STATIC_EVIDENCE.md
   ```
 
 - 관찰: 원 네이티브 앱은 구매 목록과 WSDCF URL 발급에 별도 API를 썼다. 현재 구현은 이 경로와 관련 비밀 설정을 모두 제거했다.
