@@ -3,6 +3,7 @@ package blackark.app.vr
 import androidx.xr.runtime.math.Pose
 import blackark.app.vr.network.SMBClient
 import blackark.app.vr.network.SMBConfig
+import blackark.app.vr.player.PlaybackSource
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -26,6 +27,9 @@ object AppState {
 
     var smbConfig: SMBConfig? = null
         private set
+
+    private var directPlaybackKey: String? = null
+    private var directPlaybackSource: PlaybackSource.Direct? = null
 
     // Global key event bus
     val keyEvents = MutableSharedFlow<android.view.KeyEvent>(
@@ -51,6 +55,19 @@ object AppState {
     fun setSMBClient(client: SMBClient, config: SMBConfig) {
         smbClient = client
         smbConfig = config
+    }
+
+    fun setDirectPlayback(key: String, source: PlaybackSource.Direct) {
+        directPlaybackKey = key
+        directPlaybackSource = source
+    }
+
+    fun directPlaybackFor(key: String): PlaybackSource.Direct? =
+        directPlaybackSource?.takeIf { directPlaybackKey == key }
+
+    fun clearDirectPlayback() {
+        directPlaybackKey = null
+        directPlaybackSource = null
     }
 
     fun updateDashboardPanelPose(pose: Pose) {
@@ -79,6 +96,7 @@ object AppState {
         smbClient?.disconnect()
         smbClient = null
         smbConfig = null
+        clearDirectPlayback()
         _consumePlaybackBackKeyEvents.value = false
     }
 }

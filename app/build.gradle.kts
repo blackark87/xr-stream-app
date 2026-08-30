@@ -42,8 +42,36 @@ fun resolveBuildSecret(name: String): String =
         ?: localSecrets.getProperty(name)?.trim().orEmpty()
 
 val bundledGitHubPat = resolveBuildSecret("INTERNAL_GITHUB_PAT")
-check('\n' !in bundledGitHubPat && '\r' !in bundledGitHubPat) {
-    "INTERNAL_GITHUB_PAT must be a single-line value."
+val dmmClientId = resolveBuildSecret("DMM_CLIENT_ID")
+val dmmClientSecret = resolveBuildSecret("DMM_CLIENT_SECRET")
+val dmmRedirectUri = resolveBuildSecret("DMM_REDIRECT_URI")
+val dmmJwtSecret = resolveBuildSecret("DMM_JWT_SECRET")
+val dmmLibraryUrl = resolveBuildSecret("DMM_LIBRARY_URL")
+    .ifBlank { "https://www.dmm.co.jp/digital/videoa/-/mylibrary/" }
+val dmmDigitalApiBaseUrl = resolveBuildSecret("DMM_DIGITAL_API_BASE_URL")
+    .ifBlank { "https://vr.digapi.dmm.com" }
+val dmmDigitalApiAuthSecret = resolveBuildSecret("DMM_DIGITAL_API_AUTH_SECRET")
+val dmmExploitIdPrefix = resolveBuildSecret("DMM_EXPLOIT_ID_PREFIX").ifBlank { "uid:" }
+val dmmAppName = resolveBuildSecret("DMM_APP_NAME").ifBlank { "android_vr_store" }
+val dmmApiAppVersion = resolveBuildSecret("DMM_API_APP_VERSION").ifBlank { appVersion }
+val dmmDefaultDownloadQuality = resolveBuildSecret("DMM_DEFAULT_DOWNLOAD_QUALITY")
+    .ifBlank { "high" }
+
+listOf(
+    "INTERNAL_GITHUB_PAT" to bundledGitHubPat,
+    "DMM_CLIENT_ID" to dmmClientId,
+    "DMM_CLIENT_SECRET" to dmmClientSecret,
+    "DMM_REDIRECT_URI" to dmmRedirectUri,
+    "DMM_JWT_SECRET" to dmmJwtSecret,
+    "DMM_LIBRARY_URL" to dmmLibraryUrl,
+    "DMM_DIGITAL_API_BASE_URL" to dmmDigitalApiBaseUrl,
+    "DMM_DIGITAL_API_AUTH_SECRET" to dmmDigitalApiAuthSecret,
+    "DMM_EXPLOIT_ID_PREFIX" to dmmExploitIdPrefix,
+    "DMM_APP_NAME" to dmmAppName,
+    "DMM_API_APP_VERSION" to dmmApiAppVersion,
+    "DMM_DEFAULT_DOWNLOAD_QUALITY" to dmmDefaultDownloadQuality,
+).forEach { (name, value) ->
+    check('\n' !in value && '\r' !in value) { "$name must be a single-line value." }
 }
 
 val buildEpochSeconds =
@@ -69,6 +97,9 @@ android {
         version = release(37)
     }
 
+    // The provisioned WSD runtime still uses Android's legacy Apache HTTP compatibility classes.
+    useLibrary("org.apache.http.legacy")
+
     defaultConfig {
         applicationId = "blackark.app.vr"
         minSdk = 34
@@ -80,6 +111,17 @@ android {
 
         buildConfigField("String", "APP_VERSION", "\"${escapeForBuildConfig(appVersion)}\"")
         buildConfigField("String", "BUNDLED_GITHUB_PAT", "\"${escapeForBuildConfig(bundledGitHubPat)}\"")
+        buildConfigField("String", "DMM_CLIENT_ID", "\"${escapeForBuildConfig(dmmClientId)}\"")
+        buildConfigField("String", "DMM_CLIENT_SECRET", "\"${escapeForBuildConfig(dmmClientSecret)}\"")
+        buildConfigField("String", "DMM_REDIRECT_URI", "\"${escapeForBuildConfig(dmmRedirectUri)}\"")
+        buildConfigField("String", "DMM_JWT_SECRET", "\"${escapeForBuildConfig(dmmJwtSecret)}\"")
+        buildConfigField("String", "DMM_LIBRARY_URL", "\"${escapeForBuildConfig(dmmLibraryUrl)}\"")
+        buildConfigField("String", "DMM_DIGITAL_API_BASE_URL", "\"${escapeForBuildConfig(dmmDigitalApiBaseUrl)}\"")
+        buildConfigField("String", "DMM_DIGITAL_API_AUTH_SECRET", "\"${escapeForBuildConfig(dmmDigitalApiAuthSecret)}\"")
+        buildConfigField("String", "DMM_EXPLOIT_ID_PREFIX", "\"${escapeForBuildConfig(dmmExploitIdPrefix)}\"")
+        buildConfigField("String", "DMM_APP_NAME", "\"${escapeForBuildConfig(dmmAppName)}\"")
+        buildConfigField("String", "DMM_API_APP_VERSION", "\"${escapeForBuildConfig(dmmApiAppVersion)}\"")
+        buildConfigField("String", "DMM_DEFAULT_DOWNLOAD_QUALITY", "\"${escapeForBuildConfig(dmmDefaultDownloadQuality)}\"")
     }
 
     buildTypes {

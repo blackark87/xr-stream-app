@@ -9,6 +9,7 @@ import blackark.app.vr.data.repository.ServerRepository
 import blackark.app.vr.data.repository.VideoDisplaySettingsRepository
 import blackark.app.vr.data.repository.VideoRepository
 import blackark.app.vr.data.security.SmbCredentialStore
+import blackark.app.vr.dmm.DmmRepository
 import blackark.app.vr.remote.GitHubCredentialStore
 import blackark.app.vr.remote.RuntimeConfigRepository
 
@@ -18,6 +19,7 @@ class AppContainer(context: Context) {
     val runtimeConfigRepository = RuntimeConfigRepository(context, githubCredentialStore)
     val database: AppDatabase = AppDatabase.getDatabase(context.applicationContext)
     val credentialStore = SmbCredentialStore(context)
+    val dmmRepository = DmmRepository(context)
     val serverRepository = ServerRepository(database.serverDao())
     val metadataScopeRepository = MetadataScopeRepository(database.metadataScopeDao())
     val quickAccessRepository = QuickAccessRepository(database.quickAccessFolderDao())

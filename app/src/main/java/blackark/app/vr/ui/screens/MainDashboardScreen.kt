@@ -208,6 +208,7 @@ import blackark.app.vr.network.SMBClient
 import blackark.app.vr.network.SMBFileItem
 import blackark.app.vr.network.SmbEndpointParser
 import blackark.app.vr.player.SMBDataSource
+import blackark.app.vr.player.PlaybackSource
 import blackark.app.vr.remote.RemoteConfigStatus
 import blackark.app.vr.ui.ApplyHandTrackingPreference
 import blackark.app.vr.ui.components.EmptyState
@@ -293,6 +294,7 @@ private enum class PrimaryDestination {
     LocalFiles,
     SmbFiles,
     YouTube,
+    Dmm,
     Settings,
 }
 
@@ -412,6 +414,7 @@ private fun PrimaryDestination.icon(): ImageVector = when (this) {
     PrimaryDestination.LocalFiles -> Icons.Filled.FolderOpen
     PrimaryDestination.SmbFiles -> Icons.Filled.Cloud
     PrimaryDestination.YouTube -> Icons.Filled.Movie
+    PrimaryDestination.Dmm -> Icons.Filled.Movie
     PrimaryDestination.Settings -> Icons.Filled.Settings
 }
 
@@ -421,6 +424,7 @@ private fun PrimaryDestination.localizedLabel(): String = when (this) {
     PrimaryDestination.LocalFiles -> stringResource(R.string.local_files)
     PrimaryDestination.SmbFiles -> stringResource(R.string.smb_files)
     PrimaryDestination.YouTube -> stringResource(R.string.youtube)
+    PrimaryDestination.Dmm -> stringResource(R.string.dmm_fanza)
     PrimaryDestination.Settings -> stringResource(R.string.settings)
 }
 
@@ -488,6 +492,7 @@ private fun resolveSourceTitle(
         ?: "SMB Files"
 
     PrimaryDestination.YouTube -> "YouTube"
+    PrimaryDestination.Dmm -> "DMM / FANZA"
     PrimaryDestination.Settings -> "Settings"
 }
 
@@ -511,6 +516,7 @@ private fun resolveSourceBreadcrumb(
     }
 
     PrimaryDestination.YouTube,
+    PrimaryDestination.Dmm,
     PrimaryDestination.Settings -> null
 }
 
@@ -4416,6 +4422,7 @@ fun MainDashboardScreen(
             }
 
             PrimaryDestination.YouTube,
+            PrimaryDestination.Dmm,
             PrimaryDestination.Settings -> Unit
         }
     }
@@ -4590,6 +4597,28 @@ fun MainDashboardScreen(
                     when (contentState.destination) {
                         PrimaryDestination.YouTube -> {
                             YouTubePanel(
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                        }
+
+                        PrimaryDestination.Dmm -> {
+                            DmmPanel(
+                                repository = xrApplication.container.dmmRepository,
+                                onPlayReady = { prepared ->
+                                    AppState.setDirectPlayback(
+                                        key = prepared.historyKey,
+                                        source = PlaybackSource.Direct(
+                                            mediaUri = prepared.playbackUri,
+                                            sourceName = "DMM",
+                                        ),
+                                    )
+                                    navController.navigate(
+                                        Screen.VideoPlayer.createRoute(
+                                            prepared.historyKey,
+                                            prepared.title,
+                                        )
+                                    )
+                                },
                                 modifier = Modifier.fillMaxSize(),
                             )
                         }

@@ -1782,7 +1782,9 @@ class VideoPlayerViewModel(
                     textTracks = emptyList(),
                 )
                 // Save to recent videos immediately to ensure we have an ID for updates.
-                saveToRecentVideos(videoFile, playbackSource, savedVideo)
+                if (playbackSource !is PlaybackSource.Direct) {
+                    saveToRecentVideos(videoFile, playbackSource, savedVideo)
+                }
 
                 val siblingFiles = loadSiblingFiles(videoFile, playbackSource)
                 val listedExternalSubtitle = siblingFiles
@@ -1803,6 +1805,8 @@ class VideoPlayerViewModel(
                             videoFile = videoFile,
                             playbackSource = playbackSource,
                         )
+
+                        is PlaybackSource.Direct -> null
                     }
                 _state.value = _state.value.copy(
                     externalSubtitleFileName = externalSubtitle?.file?.name,
@@ -2249,10 +2253,14 @@ class VideoPlayerViewModel(
                 val dataSourceFactory = when (playbackSource) {
                     is PlaybackSource.Smb -> SMBDataSource.Factory(playbackSource.config)
                     is PlaybackSource.Local -> DefaultDataSource.Factory(context)
+                    is PlaybackSource.Direct -> DefaultDataSource.Factory(context)
                 }
 
                 // videoFile.path is already a complete SMB URL from jcifs (e.g., smb://192.168.1.105:445/downloads/file.mp4)
-                val uri = videoFile.path.toUri()
+                val uri = when (playbackSource) {
+                    is PlaybackSource.Direct -> playbackSource.mediaUri.toUri()
+                    else -> videoFile.path.toUri()
+                }
 
                 val mediaItem = buildMediaItem(
                     videoUri = uri,
@@ -2422,6 +2430,7 @@ class VideoPlayerViewModel(
         return when (playbackSource) {
             is PlaybackSource.Smb -> loadSmbSiblingFiles(currentFile, playbackSource.config)
             is PlaybackSource.Local -> loadLocalSiblingFiles(currentFile, playbackSource)
+            is PlaybackSource.Direct -> null
         }
     }
 
@@ -2865,10 +2874,12 @@ class VideoPlayerViewModel(
         val serverAddress = when (playbackSource) {
             is PlaybackSource.Smb -> playbackSource.config.serverAddress
             is PlaybackSource.Local -> LocalFileClient.LOCAL_STORAGE_ADDRESS
+            is PlaybackSource.Direct -> playbackSource.sourceName
         }
         val shareName = when (playbackSource) {
             is PlaybackSource.Smb -> playbackSource.config.shareName
             is PlaybackSource.Local -> playbackSource.rootTreeUri.orEmpty()
+            is PlaybackSource.Direct -> ""
         }
 
         if (existingVideo != null) {

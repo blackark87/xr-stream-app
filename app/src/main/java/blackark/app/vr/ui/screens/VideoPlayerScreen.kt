@@ -483,6 +483,15 @@ fun VideoPlayerScreen(
         }
     }
 
+    DisposableEffect(videoFilePath) {
+        onDispose {
+            if (videoFilePath.startsWith("dmm://", ignoreCase = true)) {
+                container.dmmRepository.releasePlayback()
+                blackark.app.vr.AppState.clearDirectPlayback()
+            }
+        }
+    }
+
     DisposableEffect(context) {
         val activity = context.findActivity()
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU || activity == null) {
@@ -503,7 +512,9 @@ fun VideoPlayerScreen(
 
     LaunchedEffect(videoFilePath, videoFileName) {
         val playbackSource =
-            if (videoFilePath.startsWith("smb://", ignoreCase = true)) {
+            blackark.app.vr.AppState.directPlaybackFor(videoFilePath) ?: if (
+                videoFilePath.startsWith("smb://", ignoreCase = true)
+            ) {
                 blackark.app.vr.AppState.smbConfig?.let { PlaybackSource.Smb(it) }
             } else {
                 PlaybackSource.Local(
