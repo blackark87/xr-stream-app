@@ -2,9 +2,11 @@ package blackark.app.vr.dmm
 
 import android.content.Context
 import android.net.Uri
-import android.os.Build
+import android.os.Environment
 import android.provider.OpenableColumns
+import android.util.Log
 import android.webkit.CookieManager
+import android.webkit.WebSettings
 import android.webkit.WebView
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -20,6 +22,9 @@ import java.io.FileOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.security.MessageDigest
+
+private const val DMM_LIBRARY_URL =
+    "https://www.dmm.co.jp/digital/videoa/-/mylibrary/"
 
 enum class DmmPage {
     Browser,
@@ -47,37 +52,34 @@ data class DmmPreparedMedia(
 
 data class DmmUiState(
     val page: DmmPage = DmmPage.Browser,
-    val configured: Boolean = false,
-    val playableApiConfigured: Boolean = false,
     val runtimeProvisioned: Boolean = false,
-    val signedInUserId: String? = null,
-    val activeUrl: String = "",
+    val webSessionDetected: Boolean = false,
+    val activeUrl: String = DMM_LIBRARY_URL,
+    val navigationId: Long = 0L,
     val isBusy: Boolean = false,
     val statusMessage: String? = null,
-    val catalog: List<DmmCatalogItem> = emptyList(),
-    val catalogTotalItems: Int = 0,
     val downloads: List<DmmDownloadItem> = emptyList(),
     val preparedMedia: DmmPreparedMedia? = null,
 )
 
-/** Coordinates web login, SessionID cookies, WSD rights acquisition, and encrypted downloads. */
+/**
+ * Coordinates a normal DMM WebView session, authenticated downloads, WSD rights, and playback.
+ *
+ * User credentials stay inside WebView. This path does not exchange OAuth codes, validate JWTs,
+ * call the native purchased-content API, or require application secrets in BuildConfig.
+ */
 class DmmRepository(context: Context) : AutoCloseable {
     private val appContext = context.applicationContext
-    private val config = DmmConfig.fromBuildConfig()
-    private val sessionStore = DmmSessionStore(appContext)
-    private val authClient = DmmAuthClient(config)
-    private val digitalApiClient = DmmDigitalApiClient(config)
     private val wsdRuntime = DmmWsdRuntime(appContext)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-    private val downloadDirectory = File(appContext.filesDir, "dmm-downloads").apply { mkdirs() }
+    private val downloadDirectory = (
+        appContext.getExternalFilesDir(Environment.DIRECTORY_MOVIES)
+            ?: appContext.filesDir
+        ).resolve("dmm-downloads").apply { mkdirs() }
 
     private val _state = MutableStateFlow(
         DmmUiState(
-            configured = config.isConfigured,
-            playableApiConfigured = config.canIssuePlayableUrls,
             runtimeProvisioned = wsdRuntime.isProvisioned,
-            signedInUserId = sessionStore.load()?.userId,
-            activeUrl = config.libraryUrl,
             downloads = scanDownloads(),
         )
     )
@@ -87,156 +89,101 @@ class DmmRepository(context: Context) : AutoCloseable {
     private var activeTitle: String = "DMM video"
 
     fun startLogin() {
-        if (!config.isConfigured) {
-            fail("DMM OAuth is not configured in secrets.local.properties.")
-            return
-        }
-        clearDmmAuthenticationCookies()
-        _state.value = _state.value.copy(
+        Log.i(TAG, "event=web_login_open")
+        navigate(
             page = DmmPage.Login,
-            activeUrl = config.loginUrl(),
-            statusMessage = null,
+            url = DMM_LIBRARY_URL,
+            status = "Sign in on the DMM web page. The app does not read your password.",
         )
     }
 
     fun showLibrary() {
-        val stored = sessionStore.load()
-        if (stored == null) {
-            _state.value = _state.value.copy(
-                page = DmmPage.Browser,
-                activeUrl = config.libraryUrl,
-                statusMessage = null,
-            )
-            return
-        }
-        _state.value = _state.value.copy(isBusy = true, statusMessage = "Restoring DMM session…")
-        scope.launch {
-            runCatching { prepareAuthenticatedWebSession(stored) }
-                .onSuccess { session -> showAuthenticatedLibrary(session) }
-                .onFailure { error -> fail(error.userMessage()) }
-        }
-    }
-
-    fun refreshPurchasedContent() {
-        val stored = sessionStore.load()
-        if (stored == null) {
-            fail("Sign in to DMM before loading your purchased library.")
-            return
-        }
-        _state.value = _state.value.copy(isBusy = true, statusMessage = "Loading purchased VR content…")
-        scope.launch {
-            runCatching {
-                val active = authClient.ensureActive(stored)
-                sessionStore.save(active)
-                active to digitalApiClient.getAllPurchasedVr(active)
-            }.onSuccess { (active, page) ->
-                _state.value = _state.value.copy(
-                    signedInUserId = active.userId,
-                    catalog = page.items,
-                    catalogTotalItems = page.totalItems,
-                    isBusy = false,
-                    statusMessage = if (page.items.isEmpty()) {
-                        "No purchased VR content was returned for this account."
-                    } else {
-                        "Loaded ${page.items.size} of ${page.totalItems} purchased titles."
-                    },
-                )
-            }.onFailure { error -> fail(error.userMessage()) }
-        }
-    }
-
-    fun stream(item: DmmCatalogItem, part: Int = 1) {
-        requestPlayable(item, "Issuing DMM stream URL…") { session ->
-            digitalApiClient.getStreamVr(session, item, part)
-        }
-    }
-
-    fun download(item: DmmCatalogItem, part: Int = 1) {
-        val stored = sessionStore.load()
-        if (stored == null) {
-            fail("Sign in to DMM before downloading purchased content.")
-            return
-        }
-        _state.value = _state.value.copy(isBusy = true, statusMessage = "Issuing DMM download URL…")
-        scope.launch {
-            runCatching {
-                val active = authClient.ensureActive(stored)
-                sessionStore.save(active)
-                val playable = digitalApiClient.getDownloadVr(active, item, part)
-                downloadToDevice(playable.url, item.title, active)
-            }.onSuccess {
-                _state.value = _state.value.copy(
-                    isBusy = false,
-                    downloads = scanDownloads(),
-                    statusMessage = "Download complete. The encrypted WSDCF is ready for offline playback.",
-                )
-            }.onFailure { error -> fail(error.userMessage()) }
-        }
+        Log.i(TAG, "event=library_open")
+        navigate(page = DmmPage.Browser, url = DMM_LIBRARY_URL, status = null)
     }
 
     fun logout() {
-        sessionStore.clear()
         clearDmmAuthenticationCookies()
-        _state.value = _state.value.copy(
-            page = DmmPage.Browser,
-            signedInUserId = null,
-            catalog = emptyList(),
-            catalogTotalItems = 0,
-            activeUrl = config.libraryUrl,
-            statusMessage = "Signed out and removed DMM authentication cookies.",
+        Log.i(TAG, "event=web_logout")
+        _state.value = _state.value.copy(webSessionDetected = false)
+        navigate(
+            page = DmmPage.Login,
+            url = DMM_LIBRARY_URL,
+            status = "DMM web-session cookies were cleared. Sign in again if the site requests it.",
         )
     }
 
-    /** Applies the headers/cookie behavior used by DMM's Android auth and session WebViews. */
     fun loadWebPage(view: WebView, url: String) {
-        installAppCookie(url)
-        view.loadUrl(url, webRequestHeaders())
+        view.loadUrl(url)
     }
 
-    fun decorateUserAgent(baseUserAgent: String): String {
-        val version = runCatching {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                appContext.packageManager.getPackageInfo(
-                    appContext.packageName,
-                    android.content.pm.PackageManager.PackageInfoFlags.of(0),
-                ).versionName
+    fun onWebPageFinished(url: String) {
+        if (!isDmmUrl(url)) return
+        val detected = hasDmmWebSession(url)
+        val previous = _state.value
+        val page = if (detected && previous.page == DmmPage.Login) DmmPage.Browser else previous.page
+        _state.value = previous.copy(
+            page = page,
+            webSessionDetected = detected,
+            activeUrl = url,
+            statusMessage = if (detected && !previous.webSessionDetected) {
+                "DMM web session detected. Open purchased content and choose stream or download."
             } else {
-                @Suppress("DEPRECATION")
-                appContext.packageManager.getPackageInfo(appContext.packageName, 0).versionName
-            }
-        }.getOrNull() ?: "unknown"
-        return "$baseUserAgent DMMOpenAuth/$DMM_AUTH_SDK_VERSION ${appContext.packageName}/$version"
+                previous.statusMessage
+            },
+        )
+        Log.i(
+            TAG,
+            "event=web_page_finished target=${sanitizedUrl(url)} sessionDetected=$detected",
+        )
     }
 
-    /** Returns true when the WebView navigation was consumed by auth, WSD, or playback. */
+    /** Returns true when navigation was consumed by WSD rights or protected playback. */
     fun handleNavigation(url: String, suggestedTitle: String? = null): Boolean {
-        if (config.isRedirect(url)) {
-            val code = Uri.parse(url).getQueryParameter("code")
-            if (code.isNullOrBlank()) {
-                fail("DMM login returned without an authorization code.")
-            } else {
-                exchangeCode(code)
-            }
-            return true
-        }
         if (_state.value.page == DmmPage.Rights && wsdRuntime.isLicenseUrl(Uri.parse(url))) {
             submitRights(url)
             return true
         }
         val mediaUrl = extractWsdUrl(url) ?: return false
+        Log.i(TAG, "event=stream_link_intercepted target=${sanitizedUrl(mediaUrl)}")
         play(mediaUrl, suggestedTitle ?: mediaTitle(mediaUrl))
         return true
     }
 
-    fun handleDownload(url: String, suggestedTitle: String?, mimeType: String): Boolean {
+    fun handleDownload(
+        url: String,
+        suggestedTitle: String?,
+        mimeType: String,
+        userAgent: String?,
+    ): Boolean {
         if (_state.value.page == DmmPage.Rights && wsdRuntime.isLicenseUrl(Uri.parse(url))) {
             submitRights(url)
             return true
         }
-        if (extractWsdUrl(url) == null && !mimeType.contains("wsdrm", ignoreCase = true)) {
+        val mediaUrl = extractWsdUrl(url)
+        val hasWsdFileName = suggestedTitle.orEmpty()
+            .substringBefore('?')
+            .endsWith(".wsdcf", ignoreCase = true)
+        if (mediaUrl == null &&
+            !hasWsdFileName &&
+            !mimeType.contains("wsdrm", ignoreCase = true)
+        ) {
+            Log.i(
+                TAG,
+                "event=non_wsd_download_ignored target=${sanitizedUrl(url)} mime=${mimeType.take(80)}",
+            )
             return false
         }
-        download(url, suggestedTitle ?: mediaTitle(url))
+        val targetUrl = mediaUrl ?: url
+        Log.i(
+            TAG,
+            "event=download_intercepted target=${sanitizedUrl(targetUrl)} mime=${mimeType.take(80)}",
+        )
+        download(
+            url = targetUrl,
+            title = suggestedTitle ?: mediaTitle(targetUrl),
+            userAgent = userAgent,
+        )
         return true
     }
 
@@ -247,12 +194,13 @@ class DmmRepository(context: Context) : AutoCloseable {
             return
         }
         if (!wsdRuntime.isProvisioned) {
-            fail("WSD runtime is not provisioned. Run scripts/provision-dmm-runtime.sh first.")
+            fail("This build does not contain the WSD runtime.")
             return
         }
         activeSourceUri = uri
         activeTitle = title.ifBlank { "DMM video" }
-        _state.value = _state.value.copy(isBusy = true, statusMessage = "Checking playback rights…")
+        _state.value = _state.value.copy(isBusy = true, statusMessage = "Checking WSD playback rights…")
+        Log.i(TAG, "event=wsd_open source=${sanitizedUrl(url)}")
         wsdRuntime.open(uri, runtimeListener)
     }
 
@@ -263,35 +211,48 @@ class DmmRepository(context: Context) : AutoCloseable {
 
     fun importOffline(uri: Uri) {
         scope.launch {
+            _state.value = _state.value.copy(isBusy = true, statusMessage = "Importing WSDCF…")
             runCatching { importToDevice(uri) }
                 .onSuccess { item ->
+                    Log.i(TAG, "event=import_complete bytes=${item.bytesDownloaded}")
                     _state.value = _state.value.copy(
+                        isBusy = false,
                         downloads = scanDownloads(),
-                        statusMessage = "Imported ${item.title}. WSD will use locally stored rights when offline.",
+                        statusMessage = "Imported ${item.title}. WSD will check locally stored rights.",
                     )
                 }
                 .onFailure { error -> fail(error.userMessage()) }
         }
     }
 
-    fun download(url: String, title: String = mediaTitle(url)) {
+    fun download(
+        url: String,
+        title: String = mediaTitle(url),
+        userAgent: String? = null,
+    ) {
         val uri = runCatching { Uri.parse(url) }.getOrNull()
         if (uri?.scheme !in setOf("http", "https")) {
             fail("Downloads require an HTTP or HTTPS WSDCF URL.")
             return
         }
+        val referer = _state.value.activeUrl.takeIf { it.startsWith("http://") || it.startsWith("https://") }
+        _state.value = _state.value.copy(isBusy = true, statusMessage = "Downloading encrypted WSDCF…")
         scope.launch {
             runCatching {
-                val session = sessionStore.load()?.let { prepareAuthenticatedWebSession(it) }
-                downloadToDevice(url, title, session)
-            }
-                .onSuccess {
-                    _state.value = _state.value.copy(
-                        downloads = scanDownloads(),
-                        statusMessage = "Download complete. The encrypted WSDCF is ready for offline playback.",
-                    )
-                }
-                .onFailure { error -> fail(error.userMessage()) }
+                downloadToDevice(
+                    url = url,
+                    title = title,
+                    userAgent = userAgent ?: WebSettings.getDefaultUserAgent(appContext),
+                    referer = referer,
+                )
+            }.onSuccess { bytes ->
+                Log.i(TAG, "event=download_complete bytes=$bytes")
+                _state.value = _state.value.copy(
+                    isBusy = false,
+                    downloads = scanDownloads(),
+                    statusMessage = "Download complete. The encrypted WSDCF is stored on this device.",
+                )
+            }.onFailure { error -> fail(error.userMessage()) }
         }
     }
 
@@ -303,81 +264,36 @@ class DmmRepository(context: Context) : AutoCloseable {
         _state.value = _state.value.copy(statusMessage = null)
     }
 
+    fun releasePlayback() {
+        wsdRuntime.close()
+        activeSourceUri = null
+        if (_state.value.page == DmmPage.Rights) {
+            navigate(page = DmmPage.Browser, url = DMM_LIBRARY_URL, status = null)
+        }
+    }
+
     override fun close() {
         wsdRuntime.close()
         scope.cancel()
     }
 
-    fun releasePlayback() {
-        wsdRuntime.close()
-        activeSourceUri = null
-    }
-
-    private fun exchangeCode(code: String) {
-        _state.value = _state.value.copy(isBusy = true, statusMessage = "Completing DMM login…")
-        scope.launch {
-            runCatching {
-                authClient.exchangeAuthorizationCode(code)
-                    .let { prepareAuthenticatedWebSession(it) }
-            }
-                .onSuccess { session ->
-                    showAuthenticatedLibrary(
-                        session = session,
-                        status = "Signed in. Your password was handled only by the DMM web page.",
-                    )
-                }
-                .onFailure { error -> fail(error.userMessage()) }
-        }
-    }
-
-    private fun requestPlayable(
-        item: DmmCatalogItem,
-        status: String,
-        request: suspend (DmmSession) -> DmmPlayableResource,
-    ) {
-        val stored = sessionStore.load()
-        if (stored == null) {
-            fail("Sign in to DMM before streaming purchased content.")
-            return
-        }
-        _state.value = _state.value.copy(isBusy = true, statusMessage = status)
-        scope.launch {
-            runCatching {
-                val active = authClient.ensureActive(stored)
-                sessionStore.save(active)
-                request(active)
-            }.onSuccess { playable ->
-                play(playable.url, item.title)
-            }.onFailure { error -> fail(error.userMessage()) }
-        }
-    }
-
     private val runtimeListener = object : DmmWsdListener {
         override fun onRightsRequired(request: DmmRightsRequest) {
-            val stored = sessionStore.load()
-            if (stored == null) {
-                _state.value = _state.value.copy(
-                    isBusy = false,
-                    statusMessage = "Sign in to DMM before acquiring playback rights.",
-                )
-                return
-            }
-            _state.value = _state.value.copy(isBusy = true, statusMessage = "Creating DMM license session…")
+            _state.value = _state.value.copy(
+                isBusy = true,
+                statusMessage = "Opening the WSD rights page with the current web session…",
+            )
+            Log.i(TAG, "event=rights_required issuer=${sanitizedUrl(request.rightsIssuer)}")
             scope.launch {
-                runCatching {
-                    val session = authClient.ensureSessionId(stored)
-                    sessionStore.save(session)
-                    installSessionCookies(session)
-                    session to wsdRuntime.startRights(request)
-                }.onSuccess { (session, response) ->
-                    _state.value = _state.value.copy(signedInUserId = session.userId)
-                    receiveRightsResponse(response)
-                }.onFailure { error -> fail(error.userMessage()) }
+                runCatching { wsdRuntime.startRights(request) }
+                    .onSuccess(::receiveRightsResponse)
+                    .onFailure { error -> fail(error.userMessage()) }
             }
         }
 
         override fun onReady(playbackUri: Uri) {
             val source = activeSourceUri ?: return
+            Log.i(TAG, "event=wsd_ready output=${sanitizedUrl(playbackUri.toString())}")
             _state.value = _state.value.copy(
                 isBusy = false,
                 statusMessage = null,
@@ -395,7 +311,8 @@ class DmmRepository(context: Context) : AutoCloseable {
     }
 
     private fun submitRights(url: String) {
-        _state.value = _state.value.copy(isBusy = true, statusMessage = "Installing playback rights…")
+        _state.value = _state.value.copy(isBusy = true, statusMessage = "Installing WSD playback rights…")
+        Log.i(TAG, "event=license_url_intercepted target=${sanitizedUrl(url)}")
         scope.launch {
             runCatching { wsdRuntime.submitLicenseUrl(url) }
                 .onSuccess(::receiveRightsResponse)
@@ -404,166 +321,94 @@ class DmmRepository(context: Context) : AutoCloseable {
     }
 
     private fun receiveRightsResponse(response: DmmRightsResponse) {
+        Log.i(
+            TAG,
+            "event=rights_response status=${response.statusCode} hasLocation=${!response.location.isNullOrBlank()}",
+        )
         if (response.isAcquired) {
-            _state.value = _state.value.copy(isBusy = true, statusMessage = "Rights acquired. Starting player…")
+            _state.value = _state.value.copy(
+                isBusy = true,
+                statusMessage = "Rights acquired. Starting player…",
+            )
             wsdRuntime.resumeAfterRights()
             return
         }
         val location = response.location
         if (location.isNullOrBlank()) {
-            fail("DMM/WSD did not return a rights page (HTTP ${response.statusCode}).")
+            fail("WSD did not return a rights page (HTTP ${response.statusCode}).")
             return
         }
         if (wsdRuntime.isLicenseUrl(Uri.parse(location))) {
             submitRights(location)
             return
         }
-        _state.value = _state.value.copy(
+        navigate(
             page = DmmPage.Rights,
-            activeUrl = location,
-            isBusy = false,
-            statusMessage = "Confirm playback on the DMM rights page.",
+            url = location,
+            status = "Complete the rights page using the DMM web session.",
         )
-    }
-
-    private suspend fun prepareAuthenticatedWebSession(session: DmmSession): DmmSession {
-        val active = authClient.ensureSessionId(session)
-        sessionStore.save(active)
-        withContext(Dispatchers.Main) { installSessionCookies(active) }
-        return active
-    }
-
-    private fun showAuthenticatedLibrary(session: DmmSession, status: String? = null) {
-        _state.value = _state.value.copy(
-            page = DmmPage.Browser,
-            activeUrl = sessionRestorableUrl(config.libraryUrl),
-            signedInUserId = session.userId,
-            isBusy = false,
-            statusMessage = status,
-        )
-        refreshPurchasedContent()
-    }
-
-    private fun installSessionCookies(session: DmmSession) {
-        val secureId = requireNotNull(session.secureId)
-        val uniqueId = requireNotNull(session.uniqueId)
-        val manager = CookieManager.getInstance()
-        manager.setAcceptCookie(true)
-        listOf("com", "co.jp").forEach { suffix ->
-            val origin = "https://www.dmm.$suffix/"
-            val domain = ".dmm.$suffix"
-            manager.setCookie(origin, "secid=$secureId; Path=/; Domain=$domain; Secure")
-            manager.setCookie(origin, "dmm_app_uid=$uniqueId; Path=/; Domain=$domain; Secure")
-            manager.setCookie(origin, "dmm_app=1; Path=/; Domain=$domain; Secure")
-            manager.setCookie(
-                "https://accounts.dmm.$suffix/",
-                "secid=$secureId; Path=/; Domain=$domain; Secure",
-            )
-        }
-        manager.flush()
-    }
-
-    private fun installAppCookie(url: String) {
-        val host = Uri.parse(url).host.orEmpty()
-        if (host != "dmm.com" && !host.endsWith(".dmm.com") &&
-            host != "dmm.co.jp" && !host.endsWith(".dmm.co.jp")
-        ) return
-        val suffix = if (host.endsWith("dmm.co.jp")) "co.jp" else "com"
-        CookieManager.getInstance().apply {
-            setAcceptCookie(true)
-            setCookie(url, "dmm_app=1; Path=/; Domain=.dmm.$suffix; Secure")
-            flush()
-        }
-    }
-
-    private fun webRequestHeaders(session: DmmSession? = sessionStore.load()): Map<String, String> =
-        buildMap {
-            put("SMARTPHONE_APP", "DMM-APP")
-            put("SMARTPHONE-APP", "DMM-APP")
-            session?.uniqueId?.takeIf { it.isNotBlank() }?.let {
-                put("SMARTPHONE_REQ_INTS", it)
-            }
-        }
-
-    private fun clearDmmAuthenticationCookies() {
-        val manager = CookieManager.getInstance()
-        val names = listOf(
-            "secid",
-            "dmm_app_uid",
-            "althash",
-            "has_althash",
-            "INT_SESID",
-            "INT_SESID_SECURE",
-            "login_session_id",
-            "login_secure_id",
-        )
-        listOf("com", "co.jp").forEach { suffix ->
-            val domain = ".dmm.$suffix"
-            listOf("www", "accounts").forEach { host ->
-                val origin = "https://$host.dmm.$suffix/"
-                names.forEach { name ->
-                    manager.setCookie(
-                        origin,
-                        "$name=; Path=/; Domain=$domain; Max-Age=0; Secure",
-                    )
-                }
-            }
-        }
-        manager.flush()
     }
 
     private suspend fun downloadToDevice(
         url: String,
         title: String,
-        session: DmmSession?,
-    ) = withContext(Dispatchers.IO) {
-        val baseName = sanitizeFileName(title).ifBlank { "dmm-${sha256(url).take(12)}" }
-        val fileName = if (baseName.endsWith(".wsdcf", true)) baseName else "$baseName.wsdcf"
-        val destination = File(downloadDirectory, fileName)
-        val partial = File(downloadDirectory, "$fileName.part")
-        val existing = partial.length()
-        val connection = URL(url).openConnection() as HttpURLConnection
-        try {
-            connection.connectTimeout = 20_000
-            connection.readTimeout = 30_000
-            connection.instanceFollowRedirects = true
-            if (existing > 0L) connection.setRequestProperty("Range", "bytes=$existing-")
-            CookieManager.getInstance().getCookie(url)?.let { cookie ->
-                connection.setRequestProperty("Cookie", cookie)
-            }
-            webRequestHeaders(session).forEach(connection::setRequestProperty)
-            val status = connection.responseCode
-            if (status == 416 && partial.isFile) {
-                check(partial.renameTo(destination)) { "Unable to finalize the existing download." }
-                return@withContext
-            }
-            check(status in 200..299) { "Download failed with HTTP $status." }
-            val append = status == HttpURLConnection.HTTP_PARTIAL && existing > 0L
-            val initialBytes = if (append) existing else 0L
-            val responseLength = connection.contentLengthLong.takeIf { it >= 0L }
-            val total = responseLength?.plus(initialBytes)
-            FileOutputStream(partial, append).use { output ->
-                connection.inputStream.use { input ->
-                    val buffer = ByteArray(256 * 1024)
-                    var downloaded = initialBytes
-                    var lastPublished = downloaded
-                    while (true) {
-                        val count = input.read(buffer)
-                        if (count < 0) break
-                        output.write(buffer, 0, count)
-                        downloaded += count
-                        if (downloaded - lastPublished >= 1024 * 1024) {
-                            lastPublished = downloaded
-                            publishDownload(title, partial, downloaded, total, false)
-                        }
-                    }
-                    output.fd.sync()
+        userAgent: String,
+        referer: String?,
+    ): Long {
+        val cookieHeader = withContext(Dispatchers.Main) {
+            CookieManager.getInstance().getCookie(url)
+        }
+        return withContext(Dispatchers.IO) {
+            val baseName = sanitizeFileName(title).ifBlank { "dmm-${sha256(url).take(12)}" }
+            val fileName = if (baseName.endsWith(".wsdcf", true)) baseName else "$baseName.wsdcf"
+            val destination = File(downloadDirectory, fileName)
+            val partial = File(downloadDirectory, "$fileName.part")
+            val existing = partial.length()
+            val connection = URL(url).openConnection() as HttpURLConnection
+            try {
+                connection.connectTimeout = 20_000
+                connection.readTimeout = 30_000
+                connection.instanceFollowRedirects = true
+                connection.setRequestProperty("User-Agent", userAgent)
+                cookieHeader?.takeIf(String::isNotBlank)?.let {
+                    connection.setRequestProperty("Cookie", it)
                 }
+                referer?.let { connection.setRequestProperty("Referer", it) }
+                if (existing > 0L) connection.setRequestProperty("Range", "bytes=$existing-")
+                val status = connection.responseCode
+                if (status == 416 && partial.isFile) {
+                    check(partial.renameTo(destination)) { "Unable to finalize the existing download." }
+                    return@withContext destination.length()
+                }
+                check(status in 200..299) { "Download failed with HTTP $status." }
+                val append = status == HttpURLConnection.HTTP_PARTIAL && existing > 0L
+                val initialBytes = if (append) existing else 0L
+                val responseLength = connection.contentLengthLong.takeIf { it >= 0L }
+                val total = responseLength?.plus(initialBytes)
+                FileOutputStream(partial, append).use { output ->
+                    connection.inputStream.use { input ->
+                        val buffer = ByteArray(256 * 1024)
+                        var downloaded = initialBytes
+                        var lastPublished = downloaded
+                        while (true) {
+                            val count = input.read(buffer)
+                            if (count < 0) break
+                            output.write(buffer, 0, count)
+                            downloaded += count
+                            if (downloaded - lastPublished >= 1024 * 1024) {
+                                lastPublished = downloaded
+                                publishDownload(title, partial, downloaded, total, false)
+                            }
+                        }
+                        output.fd.sync()
+                    }
+                }
+                if (destination.exists()) check(destination.delete())
+                check(partial.renameTo(destination)) { "Unable to finalize the download." }
+                destination.length()
+            } finally {
+                connection.disconnect()
             }
-            if (destination.exists()) check(destination.delete())
-            check(partial.renameTo(destination)) { "Unable to finalize the download." }
-        } finally {
-            connection.disconnect()
         }
     }
 
@@ -637,8 +482,8 @@ class DmmRepository(context: Context) : AutoCloseable {
     private fun scanDownloads(): List<DmmDownloadItem> = downloadDirectory
         .listFiles()
         .orEmpty()
-        .filter { it.isFile }
-        .sortedByDescending { it.lastModified() }
+        .filter(File::isFile)
+        .sortedByDescending(File::lastModified)
         .map { file ->
             DmmDownloadItem(
                 title = file.name.removeSuffix(".part").removeSuffix(".wsdcf"),
@@ -649,43 +494,95 @@ class DmmRepository(context: Context) : AutoCloseable {
             )
         }
 
+    private fun navigate(page: DmmPage, url: String, status: String?) {
+        _state.value = _state.value.copy(
+            page = page,
+            activeUrl = url,
+            navigationId = _state.value.navigationId + 1L,
+            isBusy = false,
+            statusMessage = status,
+        )
+    }
+
+    private fun hasDmmWebSession(currentUrl: String): Boolean {
+        val manager = CookieManager.getInstance()
+        val cookies = listOf(
+            currentUrl,
+            "https://www.dmm.co.jp/",
+            "https://accounts.dmm.com/",
+            "https://www.dmm.com/",
+        ).asSequence()
+            .mapNotNull { manager.getCookie(it) }
+            .joinToString(separator = ";")
+        return SESSION_COOKIE_NAMES.any { name ->
+            Regex("(?:^|;\\s*)${Regex.escape(name)}=").containsMatchIn(cookies)
+        }
+    }
+
+    private fun clearDmmAuthenticationCookies() {
+        val manager = CookieManager.getInstance()
+        listOf("com", "co.jp").forEach { suffix ->
+            val domain = ".dmm.$suffix"
+            listOf("www", "accounts").forEach { host ->
+                val origin = "https://$host.dmm.$suffix/"
+                SESSION_COOKIE_NAMES.forEach { name ->
+                    manager.setCookie(origin, "$name=; Path=/; Domain=$domain; Max-Age=0; Secure")
+                }
+            }
+        }
+        manager.flush()
+    }
+
     private fun fail(message: String) {
+        Log.e(TAG, "event=flow_error type=${message.substringBefore(':').take(80)}")
         _state.value = _state.value.copy(isBusy = false, statusMessage = message)
     }
 
     companion object {
+        private const val TAG = "DmmWebFlow"
+        private val SESSION_COOKIE_NAMES = listOf(
+            "secid",
+            "dmm_app_uid",
+            "althash",
+            "has_althash",
+            "INT_SESID",
+            "INT_SESID_SECURE",
+            "login_session_id",
+            "login_secure_id",
+        )
+
         fun mediaTitle(url: String): String = Uri.parse(url).lastPathSegment
             ?.substringBefore('?')
-            ?.takeIf { it.isNotBlank() }
+            ?.takeIf(String::isNotBlank)
             ?: "DMM video"
 
         fun extractWsdUrl(url: String): String? {
             val uri = runCatching { Uri.parse(url) }.getOrNull() ?: return null
             if (uri.path.orEmpty().endsWith(".wsdcf", ignoreCase = true)) return url
-            return listOf("url", "download_url", "content_url", "stream_url")
-                .asSequence()
-                .mapNotNull(uri::getQueryParameter)
-                .firstOrNull { candidate ->
-                    Uri.parse(candidate).path.orEmpty().endsWith(".wsdcf", ignoreCase = true)
-                }
+            return runCatching {
+                listOf("url", "download_url", "content_url", "stream_url")
+                    .asSequence()
+                    .mapNotNull(uri::getQueryParameter)
+                    .firstOrNull { candidate ->
+                        Uri.parse(candidate).path.orEmpty().endsWith(".wsdcf", ignoreCase = true)
+                    }
+            }.getOrNull()
         }
+
+        private fun isDmmUrl(url: String): Boolean {
+            val host = runCatching { Uri.parse(url).host.orEmpty() }.getOrDefault("")
+            return host == "dmm.com" || host.endsWith(".dmm.com") ||
+                host == "dmm.co.jp" || host.endsWith(".dmm.co.jp")
+        }
+
+        private fun sanitizedUrl(url: String): String = runCatching {
+            Uri.parse(url).buildUpon().clearQuery().fragment(null).build().toString()
+        }.getOrDefault("invalid-url")
 
         private fun sanitizeFileName(value: String): String = value
             .replace(Regex("[\\\\/:*?\"<>|\\p{Cntrl}]"), "_")
             .trim()
             .take(120)
-
-        private fun sessionRestorableUrl(url: String): String {
-            val uri = Uri.parse(url)
-            if (uri.host == "www.dmm.com" && uri.path.orEmpty().startsWith("/my/-/through")) {
-                return url
-            }
-            return Uri.parse("https://www.dmm.com/my/-/through/")
-                .buildUpon()
-                .appendQueryParameter("path", url)
-                .build()
-                .toString()
-        }
 
         private fun sha256(value: String): String = MessageDigest.getInstance("SHA-256")
             .digest(value.encodeToByteArray())
@@ -695,7 +592,5 @@ class DmmRepository(context: Context) : AutoCloseable {
             (this as? java.lang.reflect.InvocationTargetException)?.targetException?.message
                 ?: message
                 ?: javaClass.simpleName
-
-        private const val DMM_AUTH_SDK_VERSION = "6.3.6"
     }
 }

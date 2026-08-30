@@ -52,5 +52,5 @@ for library in libwsdnat.so libwsdprtn.so; do
   install -m 0644 "$temporary_dir/$library" "$native_dir/$library"
 done
 
-echo "Provisioned WSD dex and ARM64 native libraries into the local app tree."
-echo "These proprietary artifacts are ignored by Git."
+echo "Refreshed the repository's WSD dex and ARM64 native libraries."
+echo "Review and commit the three runtime files when intentionally updating them."

@@ -1,200 +1,235 @@
 # XR Stream App DMM/WSD 이식 보고서
 
-> 분석·구현일: 2026-08-30
-> 보고서 형식: 일반 APK 역분석(`flavor = null`)
-> 검증 수준: 정적 분석 및 파일 프로비저닝 검증. Android 빌드와 실제 DMM 서버 호출은 프로젝트 정책과 `lab_only` 범위 때문에 수행하지 않음.
+> 분석일: 2026-08-30
+>
+> 보고서 유형: APK/DEX/SO 역공학 및 Jetpack XR 이식 (`flavor = null`)
+>
+> 검증 수준: 오프라인 정적 분석과 소스 정적 검증. Android 빌드, DMM 운영 서버 호출, 물리 헤드셋 재생은 수행하지 않음.
 
-## 실행 요약
+## 1. 실행 요약
 
-DMM VR Player의 인증, Digital API, WSD 호출 경계를 분석해 Jetpack XR 앱의 기존 Media3 플레이어에 연결했다. 구현은 웹 로그인에서 OAuth code를 받고 토큰과 SessionID를 발급하며, `/purchase/list/vr`로 구매 목록을 불러온다. 구매 카드의 스트림·다운로드 동작은 각각 `/playableprovider/stream/vr`, `/playableprovider/download/vr`을 호출하고, 원 앱과 같은 헤더 및 HMAC-SHA256 입력 순서로 계정용 WSDCF redirect를 발급한다. 스트림 URL은 `redirect + &licenseUID=<cookie_info.value>&smartphone_access=1`, 다운로드 URL은 `redirect + ?uid=<cookie_info.value>`로 조립한다. 이후 `secid`/`dmm_app_uid` 쿠키로 WSD Rights-Issuer 흐름을 진행하고, 권리가 확인되면 원 WSD 런타임의 loopback URI를 `PlaybackSource.Direct`로 기존 ExoPlayer에 전달한다. DMM이 신규 앱의 OAuth client·Digital API client·redirect·package를 실제 허용하는지는 기기에서 확인해야 한다. DRM 또는 구매 권한을 우회하는 로직은 포함하지 않았다.
+DMM VR Player에서 WSD 권리 확인과 loopback 재생 경계를 식별하고, 이를 Jetpack XR 앱의 기존 Media3 플레이어에 연결했다. 최초 구현에 포함했던 원 앱의 OAuth/JWT/SessionID/Digital API 복제 경로는 제거했다. 현재 구현은 DMM 웹 페이지에서 사용자가 직접 로그인하고, WebView가 사이트의 WSDCF 스트림 또는 다운로드를 앱에 넘기는 더 작은 경로를 사용한다. 다운로드 요청에는 WebView 쿠키, User-Agent, Referer를 전달하며 암호화된 파일을 기기 앱 전용 저장소에 보관한다. WSD DEX와 ARM64 SO는 Git 추적 대상으로 바꿔 새 PC의 clone만으로 소스 입력이 완결되도록 했다. 다만 DMM 웹 로그인, 사이트의 실제 다운로드 전달 방식, 일반 웹 세션으로 새 패키지의 WSD 권리 발급이 가능한지는 물리 기기 검증 전까지 미확정이다.
 
-## 범위와 제약
+## 2. 범위와 권한
 
-- 범위 계약: [scope.md](../../reverse-skill/work/xr-stream-app-dmm-port/scope.md)
-- 입력: 사용자가 제공한 `base.apk`, `split_config.arm64_v8a.apk`, 공개 테스트 WSDCF, `xr-stream-app`
-- 네트워크 프로필: `lab_only`
-- 제외: 실계정 로그인, 운영 API 호출, 라이선스 서버 동적 검증, Android 빌드/설치
-- 샘플 SHA-256:
-  - base APK: `d5f859d036db30de517ef5153772bdcd6ed2ebc5f048b26f535aa233d5a4fb42`
-  - ARM64 split: `6672d1f1af30f3ff129f187efc45e19e7209dc06005248e42b19074d017d59a3`
+- case: `xr-stream-app-dmm-port`
+- 로컬 범위 계약: [scope.md](../../reverse-skill/work/xr-stream-app-dmm-port/scope.md)
+- `auth.status`: `granted` (`own_system`)
+- `network_profile`: `lab_only`
+- in scope: 사용자가 보유한 DMM APK, 공개 테스트 WSDCF, `xr-stream-app`
+- out of scope: 계정정보 수집, DRM 우회, 콘텐츠 키 추출, 운영망 자동 테스트
 
-## 구현 결과
+사용자 계정이나 토큰을 저장소에 추가하지 않았고 DMM 운영 서버에는 자동 요청을 보내지 않았다.
 
-| 영역 | 구현 위치 | 결과 |
+## 3. 대상과 런타임 식별
+
+| 대상 | 유형 | SHA-256 | 정적 결과 |
+|---|---|---|---|
+| `app/src/main/assets/dmm/wsd-runtime.dex` | Dalvik DEX | `f98be3318228f001f29664ac7d8c6dd6cfea6b3229a7a8639b974a9a384ab201` | `WsdVideoInteraction`, `WsdRightsAcquiringSession` 정의 포함 |
+| `app/src/main/jniLibs/arm64-v8a/libwsdnat.so` | AArch64 ELF shared object | `6c22660e076bbf7289c303e2a2fda45c1ac9cdc640f08712253e19db35af581a` | WSD 네이티브 계층 |
+| `app/src/main/jniLibs/arm64-v8a/libwsdprtn.so` | AArch64 ELF shared object | `2e84f2dcdc25f865a974dbbb97a66f11e307f7d4c026122f95884e1de46660ca` | WSD 보호 계층 |
+
+두 SO의 정적 동적 의존성은 Android 시스템 라이브러리 범위였다. 앱은 WSD DEX가 사용하는 Apache HTTP 호환 클래스를 위해 `org.apache.http.legacy`를 선언한다.
+
+## 4. 구현 변경
+
+| 경계 | 현재 구현 | 이전 구현에서 제거한 것 |
 |---|---|---|
-| OAuth code/token 및 JWT 검증 | `app/src/main/java/blackark/app/vr/dmm/DmmAuthClient.kt` | `/connect/v1/token`, HS512 ID-token 검증, refresh 처리 |
-| SessionID/쿠키 | `DmmAuthClient.kt`, `DmmRepository.kt` | `/connect/v1/issueSessionId`, `unique_id`→`dmm_app_uid`, `secure_id`→`secid` |
-| 구매 목록/URL 발급 | `DmmDigitalApiClient.kt` | `/purchase/list/vr`, stream/download playable-provider, 원본 헤더/HMAC 순서 |
-| 비밀 저장 | `DmmSessionStore.kt` | Android Keystore AES-GCM |
-| WSD 호출 | `DmmWsdRuntime.kt` | DEX reflection, Rights-Issuer 세션, loopback URI 반환 |
-| 스트리밍 | `PlaybackSource.Direct`, `VideoPlayerViewModel.kt` | WSD URI를 기존 Media3 data source에 전달 |
-| 오프라인 | `DmmRepository.kt` | Range 재개 다운로드, 파일 가져오기, WSD 권리 기반 로컬 재생 |
-| UI | `DmmPanel.kt`, `MainDashboardScreen.kt` | 로그인/구매 카드/브라우저/권리/다운로드 화면과 소스 rail 항목 |
-| 런타임 설치 | `scripts/provision-dmm-runtime.sh`, `app/build.gradle.kts` | WSD DEX 자동 탐지, ARM64 네이티브 라이브러리 설치, `org.apache.http.legacy` 호환 라이브러리 선언 |
+| 로그인 | 일반 DMM 구매 목록 WebView, Android CookieManager 세션 | 앱 내 OAuth code/token 교환, JWT 검증, refresh token 저장 |
+| 콘텐츠 선택 | 사이트 자체 구매 페이지와 stream/download 동작 | `/purchase/list/vr` 네이티브 구매 목록 API |
+| URL 발급 | 사이트가 WebView에 제공한 URL을 수신 | playable-provider HMAC 호출과 URL 조립 |
+| 다운로드 | WebView Cookie/User-Agent/Referer를 전달하는 Range 다운로드 | API용 app name/version/auth secret |
+| 권리 | WSD Rights-Issuer와 같은 WebView 세션 사용 시도 | `issueSessionId` 호출과 `dmm_app_uid`/`secid` 수동 주입 |
+| 재생 | WSD loopback URI → `PlaybackSource.Direct` → Media3 | Unity 의존성 |
+| 배포 입력 | DEX/SO Git 추적 | 다른 PC에서 원본 APK 재프로비저닝 요구 |
 
-## Evidence
+이 변경은 `dmm_app_uid`가 불필요하다고 입증한 것이 아니다. 우선 정상 웹 세션만으로 가능한 최소 경로를 구현했으며, 권리 서버가 원 앱 전용 값이나 패키지 등록을 실제로 요구하는지는 기기에서 확인해야 한다.
 
-### E-001
+## 5. 호출 및 데이터 흐름
 
-- source_ref: 사용자 제공 APK와 정적 decompile 산출물
-- content_hash: base APK 및 ARM64 split SHA-256은 위 범위 표 참조
-- repro_command:
+```mermaid
+flowchart LR
+    user[사용자] --> web[DMM 로그인 WebView]
+    web --> site[구매 콘텐츠 페이지]
+    site -->|DownloadListener| dl[쿠키 포함 Range 다운로드]
+    dl --> local[(로컬 암호화 WSDCF)]
+    site -->|WSDCF navigation| remote[원격 WSDCF]
+    local --> runtime[WSD runtime]
+    remote --> runtime
+    runtime -->|권리 없음| issuer[Rights-Issuer]
+    issuer --> rights[동일 WebView 권리 페이지]
+    rights --> runtime
+    runtime --> loopback[127.0.0.1 Range URI]
+    loopback --> media3[Media3 / Jetpack XR]
+```
+
+실선은 코드에 연결된 경로를 뜻한다. 각 외부 DMM 단계의 실제 허용 여부는 이 보고서의 정적 검증 범위를 벗어난다.
+
+## 6. Evidence
+
+### E-001 — WSD loopback 경계
+
+- `source_ref`: 원 APK WSD DEX 정적 분석, `DmmWsdRuntime.kt`
+- `content_hash`: 런타임 DEX는 E-006/E-008의 SHA-256 참조
+- `repro_command`:
 
   ```bash
-  sha256sum /path/to/base.apk /path/to/split_config.arm64_v8a.apk
+  cd ../reverse-skill
+  rg -n 'DcfHttpServer|onRightsChecked|requestFirst|requestNext' work/dmm-vr-player/evidence work/dmm-vr-player/report
+  cd ../xr-stream-app
+  rg -n 'onAcquireRights|onRightsChecked|PlaybackSource.Direct' app/src/main/java
   ```
 
-- 관찰: `WsdVideoInteraction.newFacade`가 권리 확인 뒤 `onRightsChecked(Uri)`를 호출하고, `DcfHttpServer`는 `127.0.0.1`에 bind한다.
+- 관찰: WSD callback이 권리 필요 여부와 loopback 재생 URI를 분리하며, target 앱은 후자를 Direct playback source로 전달한다.
 
-### E-002
+### E-002 — 원 앱의 SessionID 경계
 
-- source_ref: `scripts/provision-dmm-runtime.sh`
-- content_hash: provisioned DEX `f98be3318228f001f29664ac7d8c6dd6cfea6b3229a7a8639b974a9a384ab201`
-- repro_command:
+- `source_ref`: 원 APK의 인증 SDK 정적 분석
+- `content_hash`: n/a; 사용자 제공 APK case evidence에 보관
+- `repro_command`:
 
   ```bash
-  scripts/provision-dmm-runtime.sh /path/to/base.apk /path/to/split_config.arm64_v8a.apk
+  cd ../reverse-skill
+  rg -n 'issueSessionId|unique_id|secure_id|dmm_app_uid|secid' work/dmm-vr-player/evidence/E-016.md work/dmm-vr-player/evidence/E-017.md
+  ```
+
+- 관찰: 원 앱 네이티브 경로는 SessionID 응답을 권리 페이지 쿠키로 연결했다. 이것은 현재 web-only 경로가 기기에서 실패할 때 비교할 기준이며, 현재 코드가 해당 값을 생성한다는 뜻은 아니다.
+
+### E-003 — 원 앱의 구매/URL API 경계
+
+- `source_ref`: IL2CPP metadata/method map 및 원 APK 정적 분석
+- `content_hash`: n/a; case artifact에 보관
+- `repro_command`:
+
+  ```bash
+  cd ../reverse-skill
+  rg -n 'purchase/list/vr|playableprovider/(stream|download)/vr' work/xr-stream-app-dmm-port/artifacts/dmm-api-static-summary.txt
+  ```
+
+- 관찰: 원 네이티브 앱은 구매 목록과 WSDCF URL 발급에 별도 API를 썼다. 현재 구현은 이 경로와 관련 비밀 설정을 모두 제거했다.
+
+### E-007 — WebView 세션 기반 구현
+
+- `source_ref`: `DmmRepository.kt`, `DmmPanel.kt`, `app/build.gradle.kts`
+- `content_hash`: n/a; Git commit으로 고정
+- `repro_command`:
+
+  ```bash
+  rg -n 'CookieManager|getCookie|setAcceptThirdPartyCookies|DownloadListener|startRights|PlaybackSource.Direct' app/src/main/java
+  rg -n 'DMM_CLIENT|DMM_JWT|DMM_DIGITAL_API|issueSessionId|playableprovider' app secrets.local.properties.example
+  ```
+
+- 관찰: 앱 비밀 설정과 네이티브 API 클라이언트는 없고, WebView 세션·다운로드·WSD 권리·Media3 연결만 남는다.
+
+### E-008 — Git에 포함된 WSD 런타임
+
+- `source_ref`: 저장소의 DEX/SO 세 파일
+- `content_hash`: §3 표 참조
+- `repro_command`:
+
+  ```bash
+  git ls-files app/src/main/assets/dmm/wsd-runtime.dex app/src/main/jniLibs/arm64-v8a/libwsdnat.so app/src/main/jniLibs/arm64-v8a/libwsdprtn.so
+  sha256sum app/src/main/assets/dmm/wsd-runtime.dex app/src/main/jniLibs/arm64-v8a/libwsd*.so
   file app/src/main/assets/dmm/wsd-runtime.dex app/src/main/jniLibs/arm64-v8a/libwsd*.so
   ```
 
-- 관찰: DEX는 Dalvik 035이며 두 SO는 ARM64 ELF로 추출된다. 산출물은 Git에서 제외된다.
+- 관찰: 세 런타임 파일이 저장소 입력으로 포함되고 ARM64/DEX 형식과 해시를 정적으로 확인했다.
 
-### E-003
+## 7. Findings
 
-- source_ref: `DmmAuthClient.kt`, `DmmRepository.kt`
-- content_hash: n/a
-- repro_command:
+### F-001 — WSD에서 Media3로의 브리지는 정적으로 연결됨
 
-  ```bash
-  rg -n 'connect/v1/token|issueSessionId|dmm_app_uid|secid' app/src/main/java/blackark/app/vr/dmm
-  ```
+- `severity`: `n/a_re`
+- `category`: `reverse_algo`
+- `status`: `candidate`
+- `evidence_ids`: `[E-001, E-007]`
+- `confidence`: high
+- `location`: `DmmWsdRuntime -> PlaybackSource.Direct -> VideoPlayerViewModel`
+- `impact`: 정상 권리 확인 뒤 WSD loopback 스트림을 Unity 없이 Jetpack XR 플레이어에 전달할 수 있다.
+- `residual risk`: 실제 재생, seek, lifecycle은 물리 기기 검증이 필요하다.
 
-- 관찰: 인증 code 교환, Bearer SessionID 요청, 서버 응답의 두 쿠키 매핑이 구현돼 있다.
+### F-002 — 빌드 시 DMM 계정/API 비밀은 필요하지 않음
 
-### E-004
+- `severity`: `info`
+- `category`: `design`
+- `status`: `validated`
+- `evidence_ids`: `[E-003, E-007]`
+- `confidence`: high
+- `location`: `app/build.gradle.kts`, `secrets.local.properties.example`, `dmm/`
+- `impact`: 계정과 토큰을 properties 또는 Git에 넣지 않고 기기 WebView에서 로그인할 수 있는 구조다.
+- `residual risk`: 웹 로그인이 DMM 정책상 동작하는지는 별도 문제다.
 
-- source_ref: `DmmWsdRuntime.kt`, `PlaybackSource.kt`, `VideoPlayerViewModel.kt`
-- content_hash: n/a
-- repro_command:
+### F-003 — 다른 PC에서 원본 APK 재프로비저닝은 빌드 입력상 불필요함
 
-  ```bash
-  rg -n 'WsdVideoInteraction|onRightsChecked|PlaybackSource.Direct|mediaUri' app/src/main/java
-  ```
+- `severity`: `info`
+- `category`: `design`
+- `status`: `validated`
+- `evidence_ids`: `[E-006, E-008]`
+- `confidence`: high
+- `location`: `app/src/main/assets/dmm`, `app/src/main/jniLibs/arm64-v8a`
+- `impact`: 저장소 clone에 DEX/SO가 포함되어 Android Studio가 동일 입력으로 패키징할 수 있다.
+- `residual risk`: 실제 Android 패키징 성공은 프로젝트 정책상 실행하지 않았다.
 
-- 관찰: WSD callback URI가 direct playback source로 등록되고 Media3 `DefaultDataSource`로 전달된다.
+### F-004 — 웹 세션만으로 WSD 권리 발급이 되는지는 미확정
 
-### E-005
+- `severity`: `info`
+- `category`: `design`
+- `status`: `candidate`
+- `evidence_ids`: `[E-002, E-007]`
+- `confidence`: medium
+- `location`: `DmmRepository.runtimeListener`, DMM Rights-Issuer 서버 정책
+- `impact`: 실패하면 원 앱 전용 SessionID/`dmm_app_uid`, 등록 패키지 또는 앱 브리지가 실제 필수 조건일 수 있다.
+- `remediation`: 사용자 물리 기기에서 정상 로그인 후 권리 페이지 응답을 확인한다.
 
-- source_ref: IL2CPP metadata/method map, `DmmDigitalApiClient.kt`
-- content_hash: n/a
-- repro_command:
+### F-005 — 사이트 다운로드/스트리밍 전달 방식은 미확정
 
-  ```bash
-  rg -n 'purchase/list/vr|playableprovider/(stream|download)/vr|x-api-auth-code|hmacSha256' app/src/main/java/blackark/app/vr/dmm
-  ```
+- `severity`: `info`
+- `category`: `design`
+- `status`: `candidate`
+- `evidence_ids`: `[E-007]`
+- `confidence`: medium
+- `location`: `DmmPanel` WebView callbacks
+- `impact`: 사이트가 `blob:` 또는 전용 네이티브 브리지를 쓰면 현재 `DownloadListener`/navigation interception으로 URL을 얻지 못한다.
+- `remediation`: 헤드셋에서 이벤트 로그를 확인하고, 실패한 단계에만 WebView request/blob bridge 또는 인증 프록시를 추가한다.
 
-- 관찰: 구매 목록 쿼리는 `limit/order/page`, 스트림 쿼리는 `mylibrary_id/part/quality_group`, 다운로드 쿼리는 `mylibrary_id/part/quality`를 사용한다. `x-exploit-id`는 `uid:<open-id>`이며, 이 포팅에서는 검증된 ID-token의 `user_id`를 사용한다. playable-provider 서명 입력 순서도 원 IL2CPP 호출 배열과 일치한다. 응답의 `cookie_info.value`는 WebView 쿠키가 아니라 스트림의 `&licenseUID=…&smartphone_access=1` 및 다운로드의 `?uid=…` URL 조각으로 사용된다.
+## 8. Path
 
-## Findings
+### P-001 — 웹 로그인에서 XR 재생까지
 
-### F-001
+- `path_type`: `callflow`
+- `start`: DMMPanel의 사용자 로그인
+- `goal`: 구매한 WSDCF를 기존 XR Media3 플레이어에서 재생
+- `steps`:
+  1. 사용자가 일반 DMM WebView에서 로그인한다. — evidence: E-007 — finding: F-002
+  2. 사이트의 stream/download 동작에서 WSDCF URL을 받는다. — evidence: E-007 — finding: F-005
+  3. 다운로드라면 WebView 요청 문맥으로 암호화 파일을 앱 전용 저장소에 저장하고, 스트림이면 원격 URI를 WSD에 전달한다. — evidence: E-007 — finding: F-005
+  4. WSD가 권리를 확인하고 필요하면 같은 WebView에 Rights-Issuer 페이지를 연다. — evidence: E-001, E-007 — finding: F-004
+  5. 권리가 승인되면 WSD loopback URI를 Media3에 전달한다. — evidence: E-001, E-007 — finding: F-001
+- `residual_risks`: 1, 2, 4, 5단계의 외부/기기 동작은 물리 헤드셋에서 검증되지 않았다.
 
-- severity: `n/a_re`
-- category: `reverse_algo`
-- status: `candidate`
-- evidence_ids: `[E-001, E-004]`
-- location: `WsdVideoInteraction.newFacade` → `DrmActivity.onRightsChecked` → `PlaybackSource.Direct`
-- impact: Unity 없이 WSD의 정상 권리 검사를 유지하면서 Jetpack XR/Media3로 렌더링할 수 있다.
-- confidence: `high`(정적 호출 경로), 실제 기기 실행은 미검증
+## 9. 정적 검증과 동적 분석 제한
 
-### F-002
+수행한 검증:
 
-- severity: `n/a_re`
-- category: `reverse_algo`
-- status: `candidate`
-- evidence_ids: `[E-003]`
-- location: `/connect/v1/issueSessionId`, `DmmRepository.installSessionCookies`
-- impact: `dmm_app_uid`를 로컬에서 복제할 필요가 없고 서버 응답 `unique_id`를 사용한다.
-- confidence: `high`(원 앱과 이식 코드의 정적 경로 일치), 운영 응답은 미검증
-
-### F-003
-
-- severity: `info`
-- category: `design`
-- status: `candidate`
-- evidence_ids: `[E-001, E-003]`
-- location: OAuth client/redirect와 DMM 서버 정책 경계
-- impact: 구현이 완전해도 DMM이 이 앱에 발급·허용한 OAuth 설정이 없으면 로그인 또는 SessionID 단계에서 거절될 수 있다.
-- confidence: `high`
-
-### F-004
-
-- severity: `n/a_re`
-- category: `reverse_algo`
-- status: `candidate`
-- evidence_ids: `[E-005]`
-- location: `GetPurchasedListVrApi`, `GetPlayableproviderStreamVrApi`, `GetPlayableproviderDownloadVrAPI`
-- impact: Unity 화면이나 WebView 링크 추출에 의존하지 않고 구매 목록에서 스트림/다운로드 URL 발급까지 네이티브 Kotlin으로 수행할 수 있다.
-- confidence: `high`(endpoint/header/query/HMAC 순서), 운영 자격 증명과 실제 응답은 미검증
-
-## Path
-
-### P-001 — 정상 라이선스 재생 호출 흐름
-
-- path_type: `callflow`
-- start: 사용자가 DMM 웹 로그인 및 WSDCF 콘텐츠를 선택
-- goal: 기존 XR Media3 화면에서 권한 있는 콘텐츠 재생
-- steps:
-  1. WebView가 OAuth code를 redirect로 전달한다. — evidence: E-003 — finding: F-003
-  2. 앱이 token과 ID-token `user_id`를 검증·저장한다. — evidence: E-003 — finding: F-003
-  3. 구매 목록 API와 playable-provider가 선택 콘텐츠의 계정용 WSDCF redirect를 발급한다. — evidence: E-005 — finding: F-004
-  4. WSD가 로컬 권리 부재를 알리면 SessionID를 발급하고 쿠키를 주입한다. — evidence: E-003 — finding: F-002
-  5. Rights-Issuer가 정상 라이선스를 설치한다. — evidence: E-001 — finding: F-001
-  6. WSD loopback Range URI를 Media3가 재생한다. — evidence: E-001, E-004 — finding: F-001
-- residual_risks: 신규 OAuth client/package 허용 여부, 헤드셋 WebView 호환성, 상품별 라이선스 정책은 기기 동적 시험 필요
-
-## 데이터 흐름
-
-```mermaid
-sequenceDiagram
-  actor User
-  participant WebView
-  participant Auth as DMM OAuth/API
-  participant WSD
-  participant Player as Media3 ExoPlayer
-  User->>WebView: DMM 웹 로그인
-  WebView->>Auth: authorization code
-  Auth-->>WebView: access/refresh/ID token
-  WebView->>Auth: purchase/list/vr
-  Auth-->>WebView: 구매 VR 목록
-  User->>Auth: stream/download playable-provider 요청
-  Auth-->>WSD: 계정용 WSDCF redirect
-  alt 로컬 권리 없음/만료
-    WSD-->>WebView: Rights-Issuer 필요
-    WebView->>Auth: issueSessionId
-    Auth-->>WebView: secure_id + unique_id
-    WebView->>WSD: 라이선스 URL 승인
-  end
-  WSD-->>Player: http://127.0.0.1:<port>/<id>
-  Player-->>User: XR 영상 재생
+```bash
+git diff --check
+bash -n scripts/provision-dmm-runtime.sh
+sha256sum app/src/main/assets/dmm/wsd-runtime.dex app/src/main/jniLibs/arm64-v8a/libwsd*.so
+file app/src/main/assets/dmm/wsd-runtime.dex app/src/main/jniLibs/arm64-v8a/libwsd*.so
+rg -n 'DMM_CLIENT|DMM_JWT|DMM_DIGITAL_API|issueSessionId|playableprovider' app secrets.local.properties.example
 ```
 
-## 정적 검증과 미검증 항목
+Android 빌드, 리소스 컴파일, 단위 테스트, 설치, ADB 동적 검증은 `AGENTS.md`의 Codex CLI 빌드 금지 규칙 때문에 수행하지 않았다. DMM 운영 서버 테스트도 case의 `lab_only` 및 `production_network_testing` 제외 범위 때문에 수행하지 않았다.
 
-수행한 검증은 XML 파싱, shell 문법 검사, `git diff --check`, DEX/ELF 파일 형식 및 네이티브 의존성 확인이다. 저장소의 `AGENTS.md`가 Codex CLI의 Gradle 빌드·컴파일·테스트·설치를 금지하므로 Android 빌드는 실행하지 않았다. 또한 `lab_only` 범위 때문에 실계정 로그인과 운영 라이선스 요청도 실행하지 않았다.
+## 10. Timeline 요약
 
-기기 검증은 다음 순서가 적합하다.
+| 시각(KST) | 단계 | 결과 |
+|---|---|---|
+| 2026-08-30 20:36 | scope 초기화 | 사용자 소유 샘플과 앱을 범위로 설정 |
+| 2026-08-30 21:42 | 원 APK 정적 분석 | WSD, SessionID, native API 경계를 식별 |
+| 2026-08-30 21:53 | 최초 포트 정적 검증 | Media3/WSD 연결 확인, 기기 검증은 보류 |
+| 2026-08-30 후속 수정 | web-only 재설계 | OAuth/API 비밀 경로 제거, DEX/SO Git 포함, 기기 체크리스트 작성 |
 
-1. 권한 있는 OAuth 설정으로 로그인 redirect와 ID-token 검증 확인
-2. 공개 테스트 WSDCF를 **Import file**로 가져와 권리 페이지 진입 확인
-3. 라이선스 승인 후 loopback URI와 Media3 재생 확인
-4. 네트워크를 끄고 동일 파일의 오프라인 재생 확인
-5. 구매 카드에서 stream/download playable-provider 응답과 상품별 quality/part 확인
+## 11. 다음 검증
 
-## Timeline 요약
-
-- 기존 APK 정적 분석에서 SessionID와 WSD loopback 경계를 확인했다.
-- Jetpack XR 앱의 `PlaybackSource`와 Media3 초기화 경로를 조사했다.
-- OAuth/SessionID/구매 목록/playable-provider HMAC/Keystore/WSD reflection/다운로드/UI를 구현했다.
-- 로컬 APK에서 런타임 DEX와 ARM64 SO를 프로비저닝했다.
-- 정적 검증을 수행했으며 빌드와 운영 네트워크 검증은 정책상 수행하지 않았다.
+실제 기기에서 로그인 → 구매 페이지 → 다운로드 → 권리 발급 → 오프라인 재생 순으로 먼저 확인한다. 각 단계의 `DmmWebFlow` 이벤트에 따라 실패 지점을 좁힌다. 전체 체크리스트와 해석 기준은 [DMM WebView 인계 문서](./DMM_WEBVIEW_HANDOFF.md)에 있다.

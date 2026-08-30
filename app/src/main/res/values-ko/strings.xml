@@ -211,4 +211,20 @@
     <string name="youtube_forward">YouTube 앞으로</string>
     <string name="youtube_home">YouTube 홈</string>
     <string name="youtube_reload">YouTube 새로고침</string>
+    <string name="dmm_fanza">DMM / FANZA</string>
+    <string name="dmm_library">구매 목록</string>
+    <string name="dmm_login">DMM 로그인</string>
+    <string name="dmm_logout">DMM 로그아웃</string>
+    <string name="dmm_signed_in">DMM 웹 세션 감지됨</string>
+    <string name="dmm_signed_out">아래 DMM 웹 페이지에서 로그인하세요</string>
+    <string name="dmm_reload">DMM 페이지 새로고침</string>
+    <string name="dmm_stream">스트리밍</string>
+    <string name="dmm_wsdcf_url">WSDCF 콘텐츠 URL</string>
+    <string name="dmm_offline_downloads">오프라인 다운로드</string>
+    <string name="dmm_play_offline">오프라인 재생</string>
+    <string name="dmm_download">다운로드</string>
+    <string name="dmm_dismiss">닫기</string>
+    <string name="dmm_import_file">파일 가져오기</string>
+    <string name="dmm_runtime_not_provisioned">이 빌드에는 WSD 런타임이 포함되어 있지 않습니다.</string>
+    <string name="dmm_web_help">아래에서 로그인하고 구매 콘텐츠 페이지를 연 다음 사이트의 스트리밍 또는 다운로드를 선택하세요. 로그인 정보는 WebView 안에만 유지됩니다.</string>
 </resources>

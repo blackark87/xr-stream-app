@@ -1,108 +1,111 @@
 # DMM/FANZA 재생 사용법
 
-> 이 통합은 DRM을 제거하지 않습니다. DMM 계정 로그인, 구매 권한 확인, WSD 라이선스 발급이 모두 성공한 콘텐츠만 재생합니다. DMM이 이 앱의 OAuth client/redirect와 패키지를 허용해야 하며, 이 서버 정책은 오프라인 분석만으로 보장할 수 없습니다.
+> 현재 구현은 DMM 웹 로그인 세션을 그대로 사용하는 실험 경로입니다. DRM을 제거하거나 권리 검사를 우회하지 않습니다. 로그인, 다운로드 URL 전달, WSD 권리 발급이 이 앱 패키지에서도 허용되는지는 실제 Android XR 기기에서 확인해야 합니다.
 
-## 빠른 설정
+## 바로 사용하기
 
-1. 보유한 DMM Android APK에서 WSD 런타임을 로컬 프로젝트에 설치합니다.
+1. 저장소를 새로 clone한 뒤 Android Studio에서 앱을 빌드하고 헤드셋에 설치합니다.
+2. 왼쪽 소스 목록에서 **DMM / FANZA**를 엽니다.
+3. 패널 안의 DMM 웹 페이지에서 직접 로그인합니다.
+4. 구매 목록으로 이동해 사이트가 제공하는 **Stream** 또는 **Download** 동작을 선택합니다.
+5. 다운로드가 완료되면 **Offline downloads** 카드에서 재생합니다.
+6. WSD 권리 페이지가 열리면 같은 WebView 안에서 정상 인증 절차를 마칩니다.
 
-   ```bash
-   scripts/provision-dmm-runtime.sh \
-     /path/to/base.apk \
-     /path/to/split_config.arm64_v8a.apk
-   ```
+앱에 계정, 비밀번호, JWT, OAuth client secret을 입력하는 설정은 없습니다. 로그인 정보는 Android WebView 쿠키 저장소 안에만 머뭅니다.
 
-   스크립트는 WSD가 들어 있는 DEX를 자동 탐지하고 `libwsdnat.so`, `libwsdprtn.so`를 설치합니다. 이 세 파일은 Git에서 제외됩니다.
+## 빌드 준비
 
-2. 로컬 시크릿 파일을 만듭니다.
+WSD 런타임은 다음 경로에 저장소 파일로 포함되어 있으므로 다른 PC에서 원본 DMM APK를 다시 프로비저닝할 필요가 없습니다.
 
-   ```bash
-   cp secrets.local.properties.example secrets.local.properties
-   ```
+| 파일 | 용도 |
+|---|---|
+| `app/src/main/assets/dmm/wsd-runtime.dex` | WSD Java/Dalvik 런타임 |
+| `app/src/main/jniLibs/arm64-v8a/libwsdnat.so` | ARM64 WSD 네이티브 런타임 |
+| `app/src/main/jniLibs/arm64-v8a/libwsdprtn.so` | ARM64 WSD 보호 런타임 |
 
-3. DMM이 이 앱에 사용하도록 허가한 값을 `secrets.local.properties`에 입력합니다.
+`scripts/provision-dmm-runtime.sh`는 위 세 파일을 사용자가 보유한 APK에서 의도적으로 갱신할 때만 쓰는 유지보수 도구입니다. 일반 빌드 단계에는 필요하지 않습니다.
 
-   ```properties
-   DMM_CLIENT_ID=<issued client id>
-   DMM_CLIENT_SECRET=<issued client secret>
-   DMM_REDIRECT_URI=<registered redirect URI>
-   DMM_JWT_SECRET=<issued ID-token verification key>
-   DMM_LIBRARY_URL=https://www.dmm.co.jp/digital/videoa/-/mylibrary/
-   DMM_DIGITAL_API_BASE_URL=https://vr.digapi.dmm.com
-   DMM_DIGITAL_API_AUTH_SECRET=<authorized playable-provider signing key>
-   DMM_EXPLOIT_ID_PREFIX=uid:
-   DMM_APP_NAME=<registered Digital API app name>
-   DMM_API_APP_VERSION=<registered API client version>
-   DMM_DEFAULT_DOWNLOAD_QUALITY=high
-   ```
+프로젝트 정책상 Codex CLI에서는 Gradle 빌드나 테스트를 실행하지 않았습니다. Android Studio 빌드는 사용자의 Android 개발 환경에서 수행해야 합니다.
 
-   원 APK에 내장된 client secret을 저장소에 복사하거나 커밋하지 마십시오. 사용자 비밀번호와 JWT를 개발자에게 전달할 필요도 없습니다.
-
-4. 개발 환경에서 앱을 빌드한 뒤 왼쪽 소스 목록의 **DMM / FANZA**를 엽니다.
-
-## 로그인하고 스트리밍하기
-
-1. **Sign in to DMM**을 선택합니다.
-2. DMM WebView에서 직접 로그인합니다. 비밀번호는 앱 코드가 읽거나 저장하지 않습니다.
-3. OAuth redirect가 돌아오면 앱이 access/refresh/ID token을 교환하고 Android Keystore로 암호화합니다.
-4. 로그인 직후 앱이 DMM Digital API의 `/purchase/list/vr`로 구매 목록을 읽습니다.
-5. 구매 카드의 **Stream**을 누르면 `/playableprovider/stream/vr`이 현재 계정용 redirect와 `cookie_info.value`를 발급합니다. 앱은 원 클라이언트와 같이 `&licenseUID=<value>&smartphone_access=1`을 붙여 WSD에 전달합니다.
-6. **Download**는 `/playableprovider/download/vr`을 호출하고 원 클라이언트와 같이 `?uid=<cookie_info.value>`를 redirect에 붙여 암호화 파일을 받습니다.
-7. 앱은 해당 요청을 원 앱과 같은 헤더와 HMAC-SHA256 파라미터 순서로 서명합니다. `x-exploit-id`는 원 클라이언트와 같이 `uid:<user_id>`로 만듭니다. 서명 키와 client 식별자는 이 앱에 허가된 로컬 설정값만 사용합니다.
-8. 직접 받은 WSDCF URL이 있다면 위쪽 URL 입력란도 계속 사용할 수 있습니다.
-9. 로컬 권리가 없으면 앱이 `issueSessionId`를 호출하고 `secid`와 `dmm_app_uid`를 권리 페이지 쿠키로 설정합니다.
-10. 라이선스가 승인되면 WSD가 `127.0.0.1` Range URI를 만들고 기존 Media3/ExoPlayer 화면이 재생합니다.
-
-`DMM_DIGITAL_API_AUTH_SECRET`이 비어 있으면 웹 로그인과 구매 목록 조회까지만 가능하며, 구매 카드의 URL 발급은 명시적인 설정 오류로 중단됩니다. 원 APK에 들어 있는 서명 키를 자동 추출하거나 복사하지 않습니다.
-
-## 다운로드와 오프라인 재생
-
-- URL을 입력한 뒤 **Download**를 선택하면 암호화된 WSDCF가 앱 내부 저장소에 저장됩니다. 중단된 HTTP 다운로드는 Range 요청으로 이어받습니다.
-- 기기에 이미 있는 공개 테스트 파일은 **Import file**로 가져옵니다.
-- **Offline downloads**에서 **Play offline**을 선택합니다.
-- 오프라인 재생도 기존에 이 기기와 앱 패키지에 저장된 유효한 WSD 권리가 있어야 합니다. 권리가 없거나 만료되면 네트워크 연결 후 정상 라이선스 절차가 필요합니다.
-
-## 동작 구조
+## 동작 방식
 
 ```mermaid
 flowchart LR
-  user[사용자] --> login[DMM 로그인 WebView]
-  login --> token[OAuth token 교환]
-  token --> store[(Android Keystore)]
-  store --> catalog[구매 목록 API]
-  user --> library[구매 카드 또는 WSDCF URL]
-  catalog --> library
-  library --> playable[stream/download URL 발급]
-  playable --> wsd
-  library --> wsd[WSD 런타임]
-  wsd --> valid{로컬 권리 유효?}
-  valid -- 아니요 --> session[issueSessionId]
-  session --> cookies[secid + dmm_app_uid]
-  cookies --> rights[Rights-Issuer WebView]
-  rights --> wsd
-  valid -- 예 --> loopback[127.0.0.1 Range URI]
-  wsd --> loopback
-  loopback --> media3[Media3 ExoPlayer]
-  library --> encrypted[(암호화 WSDCF 다운로드)]
-  encrypted --> wsd
+    user[사용자] --> web[DMM WebView 로그인]
+    web --> site[구매 콘텐츠 페이지]
+    site -->|Download| downloader[WebView 쿠키를 포함한 다운로드]
+    downloader --> local[(앱 전용 Movies 저장소의 WSDCF)]
+    site -->|Stream| remote[원격 WSDCF URL]
+    local --> wsd[WSD 권리 확인 및 복호화]
+    remote --> wsd
+    wsd -->|권리 필요| rights[동일 WebView의 권리 페이지]
+    rights --> wsd
+    wsd --> loopback[127.0.0.1 재생 URI]
+    loopback --> media3[기존 Media3 / XR 플레이어]
 ```
 
-## 오류 확인
+- **로그인**: 앱 자체 OAuth 구현이 아니라 일반 DMM 웹 페이지를 사용합니다.
+- **다운로드**: WebView가 전달한 WSDCF 다운로드를 앱 전용 저장소에 암호화된 상태로 저장하며 HTTP Range 재개를 지원합니다.
+- **스트리밍**: 사이트가 노출한 WSDCF URL을 WSD에 전달합니다.
+- **권리 확인**: 로컬 권리가 없으면 WSD Rights-Issuer 흐름을 시작하고 권리 페이지를 기존 WebView에 엽니다.
+- **재생**: 권리 확인 뒤 WSD가 반환한 loopback URI를 `PlaybackSource.Direct`로 기존 Media3 플레이어에 연결합니다.
 
-| 메시지 | 의미와 조치 |
+## 오프라인 파일 위치와 수명
+
+다운로드 파일은 우선 다음 앱 전용 외부 저장소 아래에 저장됩니다.
+
+```text
+Android/data/blackark.app.vr/files/Movies/dmm-downloads/
+```
+
+기기에서 외부 앱 전용 저장소를 제공하지 않으면 앱 내부 `files/dmm-downloads`로 대체됩니다. 앱을 삭제하면 앱 전용 다운로드와 WSD가 저장한 권리도 함께 사라질 수 있습니다.
+
+오프라인 WSDCF 자체는 암호화된 파일입니다. 재생하려면 이 설치본에 유효한 WSD 권리가 있어야 하며, 권리가 없거나 만료되면 네트워크에 연결해 정상 권리 발급 절차를 다시 거쳐야 합니다.
+
+## 수동 URL과 파일 가져오기
+
+- 사이트 동작을 앱이 자동으로 잡지 못할 때, 정상적으로 발급받은 `.wsdcf` URL을 입력해 **Stream** 또는 **Download**를 선택할 수 있습니다.
+- 이미 기기에 있는 공개 테스트 WSDCF는 **Import file**로 앱 전용 저장소에 복사할 수 있습니다.
+- 공개 파일이라는 사실은 재생 권리가 공개라는 뜻이 아닙니다. WSD의 정상 권리 확인은 그대로 실행됩니다.
+
+## 물리 기기에서 확인하기
+
+다음 로그는 URL의 query와 fragment, 쿠키, 토큰을 출력하지 않도록 제한되어 있습니다.
+
+```bash
+adb logcat -s DmmWebFlow
+```
+
+정상 경로에서 볼 수 있는 주요 이벤트는 다음과 같습니다.
+
+| 이벤트 | 의미 |
 |---|---|
-| OAuth is not configured | 네 개의 `DMM_*` 인증 설정이 비어 있습니다. DMM에 등록된 값을 로컬 시크릿에 입력합니다. |
-| WSD runtime is missing | 프로비저닝 스크립트를 실행하고 ARM64 split APK에 두 네이티브 라이브러리가 있는지 확인합니다. |
-| Sign in before acquiring rights | 먼저 DMM 로그인을 완료합니다. |
-| ID-token signature verification failed | JWT 검증 키가 이 OAuth client와 맞지 않습니다. 토큰을 수동으로 붙여넣지 말고 설정을 확인합니다. |
-| DMM Digital API is not configured | 구매 목록에 필요한 Digital API app name/version/base URL 설정을 확인합니다. |
-| DMM playable-provider signing is not configured | 이 앱에 사용하도록 허가된 `DMM_DIGITAL_API_AUTH_SECRET`을 로컬 시크릿에 설정합니다. |
-| DMM/WSD did not return a rights page | 서버가 요청을 거절했거나 OAuth client/package 정책이 맞지 않을 수 있습니다. |
+| `web_login_open` | 로그인용 구매 목록 페이지를 열었음 |
+| `web_page_finished ... sessionDetected=true` | 알려진 DMM 세션 쿠키를 감지했음. 재생 승인 자체를 뜻하지는 않음 |
+| `download_intercepted` | WebView의 WSDCF 다운로드를 앱이 인수했음 |
+| `download_complete` | 암호화 파일 저장 완료 |
+| `stream_link_intercepted` | WSDCF 탐색을 스트리밍으로 인수했음 |
+| `rights_required` | 로컬 권리가 없어 Rights-Issuer 절차가 필요함 |
+| `rights_response` | WSD 권리 요청 응답 수신 |
+| `wsd_ready` | WSD가 Media3용 loopback URI를 반환함 |
+| `flow_error` | 실패 유형을 민감값 없이 기록함 |
 
-## 보안 경계
+## 현재 제한과 실패 해석
 
-- 사용자 비밀번호를 앱 API나 설정 파일로 받지 않습니다.
-- 토큰과 SessionID는 Android Keystore AES-GCM으로 암호화합니다.
-- cleartext HTTP는 WSD의 `127.0.0.1`/`localhost`에만 허용합니다.
-- 다운로드 파일은 암호화 상태로 보관하며 콘텐츠 키를 내보내지 않습니다.
-- 라이선스 실패, 만료, HDMI 제한 등 WSD 오류를 우회하지 않습니다.
+| 증상 | 해석 및 다음 확인 |
+|---|---|
+| WebView 로그인이 완료되지 않음 | DMM이 임베디드 WebView를 허용하는지, 보안 인증 또는 리디렉션이 막히는지 기기에서 확인합니다. |
+| 로그인은 되지만 `download_intercepted`가 없음 | 사이트가 `DownloadListener`가 아닌 JavaScript `blob:` 또는 별도 앱 브리지로 다운로드할 가능성이 있습니다. WebView 요청 관찰 로직이 추가로 필요합니다. |
+| 다운로드 HTTP 401/403 | CDN 리디렉션 뒤에도 Cookie/User-Agent/Referer가 충분한지 확인해야 합니다. |
+| 스트리밍만 401/403 | 원격 WSDCF가 WebView 쿠키를 요구하지만 WSD 내부 HTTP 클라이언트가 공유하지 못할 수 있습니다. 인증된 로컬 Range 프록시가 추가로 필요할 수 있습니다. |
+| 권리 페이지 또는 라이선스가 거절됨 | 일반 웹 세션만으로 새 패키지의 WSD 권리 발급이 가능한지 확인하는 핵심 실패 지점입니다. 이 경우 `dmm_app_uid` 또는 원 앱 전용 브리지/패키지 정책이 실제 제약일 수 있습니다. |
+| `wsd_ready` 뒤 재생 실패 | WSD loopback URI의 Range 응답과 Media3 연결, seek 동작을 기기 로그로 확인합니다. |
+
+상세 변경 내역과 검증 체크리스트는 [DMM WebView 인계 문서](./DMM_WEBVIEW_HANDOFF.md)에 정리되어 있습니다.
+
+## 보안 및 권리 경계
+
+- 실제 계정, 비밀번호, JWT, 쿠키, 토큰을 Git이나 properties 파일에 넣지 않습니다.
+- URL query/fragment에는 임시 라이선스 값이 들어갈 수 있으므로 로그나 이슈에 그대로 붙이지 않습니다.
+- WSD DEX/SO는 권리 확인과 복호화를 담당하며 실패·만료·출력 제한을 우회하지 않습니다.
+- 포함된 런타임의 보관·배포 권한은 저장소 소유자가 별도로 확인해야 합니다.

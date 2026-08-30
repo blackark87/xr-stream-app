@@ -24,11 +24,6 @@ keystore.properties
 /.github-pat
 /secrets.local.properties
 
-# Locally provisioned proprietary DMM/WSD runtime (see scripts/provision-dmm-runtime.sh)
-/app/src/main/assets/dmm/wsd-runtime.dex
-/app/src/main/jniLibs/arm64-v8a/libwsdnat.so
-/app/src/main/jniLibs/arm64-v8a/libwsdprtn.so
-
 # OS files
 .DS_Store
 

@@ -215,8 +215,8 @@
     <string name="dmm_library">Purchased library</string>
     <string name="dmm_login">Sign in to DMM</string>
     <string name="dmm_logout">Sign out of DMM</string>
-    <string name="dmm_signed_in">Signed in for licensed playback</string>
-    <string name="dmm_signed_out">Sign in to play purchased content</string>
+    <string name="dmm_signed_in">DMM web session detected</string>
+    <string name="dmm_signed_out">Sign in on the DMM web page below</string>
     <string name="dmm_reload">Reload DMM page</string>
     <string name="dmm_stream">Stream</string>
     <string name="dmm_wsdcf_url">WSDCF content URL</string>
@@ -225,10 +225,6 @@
     <string name="dmm_download">Download</string>
     <string name="dmm_dismiss">Dismiss</string>
     <string name="dmm_import_file">Import file</string>
-    <string name="dmm_oauth_not_configured">OAuth is not configured. Add DMM_CLIENT_ID, DMM_CLIENT_SECRET, DMM_REDIRECT_URI, and DMM_JWT_SECRET to secrets.local.properties.</string>
-    <string name="dmm_runtime_not_provisioned">The WSD runtime is missing. Run scripts/provision-dmm-runtime.sh with an authorized base APK and ARM64 split APK.</string>
-    <string name="dmm_playable_api_not_configured">Direct stream/download URL signing is not configured. Add an authorized DMM_DIGITAL_API_AUTH_SECRET.</string>
-    <string name="dmm_purchased_content">Purchased VR (%1$d)</string>
-    <string name="dmm_refresh_library">Refresh library</string>
-    <string name="dmm_cover_image">Cover image for %1$s</string>
+    <string name="dmm_runtime_not_provisioned">This build does not contain the bundled WSD runtime.</string>
+    <string name="dmm_web_help">Log in below, open your purchased content page, then use the site’s stream or download action. Credentials stay inside the WebView.</string>
 </resources>

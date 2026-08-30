@@ -31,7 +31,7 @@ interface DmmWsdListener {
 }
 
 /**
- * Reflection bridge to the WSD runtime provisioned from an authorized APK/SDK.
+ * Reflection bridge to the WSD runtime bundled with this repository.
  *
  * WSD performs the real rights check and decrypts byte ranges into its loopback HTTP server. This
  * class never handles a content key and never bypasses a failed or expired license.
@@ -177,7 +177,7 @@ class DmmWsdRuntime(
     private fun requireClassLoader(): DexClassLoader {
         classLoader?.let { return it }
         check(isProvisioned) {
-            "WSD runtime is missing. Run scripts/provision-dmm-runtime.sh with your authorized APK files."
+            "The bundled WSD runtime is missing from this build."
         }
         val runtimeDir = File(appContext.codeCacheDir, "dmm-wsd").apply { mkdirs() }
         val dexFile = File(runtimeDir, "wsd-runtime.dex")
