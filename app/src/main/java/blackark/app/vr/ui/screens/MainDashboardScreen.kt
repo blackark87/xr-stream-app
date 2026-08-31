@@ -298,6 +298,9 @@ private enum class PrimaryDestination {
     Settings,
 }
 
+private val visiblePrimaryDestinations = PrimaryDestination.entries
+    .filterNot { it == PrimaryDestination.Dmm }
+
 private fun logMetadataTrace(tag: String, message: String) {
     Log.v(tag, message)
 }
@@ -803,7 +806,7 @@ private fun DashboardSourceRail(
                 .padding(vertical = 14.dp),
             containerColor = Color.Transparent,
         ) {
-            PrimaryDestination.entries.forEach { mode ->
+            visiblePrimaryDestinations.forEach { mode ->
                 NavigationRailItem(
                     selected = selectedMode == mode,
                     onClick = { onModeSelected(mode) },
@@ -853,7 +856,7 @@ private fun DashboardSourceBar(
             containerColor = Color.Transparent,
             tonalElevation = 0.dp,
         ) {
-            PrimaryDestination.entries.forEach { mode ->
+            visiblePrimaryDestinations.forEach { mode ->
                 NavigationBarItem(
                     selected = selectedMode == mode,
                     onClick = { onModeSelected(mode) },
@@ -4499,7 +4502,7 @@ fun MainDashboardScreen(
                     }
                 }
                 .movable(
-                    movePolicy = MovePolicy.default { event ->
+                    movePolicy = MovePolicy.system { event ->
                         AppState.updateDashboardPanelPose(event.pose)
                     },
                 )

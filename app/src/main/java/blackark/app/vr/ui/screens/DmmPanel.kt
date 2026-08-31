@@ -20,7 +20,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.weight
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -61,6 +60,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.webkit.UserAgentMetadata
+import androidx.webkit.WebSettingsCompat
+import androidx.webkit.WebViewFeature
 import blackark.app.vr.R
 import blackark.app.vr.dmm.DmmDownloadItem
 import blackark.app.vr.dmm.DmmPage
@@ -87,6 +89,7 @@ fun DmmPanel(
     }
     var mediaUrl by rememberSaveable { mutableStateOf("") }
     var canGoBack by remember { mutableStateOf(false) }
+    var handledNavigationId by remember { mutableStateOf(state.navigationId) }
     val importLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument(),
         onResult = { uri -> uri?.let(repository::importOffline) },
@@ -104,9 +107,12 @@ fun DmmPanel(
         }
     }
 
-    LaunchedEffect(state.activeUrl, state.navigationId) {
-        if (state.activeUrl.isNotBlank() && webView?.url != state.activeUrl) {
-            webView?.let { repository.loadWebPage(it, state.activeUrl) }
+    LaunchedEffect(state.navigationId) {
+        if (state.activeUrl.isNotBlank() && state.navigationId != handledNavigationId) {
+            webView?.let {
+                repository.loadWebPage(it, state.activeUrl)
+                handledNavigationId = state.navigationId
+            }
         }
     }
 
@@ -167,7 +173,12 @@ fun DmmPanel(
                         contentDescription = stringResource(R.string.back),
                     )
                 }
-                IconButton(onClick = { webView?.reload() }) {
+                IconButton(
+                    onClick = {
+                        repository.allowWebReload()
+                        webView?.reload()
+                    },
+                ) {
                     Icon(Icons.Filled.Refresh, contentDescription = stringResource(R.string.dmm_reload))
                 }
                 IconButton(
@@ -297,7 +308,8 @@ fun DmmPanel(
                         settings.mediaPlaybackRequiresUserGesture = true
                         settings.loadsImagesAutomatically = true
                         settings.useWideViewPort = true
-                        settings.loadWithOverviewMode = true
+                        settings.loadWithOverviewMode = false
+                        configureMobileBrowserProfile()
                         android.webkit.CookieManager.getInstance()
                             .setAcceptThirdPartyCookies(this, true)
                         webChromeClient = WebChromeClient()
@@ -307,20 +319,30 @@ fun DmmPanel(
                                 request: WebResourceRequest?,
                             ): Boolean {
                                 val url = request?.url?.toString() ?: return false
-                                return repository.handleNavigation(url, view?.title)
+                                return repository.shouldBlockWebNavigation(url) ||
+                                    repository.handleNavigation(url, view?.title)
                             }
 
                             @Deprecated("Deprecated in Android")
                             override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean =
-                                url?.let { repository.handleNavigation(it, view?.title) } == true
+                                url?.let {
+                                    repository.shouldBlockWebNavigation(it) ||
+                                        repository.handleNavigation(it, view?.title)
+                                } == true
 
                             override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
+                                if (url?.let(repository::shouldBlockWebNavigation) == true) {
+                                    view?.stopLoading()
+                                    return
+                                }
                                 sync(view)
                             }
 
                             override fun onPageFinished(view: WebView?, url: String?) {
                                 sync(view)
-                                url?.let(repository::onWebPageFinished)
+                                if (url?.let(repository::onWebPageFinished) == true) {
+                                    view?.stopLoading()
+                                }
                             }
                         }
                         setDownloadListener(
@@ -354,6 +376,35 @@ fun DmmPanel(
 private fun browserDisplayUrl(url: String): String = runCatching {
     Uri.parse(url).buildUpon().clearQuery().fragment(null).build().toString()
 }.getOrDefault("invalid-url")
+
+private fun WebView.configureMobileBrowserProfile() {
+    val supportsMetadata = WebViewFeature.isFeatureSupported(WebViewFeature.USER_AGENT_METADATA)
+    val defaultMetadata = if (supportsMetadata) {
+        WebSettingsCompat.getUserAgentMetadata(settings)
+    } else {
+        null
+    }
+
+    settings.userAgentString = settings.userAgentString.asMobileUserAgent()
+
+    if (defaultMetadata != null) {
+        val metadata = UserAgentMetadata.Builder(defaultMetadata)
+            .setMobile(true)
+            .apply {
+                if (WebViewFeature.isFeatureSupported(WebViewFeature.USER_AGENT_METADATA_FORM_FACTORS)) {
+                    setFormFactors(listOf(UserAgentMetadata.FORM_FACTOR_MOBILE))
+                }
+            }
+            .build()
+        WebSettingsCompat.setUserAgentMetadata(settings, metadata)
+    }
+}
+
+private fun String.asMobileUserAgent(): String = when {
+    contains(Regex("\\bMobile\\b", RegexOption.IGNORE_CASE)) -> this
+    contains(" Safari/") -> replace(" Safari/", " Mobile Safari/")
+    else -> "$this Mobile"
+}
 
 @Composable
 private fun DmmDownloadCard(

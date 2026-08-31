@@ -3,6 +3,7 @@ package blackark.app.vr.dmm
 import android.content.Context
 import android.net.Uri
 import android.os.Environment
+import android.os.SystemClock
 import android.provider.OpenableColumns
 import android.util.Log
 import android.webkit.CookieManager
@@ -87,6 +88,10 @@ class DmmRepository(context: Context) : AutoCloseable {
 
     private var activeSourceUri: Uri? = null
     private var activeTitle: String = "DMM video"
+    private var lastFinishedPageKey: String? = null
+    private var lastFinishedAtMs: Long = 0L
+    private var rapidSamePageFinishCount: Int = 0
+    private var blockedReloadPageKey: String? = null
 
     fun startLogin() {
         Log.i(TAG, "event=web_login_open")
@@ -117,25 +122,41 @@ class DmmRepository(context: Context) : AutoCloseable {
         view.loadUrl(url)
     }
 
-    fun onWebPageFinished(url: String) {
-        if (!isDmmUrl(url)) return
+    fun onWebPageFinished(url: String): Boolean {
+        if (!isDmmUrl(url)) return false
         val detected = hasDmmWebSession(url)
         val previous = _state.value
         val page = if (detected && previous.page == DmmPage.Login) DmmPage.Browser else previous.page
+        val reloadBlocked = recordFinishedPage(url, detected)
         _state.value = previous.copy(
             page = page,
             webSessionDetected = detected,
             activeUrl = url,
-            statusMessage = if (detected && !previous.webSessionDetected) {
-                "DMM web session detected. Open purchased content and choose stream or download."
-            } else {
-                previous.statusMessage
+            statusMessage = when {
+                reloadBlocked -> {
+                    "DMM repeatedly refreshed the purchased library, so automatic reloads were paused. " +
+                        "Use Reload to try again or check the connection region in DMM's guidance."
+                }
+                detected && !previous.webSessionDetected -> {
+                    "DMM web session detected. Open purchased content and choose stream or download."
+                }
+                else -> previous.statusMessage
             },
         )
         Log.i(
             TAG,
-            "event=web_page_finished target=${sanitizedUrl(url)} sessionDetected=$detected",
+            "event=web_page_finished target=${sanitizedUrl(url)} " +
+                "sessionDetected=$detected reloadBlocked=$reloadBlocked",
         )
+        return reloadBlocked
+    }
+
+    fun shouldBlockWebNavigation(url: String): Boolean =
+        blockedReloadPageKey != null && blockedReloadPageKey == reloadComparisonKey(url)
+
+    fun allowWebReload() {
+        resetReloadGuard()
+        _state.value = _state.value.copy(statusMessage = null)
     }
 
     /** Returns true when navigation was consumed by WSD rights or protected playback. */
@@ -495,6 +516,7 @@ class DmmRepository(context: Context) : AutoCloseable {
         }
 
     private fun navigate(page: DmmPage, url: String, status: String?) {
+        resetReloadGuard()
         _state.value = _state.value.copy(
             page = page,
             activeUrl = url,
@@ -502,6 +524,43 @@ class DmmRepository(context: Context) : AutoCloseable {
             isBusy = false,
             statusMessage = status,
         )
+    }
+
+    private fun recordFinishedPage(url: String, sessionDetected: Boolean): Boolean {
+        val pageKey = reloadComparisonKey(url)
+        val now = SystemClock.elapsedRealtime()
+        val repeatedRapidly = pageKey == lastFinishedPageKey &&
+            now - lastFinishedAtMs in 0..RAPID_RELOAD_WINDOW_MS
+
+        rapidSamePageFinishCount = if (repeatedRapidly) {
+            rapidSamePageFinishCount + 1
+        } else {
+            1
+        }
+        lastFinishedPageKey = pageKey
+        lastFinishedAtMs = now
+
+        if (sessionDetected &&
+            isPurchasedLibraryUrl(url) &&
+            rapidSamePageFinishCount >= RAPID_RELOAD_LIMIT
+        ) {
+            if (blockedReloadPageKey != pageKey) {
+                Log.w(
+                    TAG,
+                    "event=rapid_library_reload_blocked target=${sanitizedUrl(url)} " +
+                        "count=$rapidSamePageFinishCount",
+                )
+            }
+            blockedReloadPageKey = pageKey
+        }
+        return blockedReloadPageKey == pageKey
+    }
+
+    private fun resetReloadGuard() {
+        lastFinishedPageKey = null
+        lastFinishedAtMs = 0L
+        rapidSamePageFinishCount = 0
+        blockedReloadPageKey = null
     }
 
     private fun hasDmmWebSession(currentUrl: String): Boolean {
@@ -540,6 +599,8 @@ class DmmRepository(context: Context) : AutoCloseable {
 
     companion object {
         private const val TAG = "DmmWebFlow"
+        private const val RAPID_RELOAD_LIMIT = 4
+        private const val RAPID_RELOAD_WINDOW_MS = 5_000L
         private val SESSION_COOKIE_NAMES = listOf(
             "secid",
             "dmm_app_uid",
@@ -574,6 +635,19 @@ class DmmRepository(context: Context) : AutoCloseable {
             return host == "dmm.com" || host.endsWith(".dmm.com") ||
                 host == "dmm.co.jp" || host.endsWith(".dmm.co.jp")
         }
+
+        private fun isPurchasedLibraryUrl(url: String): Boolean {
+            if (!isDmmUrl(url)) return false
+            return runCatching { Uri.parse(url).path.orEmpty() }
+                .getOrDefault("")
+                .contains("/mylibrary", ignoreCase = true)
+        }
+
+        private fun reloadComparisonKey(url: String): String = runCatching {
+            Uri.parse(url).buildUpon().clearQuery().fragment(null).build().toString()
+                .trimEnd('/')
+                .lowercase()
+        }.getOrDefault(url.substringBefore('#').substringBefore('?').trimEnd('/').lowercase())
 
         private fun sanitizedUrl(url: String): String = runCatching {
             Uri.parse(url).buildUpon().clearQuery().fragment(null).build().toString()

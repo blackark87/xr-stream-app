@@ -105,6 +105,12 @@ android {
         compose = true
         buildConfig = true
     }
+    packaging {
+        jniLibs {
+            // The dynamically loaded WSD dex needs its JNI libraries as real filesystem files.
+            useLegacyPackaging = true
+        }
+    }
     testOptions {
         unitTests.isReturnDefaultValues = true
     }
@@ -134,6 +140,7 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.activity.compose)
+    implementation(libs.androidx.webkit)
 
     // Compose
     implementation(platform(libs.androidx.compose.bom))
@@ -148,7 +155,6 @@ dependencies {
     implementation(libs.androidx.xr.compose)
     implementation(libs.androidx.xr.runtime)
     implementation(libs.androidx.xr.scenecore)
-    implementation(libs.androidx.xr.compose.material3)
     implementation(libs.androidx.xr.arcore)
     implementation(libs.androidx.xr.arcore.openxr)
     // Jetpack XR beta01 transitively requests ARCore 1.53.0, whose malformed

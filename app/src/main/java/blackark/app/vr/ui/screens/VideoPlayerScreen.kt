@@ -100,7 +100,6 @@ import androidx.xr.compose.subspace.layout.resizable
 import androidx.xr.compose.subspace.layout.rotate
 import androidx.xr.compose.subspace.layout.width
 import androidx.xr.compose.unit.DpVolumeSize
-import androidx.xr.compose.unit.Meter.Companion.meters
 import androidx.xr.runtime.DeviceTrackingMode
 import androidx.xr.runtime.Config
 import androidx.xr.runtime.SessionConfigureSuccess
@@ -380,6 +379,7 @@ private fun PlaybackScrollInputOverlay(
 
 private val DEFAULT_FLAT_PANEL_WIDTH = 1280.dp
 private val DEFAULT_FLAT_PANEL_HEIGHT = 720.dp
+private const val FALLBACK_DP_PER_METER = 2000f
 private val MIN_FLAT_PANEL_SIZE =
     DpVolumeSize(
         width = 960.dp,
@@ -431,8 +431,8 @@ private fun HeadFollowPose.withViewAnchorElevation(
     )
 }
 
-private fun HeadFollowPose.translationDp(): Vector3 =
-    translationMeters * 1.meters.toDp().value
+private fun HeadFollowPose.translationDp(dpPerMeter: Float): Vector3 =
+    translationMeters * dpPerMeter
 
 internal fun resolveHeadFollowPanelRotation(viewForward: Vector3): Quaternion =
     // SpatialPanel renders its front face along local +Z, back toward the viewer.
@@ -584,6 +584,10 @@ private fun SpatialVideoPlayerContent(
     val showControls = playerState.showControls
     val session = LocalSession.current
     val density = LocalDensity.current
+    val dpPerMeter =
+        session?.scene?.virtualPixelDensity?.let { pixelDensity ->
+            with(density) { pixelDensity.convertMetersToPixels(1f).toDp().value }
+        } ?: FALLBACK_DP_PER_METER
     ApplyHandTrackingPreference(
         isHandTrackingEnabled = isHandTrackingEnabled,
         hasHandTrackingPermission = hasHandTrackingPermission,
@@ -864,6 +868,7 @@ private fun SpatialVideoPlayerContent(
                         dashboardPanelPose = dashboardPanelPose,
                         headFollowPose = immersiveBackgroundHeadPose,
                         density = density,
+                        dpPerMeter = dpPerMeter,
                     )
                 } else {
                     buildHiddenSpatialPanelAnchorModifier()
@@ -952,6 +957,7 @@ private fun SpatialVideoPlayerContent(
                                 dashboardPanelPose = immersivePlaybackDashboardPose,
                                 fallbackAnchorPose = fixedImmersiveMediaPose,
                                 density = density,
+                                dpPerMeter = dpPerMeter,
                                 distanceMeters = playerState.immersiveSubtitleDistanceMeters,
                                 horizontalOffsetMeters =
                                     playerState.immersiveUiHorizontalOffsetMeters,
@@ -982,6 +988,7 @@ private fun SpatialVideoPlayerContent(
                         dashboardPanelPose = visiblePlaybackDashboardPose,
                         headFollowPose = visiblePlaybackHeadPose,
                         density = density,
+                        dpPerMeter = dpPerMeter,
                         stereoMode = playerState.stereoMode,
                         horizontalOffsetMeters = playerState.immersiveUiHorizontalOffsetMeters,
                     ),
@@ -1036,6 +1043,7 @@ private fun SpatialVideoPlayerContent(
                             dashboardPanelPose = visiblePlaybackDashboardPose,
                             headFollowPose = visiblePlaybackHeadPose,
                             density = density,
+                            dpPerMeter = dpPerMeter,
                             horizontalOffsetMeters =
                                 playerState.immersiveUiHorizontalOffsetMeters,
                         )
@@ -1060,6 +1068,7 @@ private fun SpatialVideoPlayerContent(
                             dashboardPanelPose = visiblePlaybackDashboardPose,
                             headFollowPose = visiblePlaybackHeadPose,
                             density = density,
+                            dpPerMeter = dpPerMeter,
                             activeMenu = playerState.activePlaybackMenu,
                             videoFormat = playerState.videoFormat,
                             stereoMode = playerState.stereoMode,
@@ -1415,6 +1424,7 @@ private fun buildImmersiveBackgroundInputModifier(
     dashboardPanelPose: Pose?,
     headFollowPose: HeadFollowPose?,
     density: Density,
+    dpPerMeter: Float,
 ): SubspaceModifier {
     val baseModifier =
         SubspaceModifier
@@ -1422,7 +1432,7 @@ private fun buildImmersiveBackgroundInputModifier(
             .height(IMMERSIVE_BACKGROUND_INPUT_PANEL_HEIGHT)
 
     if (headFollowPose != null) {
-        val headTranslationDp = headFollowPose.translationDp()
+        val headTranslationDp = headFollowPose.translationDp(dpPerMeter)
         return baseModifier
             .offset(
                 x = headTranslationDp.x.dp +
@@ -1460,6 +1470,7 @@ private fun buildImmersiveSubtitleModifier(
     dashboardPanelPose: Pose?,
     fallbackAnchorPose: HeadFollowPose?,
     density: Density,
+    dpPerMeter: Float,
     distanceMeters: Float,
     horizontalOffsetMeters: Float,
     verticalOffsetMeters: Float,
@@ -1478,9 +1489,8 @@ private fun buildImmersiveSubtitleModifier(
         dashboardPanelPose?.translation?.let { translation ->
             elevationDelta * translation
         } ?: fallbackAnchorPose?.let { anchorPose ->
-            val referenceDistanceDp =
-                IMMERSIVE_SUBTITLE_REFERENCE_DISTANCE_METERS * 1.meters.toDp().value
-            val anchorTranslationDp = anchorPose.translationDp()
+            val referenceDistanceDp = IMMERSIVE_SUBTITLE_REFERENCE_DISTANCE_METERS * dpPerMeter
+            val anchorTranslationDp = anchorPose.translationDp(dpPerMeter)
             val elevatedReferenceTranslation =
                 elevationDelta *
                     Vector3(
@@ -1506,7 +1516,7 @@ private fun buildImmersiveSubtitleModifier(
             horizontalOffsetMeters = horizontalOffsetMeters,
             verticalOffsetMeters = verticalOffsetMeters,
             pixelsPerDp = density.density,
-            dpPerMeter = 1.meters.toDp().value,
+            dpPerMeter = dpPerMeter,
         )
     val baseModifier =
         SubspaceModifier
@@ -1527,6 +1537,7 @@ private fun buildImmersiveControlsModifier(
     dashboardPanelPose: Pose?,
     headFollowPose: HeadFollowPose?,
     density: Density,
+    dpPerMeter: Float,
     stereoMode: blackark.app.vr.ui.viewmodel.StereoMode,
     horizontalOffsetMeters: Float,
 ): SubspaceModifier {
@@ -1547,10 +1558,10 @@ private fun buildImmersiveControlsModifier(
         resolveImmersiveUiHorizontalOffsetDp(
             worldRight = rotation * Vector3.Right,
             horizontalOffsetMeters = horizontalOffsetMeters,
-            dpPerMeter = 1.meters.toDp().value,
+            dpPerMeter = dpPerMeter,
         )
     if (headFollowPose != null) {
-        val headTranslationDp = headFollowPose.translationDp()
+        val headTranslationDp = headFollowPose.translationDp(dpPerMeter)
         return baseModifier.offset(
             x = headTranslationDp.x.dp +
                 (headFollowPose.forward.x * IMMERSIVE_CONTROLS_FOLLOW_DISTANCE.value).dp +
@@ -1602,6 +1613,7 @@ private fun buildImmersiveSeekPreviewModifier(
     dashboardPanelPose: Pose?,
     headFollowPose: HeadFollowPose?,
     density: Density,
+    dpPerMeter: Float,
     horizontalOffsetMeters: Float,
 ): SubspaceModifier {
     val baseModifier =
@@ -1613,7 +1625,7 @@ private fun buildImmersiveSeekPreviewModifier(
         resolveImmersiveUiHorizontalOffsetDp(
             worldRight = rotation * Vector3.Right,
             horizontalOffsetMeters = horizontalOffsetMeters,
-            dpPerMeter = 1.meters.toDp().value,
+            dpPerMeter = dpPerMeter,
         )
     val previewUpOffset =
         (IMMERSIVE_CONTROLS_PANEL_HEIGHT + IMMERSIVE_SEEK_PREVIEW_PANEL_HEIGHT) / 2f +
@@ -1628,7 +1640,7 @@ private fun buildImmersiveSeekPreviewModifier(
     val previewFrontZ = (-worldForward.z * IMMERSIVE_SEEK_PREVIEW_FRONT_OFFSET.value).dp
 
     if (headFollowPose != null) {
-        val headTranslationDp = headFollowPose.translationDp()
+        val headTranslationDp = headFollowPose.translationDp(dpPerMeter)
         val controlsX =
             headTranslationDp.x.dp +
                 (headFollowPose.forward.x * IMMERSIVE_CONTROLS_FOLLOW_DISTANCE.value).dp +
@@ -1688,6 +1700,7 @@ private fun buildImmersivePlaybackMenuModifier(
     dashboardPanelPose: Pose?,
     headFollowPose: HeadFollowPose?,
     density: Density,
+    dpPerMeter: Float,
     activeMenu: PlaybackMenu,
     videoFormat: VideoFormat,
     stereoMode: blackark.app.vr.ui.viewmodel.StereoMode,
@@ -1725,7 +1738,7 @@ private fun buildImmersivePlaybackMenuModifier(
         resolveImmersiveUiHorizontalOffsetDp(
             worldRight = rotation * Vector3.Right,
             horizontalOffsetMeters = horizontalOffsetMeters,
-            dpPerMeter = 1.meters.toDp().value,
+            dpPerMeter = dpPerMeter,
         )
     val worldUp = rotation * Vector3.Up
     val worldRight = rotation * Vector3.Right
@@ -1741,7 +1754,7 @@ private fun buildImmersivePlaybackMenuModifier(
     val menuFrontZ = (-worldForward.z * IMMERSIVE_MENU_FRONT_OFFSET.value).dp
 
     if (headFollowPose != null) {
-        val headTranslationDp = headFollowPose.translationDp()
+        val headTranslationDp = headFollowPose.translationDp(dpPerMeter)
         val controlsX =
             headTranslationDp.x.dp +
                 (headFollowPose.forward.x * IMMERSIVE_CONTROLS_FOLLOW_DISTANCE.value).dp +

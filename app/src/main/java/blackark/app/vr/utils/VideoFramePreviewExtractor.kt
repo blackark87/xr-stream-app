@@ -1,4 +1,6 @@
-@file:OptIn(androidx.media3.common.util.UnstableApi::class)
+@file:androidx.annotation.OptIn(
+    markerClass = [androidx.media3.common.util.UnstableApi::class],
+)
 
 package blackark.app.vr.utils
 
