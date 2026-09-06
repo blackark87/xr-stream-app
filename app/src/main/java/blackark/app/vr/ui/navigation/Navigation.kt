@@ -1,11 +1,16 @@
 package blackark.app.vr.ui.navigation
 
+import androidx.compose.runtime.setValue
+
+import androidx.compose.runtime.getValue
+
 import android.content.Context
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.navigation.compose.currentBackStackEntryAsState
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
@@ -40,33 +45,21 @@ fun AppNavigation(
         (appContext as XRStreamApplication).container
     }
 
+    val entry by navController.currentBackStackEntryAsState()
+    var readyDashboardEntryId by remember(entry?.id) { mutableStateOf<String?>(null) }
+    DashboardPanelHost(
+        visible = entry?.destination?.route == Screen.MainDashboard.route &&
+            readyDashboardEntryId == entry?.id,
+    )
     NavHost(
         navController = navController,
         startDestination = Screen.MainDashboard.route,
-        enterTransition = {
-            fadeIn(
-                animationSpec = tween(
-                    durationMillis = 220,
-                    delayMillis = 60,
-                )
-            )
-        },
-        exitTransition = {
-            fadeOut(animationSpec = tween(durationMillis = 140))
-        },
-        popEnterTransition = {
-            fadeIn(
-                animationSpec = tween(
-                    durationMillis = 180,
-                    delayMillis = 40,
-                )
-            )
-        },
-        popExitTransition = {
-            fadeOut(animationSpec = tween(durationMillis = 120))
-        },
+        enterTransition = { EnterTransition.None },
+        exitTransition = { ExitTransition.None },
+        popEnterTransition = { EnterTransition.None },
+        popExitTransition = { ExitTransition.None },
     ) {
-        composable(Screen.MainDashboard.route) {
+        composable(Screen.MainDashboard.route) { dashboardEntry ->
             // Create ViewModel
             val viewModel: MainDashboardViewModel = viewModel(
                 factory = MainDashboardViewModelFactory(
@@ -85,6 +78,11 @@ fun AppNavigation(
                 viewModel = viewModel,
                 hasControllerLikeInputDevice = hasControllerLikeInputDevice,
                 hasHandTrackingPermission = hasHandTrackingPermission,
+                onLayoutReady = {
+                    if (navController.currentBackStackEntry?.id == dashboardEntry.id) {
+                        readyDashboardEntryId = dashboardEntry.id
+                    }
+                },
             )
         }
 

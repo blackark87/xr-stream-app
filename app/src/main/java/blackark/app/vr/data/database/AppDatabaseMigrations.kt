@@ -108,9 +108,27 @@ object AppDatabaseMigrations {
             }
         }
 
+    val MIGRATION_16_17 = object : Migration(16, 17) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("""
+                CREATE TABLE IF NOT EXISTS file_nfo_cache (
+                    sourceScope TEXT NOT NULL,
+                    filePath TEXT NOT NULL,
+                    nfoPath TEXT,
+                    metadataCacheKey TEXT,
+                    checkedAt INTEGER NOT NULL,
+                    PRIMARY KEY(sourceScope, filePath)
+                )
+            """.trimIndent())
+            db.execSQL("ALTER TABLE recent_videos ADD COLUMN resumeThumbnailPath TEXT")
+            db.execSQL("ALTER TABLE recent_videos ADD COLUMN resumeThumbnailPositionMs INTEGER")
+        }
+    }
+
     val ALL: Array<Migration> = arrayOf(
         MIGRATION_13_14,
         MIGRATION_14_15,
         MIGRATION_15_16,
+        MIGRATION_16_17,
     )
 }

@@ -1,5 +1,9 @@
 package blackark.app.vr.ui.components
 
+import androidx.compose.runtime.setValue
+
+import androidx.compose.runtime.getValue
+
 import android.annotation.SuppressLint
 import androidx.annotation.OptIn
 import androidx.compose.foundation.BorderStroke
@@ -50,12 +54,10 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -926,12 +928,19 @@ fun XRPlaybackControls(
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        // Keep Recenter on the panel's horizontal center. With gaze input, placing
-                        // it on the right biases the live head pose and causes cumulative drift.
+                        // Keep this fallback until Galaxy XR exposes a verified, independent
+                        // Grip/Trigger input path. SceneCore currently reports only primary action.
                         horizontalArrangement = Arrangement.Center,
                     ) {
-                        Button(onClick = videoPlayerViewModel::recenterView) {
-                            Text("Recenter")
+                        Button(
+                            onClick = videoPlayerViewModel::recenterView,
+                            enabled = playerState.recenterCountdownSeconds == 0,
+                        ) {
+                            Text(
+                                if (playerState.recenterCountdownSeconds > 0) {
+                                    "Look forward · ${playerState.recenterCountdownSeconds}"
+                                } else "Recenter in 3s"
+                            )
                         }
                     }
                 }

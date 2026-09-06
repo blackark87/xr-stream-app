@@ -1,5 +1,11 @@
 package blackark.app.vr.ui.screens
 
+internal fun isPlaybackSurfaceAvailable(
+    hasPresentedSurface: Boolean,
+    isLoading: Boolean,
+    hasError: Boolean,
+): Boolean = !hasError && (hasPresentedSurface || !isLoading)
+
 internal data class PlaybackLayerPolicy(
     val retainBackgroundInputLayer: Boolean,
     val showHiddenControlsInputOverlay: Boolean,
@@ -29,7 +35,7 @@ internal fun resolvePlaybackLayerPolicy(
         showHiddenControlsInputOverlay =
             canHandleBackgroundToggle && !showControls,
         enableBackgroundToggleInput = canHandleBackgroundToggle,
-        showControlsLayer = isSurfaceReady && showControls,
+        showControlsLayer = isSurfaceReady && showControls && !navigationExitPending,
     )
 }
 

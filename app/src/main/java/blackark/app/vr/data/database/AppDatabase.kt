@@ -29,6 +29,7 @@ import blackark.app.vr.data.database.entity.VirtualGroupMetadataPerformerCrossRe
 
 @Database(
     entities = [
+        blackark.app.vr.data.database.entity.FileNfoCache::class,
         SavedServer::class,
         MetadataScope::class,
         QuickAccessFolder::class,
@@ -44,10 +45,11 @@ import blackark.app.vr.data.database.entity.VirtualGroupMetadataPerformerCrossRe
         JvrPerformerMergeRule::class,
         VirtualGroupMetadataPerformerCrossRef::class,
     ],
-    version = 16,
+    version = 17,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
+    abstract fun fileNfoCacheDao(): blackark.app.vr.data.database.dao.FileNfoCacheDao
     abstract fun serverDao(): ServerDao
     abstract fun metadataScopeDao(): MetadataScopeDao
     abstract fun quickAccessFolderDao(): QuickAccessFolderDao

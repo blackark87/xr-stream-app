@@ -216,6 +216,41 @@ class MainDashboardViewModel(
     private var smbClient: SMBClient? = null
     private var localClient: LocalFileClient? = null
     private var fileLoadJob: Job? = null
+    private val fileNfoRepository = blackark.app.vr.data.repository.FileNfoRepository(context)
+    private var folderNfoJob: Job? = null
+    private var folderNfoGeneration = 0L
+
+    fun observeCachedNfo(video: blackark.app.vr.data.model.LibraryVideoItem) =
+        fileNfoRepository.observe(buildSourceScope(video.serverAddress, video.shareName), video.filePath)
+
+    private fun refreshFolderNfo(files: List<SMBFileItem>, generation: Long) {
+        val sourceScope = currentSourceScope() ?: return
+        val resolver = createLocalNfoMetadataResolver()
+        folderNfoJob = viewModelScope.launch {
+            for (file in files.filter { !it.isDirectory && SMBClient.isVideoFile(it.name) && !isTrailerFile(it.name) }) {
+                try {
+                    val result = resolver.resolve(
+                        video = file,
+                        fallbackCode = extractNormalizedCodeFromFileName(file.name)
+                            ?: file.name.substringBeforeLast('.', file.name),
+                        preferredBaseName = resolveParentFolderBaseName(file.path),
+                        strict = true,
+                    )
+                    kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                    if (generation != folderNfoGeneration || sourceScope != currentSourceScope()) return@launch
+                    fileNfoRepository.store(sourceScope, file.path, result)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: Exception) {
+                    Log.w("FileNfoCache", "Keeping cached NFO for ${file.path}: ${error.message}")
+                }
+            }
+            if (generation == folderNfoGeneration && sourceScope == currentSourceScope()) {
+                bumpFileMetadataRefreshToken()
+                syncCurrentListingForAv(files)
+            }
+        }
+    }
     private var avScanJob: Job? = null
     private var avVisibleSyncJob: Job? = null
     private var avCastRepairJob: Job? = null
@@ -578,6 +613,8 @@ class MainDashboardViewModel(
     }
 
     fun disconnect() {
+        folderNfoGeneration++
+        folderNfoJob?.cancel()
         fileLoadJob?.cancel()
         fileLoadJob = null
         avScanJob?.cancel()
@@ -613,7 +650,10 @@ class MainDashboardViewModel(
         path: String,
         fallbackToRootOnFailure: Boolean = false,
     ) {
+        folderNfoGeneration++
+        folderNfoJob?.cancel()
         fileLoadJob?.cancel()
+        val nfoGeneration = folderNfoGeneration
         fileLoadJob = viewModelScope.launch {
             _uiState.value = _uiState.value.copy(
                 isLoadingFiles = true,
@@ -658,7 +698,7 @@ class MainDashboardViewModel(
                                 path,
                             )
                         }
-                    syncCurrentListingForAv(sortedFiles)
+                    refreshFolderNfo(sortedFiles, nfoGeneration)
                 } else {
                     if (fallbackToRootOnFailure && path.isNotBlank()) {
                         loadFiles("")
@@ -1242,10 +1282,11 @@ class MainDashboardViewModel(
     ): JvrMovieMetadata? {
         if (file.isDirectory || !SMBClient.isVideoFile(file.name)) return null
 
+        val cachedNfo = currentSourceScope()?.let { fileNfoRepository.get(it, file.path) }
         val normalizedCode = preferredBaseName
             ?.let(::extractNormalizedCodeFromFileName)
             ?: extractNormalizedCodeFromFileName(file.name)
-            ?: return null
+            ?: return cachedNfo
         val sourceScope = currentSourceScope()
         val asset = sourceScope?.let { scope ->
             avLibraryRepository.findAssetForPathOrCode(
@@ -1272,22 +1313,8 @@ class MainDashboardViewModel(
         return resolution.metadata
     }
 
-    suspend fun resolveBrowserFileNfoTitle(file: SMBFileItem): String? {
-        if (file.isDirectory || !SMBClient.isVideoFile(file.name)) return null
-
-        val fallbackCode = extractNormalizedCodeFromFileName(file.name)
-            ?: file.name.substringBeforeLast('.', file.name)
-                .trim()
-                .uppercase()
-                .takeIf { it.isNotBlank() }
-            ?: return null
-        return createLocalNfoMetadataResolver()
-            .resolve(video = file, fallbackCode = fallbackCode)
-            .metadata
-            ?.title
-            ?.trim()
-            ?.takeIf { it.isNotBlank() }
-    }
+    suspend fun resolveBrowserFileNfoTitle(file: SMBFileItem): String? =
+        currentSourceScope()?.let { fileNfoRepository.get(it, file.path)?.title?.takeIf(String::isNotBlank) }
 
     suspend fun resolveActorFolderArtwork(folder: SMBFileItem): String? {
         return resolveBrowserFolderArtwork(
@@ -1955,13 +1982,8 @@ class MainDashboardViewModel(
     ): MetadataChainResolution {
         val folderPath = extractFolderPath(file.path)
         val resolvedSource = JvrLibraryMetadataProvider.resolveMetadataSource(folderPath)
-        val localSidecar = createLocalNfoMetadataResolver().resolve(
-            video = file,
-            fallbackCode = normalizedCode,
-            preferredBaseName = preferredBaseName,
-        )
-        val localMetadata = localSidecar.metadata
-        val localPosterUrl = localSidecar.posterUrl?.takeIf { it.isNotBlank() }
+        val localMetadata = currentSourceScope()?.let { fileNfoRepository.get(it, file.path) }
+        val localPosterUrl = localMetadata?.posterUrl?.takeIf { it.isNotBlank() }
         val indexedResolution = if (resolvedSource != null) {
             resolveIndexedMetadata(
                 normalizedCode = normalizedCode,

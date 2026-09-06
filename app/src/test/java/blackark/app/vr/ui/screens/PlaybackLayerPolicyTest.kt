@@ -15,6 +15,14 @@ import org.junit.Test
 class PlaybackLayerPolicyTest {
 
     @Test
+    fun `rebuffering retains existing subtitle and control surfaces`() {
+        assertFalse(isPlaybackSurfaceAvailable(false, true, false))
+        assertTrue(isPlaybackSurfaceAvailable(false, false, false))
+        assertTrue(isPlaybackSurfaceAvailable(true, true, false))
+        assertFalse(isPlaybackSurfaceAvailable(true, true, true))
+    }
+
+    @Test
     fun `head-follow panel front faces back toward the viewer`() {
         val viewForward = Vector3(x = 0.6f, y = 0f, z = -0.8f)
 
@@ -27,22 +35,44 @@ class PlaybackLayerPolicyTest {
     }
 
     @Test
-    fun `playback center removes pitch while preserving horizontal direction`() {
-        val levelForward = resolveLevelPlaybackForward(
-            Vector3(x = 0.3f, y = 0.8f, z = -0.4f),
-        )
-        val rotation = resolveHeadFollowPanelRotation(levelForward)
-        val panelUp = rotation * Vector3.Up
-
-        assertEquals(0f, levelForward.y, 0.0001f)
-        assertEquals(1f, levelForward.length, 0.0001f)
-        assertEquals(0f, panelUp.x, 0.0001f)
-        assertEquals(1f, panelUp.y, 0.0001f)
-        assertEquals(0f, panelUp.z, 0.0001f)
+    fun `recenter follows current pitch and yaw without roll`() {
+        val forward = Vector3(0.3f, 0.8f, -0.4f).toNormalized()
+        val rotation = resolvePlaybackCenterRotation(forward, Quaternion.Identity)
+        val actual = rotation * Vector3.Forward
+        assertEquals(forward.x, actual.x, 0.0001f)
+        assertEquals(forward.y, actual.y, 0.0001f)
+        assertEquals(forward.z, actual.z, 0.0001f)
+        assertEquals(0f, (rotation * Vector3.Right).y, 0.0001f)
+        for (format in listOf(VideoFormat.Format180, VideoFormat.Format360)) {
+            val mediaForward = resolveImmersiveVideoRotation(format, rotation, 0f) * Vector3.Forward
+            assertEquals(actual.x, mediaForward.x, 0.0001f)
+            assertEquals(actual.y, mediaForward.y, 0.0001f)
+            assertEquals(actual.z, mediaForward.z, 0.0001f)
+        }
     }
 
     @Test
-    fun `spatial release toggles controls without requiring a hit position`() {
+    fun `vertical recenter keeps a finite orientation and previous heading`() {
+        val previous = Quaternion.fromAxisAngle(Vector3.Up, 35f)
+        for (forward in listOf(Vector3.Up, -Vector3.Up)) {
+            val rotation = resolvePlaybackCenterRotation(forward, previous)
+            val actual = rotation * Vector3.Forward
+            assertEquals(forward.y, actual.y, 0.0001f)
+            assertEquals(0f, (rotation * Vector3.Right).y, 0.0001f)
+            assertEquals((previous * Vector3.Right).x, (rotation * Vector3.Right).x, 0.0001f)
+        }
+    }
+
+    @Test
+    fun `recenter rejects stale and future samples`() {
+        assertTrue(isFreshPlaybackPose(1000, 1000))
+        assertTrue(isFreshPlaybackPose(1000, 1250))
+        assertFalse(isFreshPlaybackPose(1000, 1251))
+        assertFalse(isFreshPlaybackPose(1001, 1000))
+    }
+
+    @Test
+    fun `only spatial release is a candidate for a background click`() {
         assertTrue(isSpatialToggleClick(InputEvent.Action.UP))
         assertFalse(isSpatialToggleClick(InputEvent.Action.DOWN))
     }
@@ -93,7 +123,7 @@ class PlaybackLayerPolicyTest {
         assertTrue(policy.retainBackgroundInputLayer)
         assertFalse(policy.showHiddenControlsInputOverlay)
         assertFalse(policy.enableBackgroundToggleInput)
-        assertTrue(policy.showControlsLayer)
+        assertFalse(policy.showControlsLayer)
     }
 
     @Test

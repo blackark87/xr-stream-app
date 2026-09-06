@@ -17,4 +17,6 @@ data class RecentVideo(
     override val duration: Long = 0, // Video duration in milliseconds
     override val thumbnailPath: String? = null, // Path to locally cached thumbnail
     override val resolvedTitle: String? = null,
+    val resumeThumbnailPath: String? = null,
+    val resumeThumbnailPositionMs: Long? = null,
 ) : LibraryVideoItem

@@ -85,6 +85,14 @@ interface VideoDao {
         title: String?
     )
 
-    @Query("UPDATE recent_videos SET thumbnailPath = NULL")
+    // Compare against the exact captured position, not a time bucket or a linked asset path.
+    @Query("""
+        UPDATE recent_videos SET resumeThumbnailPath = :thumbnailPath,
+            resumeThumbnailPositionMs = :positionMs
+        WHERE filePath = :filePath AND lastPosition = :positionMs
+    """)
+    suspend fun publishResumeThumbnail(filePath: String, positionMs: Long, thumbnailPath: String): Int
+
+    @Query("UPDATE recent_videos SET thumbnailPath = NULL, resumeThumbnailPath = NULL, resumeThumbnailPositionMs = NULL")
     suspend fun clearAllThumbnailPaths()
 }

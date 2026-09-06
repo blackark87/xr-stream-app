@@ -4,6 +4,10 @@
 
 package blackark.app.vr.ui.screens
 
+import androidx.compose.runtime.setValue
+
+import androidx.compose.runtime.getValue
+
 import android.annotation.SuppressLint
 import android.app.LocaleManager
 import android.content.Context
@@ -127,14 +131,12 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.autofill.ContentType
@@ -179,19 +181,11 @@ import androidx.navigation.NavController
 import androidx.xr.compose.spatial.ContentEdge
 import androidx.xr.compose.spatial.Orbiter
 import androidx.xr.compose.spatial.OrbiterOffsetType
-import androidx.xr.compose.spatial.Subspace
 import androidx.xr.compose.subspace.SpatialMainPanel
-import androidx.xr.compose.subspace.layout.MovePolicy
-import androidx.xr.compose.subspace.layout.ResizePolicy
-import androidx.xr.compose.subspace.layout.SubspaceModifier
 import androidx.xr.compose.subspace.layout.height
-import androidx.xr.compose.subspace.layout.movable
 import androidx.xr.compose.subspace.layout.offset
-import androidx.xr.compose.subspace.layout.resizable
 import androidx.xr.compose.subspace.layout.rotate
 import androidx.xr.compose.subspace.layout.width
-import androidx.xr.compose.unit.DpVolumeSize
-import androidx.xr.runtime.math.Pose
 import blackark.app.vr.AppState
 import blackark.app.vr.BuildConfig
 import blackark.app.vr.R
@@ -257,7 +251,6 @@ import blackark.app.vr.utils.togglePreviewMute
 import blackark.app.vr.utils.extractVirtualGroupKey
 import blackark.app.vr.utils.groupMultipartVideoFiles
 import blackark.app.vr.utils.BrowserFolderArtworkKind
-import blackark.app.vr.utils.extractVirtualGroupPart
 import blackark.app.vr.utils.parseVideoIdentity
 import blackark.app.vr.utils.resolveParentFolderBaseName
 import blackark.app.vr.remote.RuntimeConfigRegistry
@@ -278,7 +271,6 @@ import java.time.ZoneId
 import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
 import kotlin.math.roundToInt
-import androidx.xr.compose.subspace.layout.onGloballyPositioned as onSubspaceGloballyPositioned
 
 /**
  * Main Dashboard Screen - Material 3 dashboard with XR pane layout support.
@@ -1415,30 +1407,16 @@ private fun HomeVideoCard(
     val sourceMatches = selectedSource?.let { source ->
         video.matchesHomeVideoSource(source)
     } == true
-    val metadataState = if (
-        artworkPolicy == VideoArtworkPolicy.MetadataPreferred && sourceMatches
-    ) {
-        rememberVideoFileMetadata(
-            viewModel = viewModel,
-            file = file,
-            isVideoFile = true,
-            refreshToken = metadataRefreshToken,
-        )
-    } else {
-        ArtworkState.Missing
-    }
+    val cachedNfo by remember(video.serverAddress, video.shareName, video.filePath) {
+        viewModel.observeCachedNfo(video)
+    }.collectAsStateWithLifecycle(initialValue = null)
+    val metadataState = if (video is RecentVideo) {
+        cachedNfo?.let { ArtworkState.Resolved(it) } ?: ArtworkState.Missing
+    } else if (artworkPolicy == VideoArtworkPolicy.MetadataPreferred && sourceMatches) {
+        rememberVideoFileMetadata(viewModel, file, true, refreshToken = metadataRefreshToken)
+    } else ArtworkState.Missing
     val metadata = metadataState.resolvedValueOrNull()
-    val nfoTitle = if (
-        artworkPolicy == VideoArtworkPolicy.GeneratedFrameOnly && sourceMatches
-    ) {
-        rememberVideoFileNfoTitle(
-            viewModel = viewModel,
-            file = file,
-            refreshToken = metadataRefreshToken,
-        )
-    } else {
-        null
-    }
+    val nfoTitle = cachedNfo?.title?.takeIf { it.isNotBlank() }
     var posterFailureCount by remember(
         video.filePath,
         metadata?.posterUrl,
@@ -1453,30 +1431,22 @@ private fun HomeVideoCard(
     val posterUrl = (artworkSelection as? VideoArtworkSelection.Poster)?.url
     val resumeFrameTimeMs = video.lastPosition.takeIf { showProgress && it > 0L }
     val validGeneratedFramePath = if (artworkSelection is VideoArtworkSelection.GeneratedFrame) {
-        VideoThumbnailFetcher.currentGeneratedFramePath(
+        if (video is RecentVideo) {
+            listOfNotNull(video.resumeThumbnailPath, video.thumbnailPath)
+                .firstOrNull { java.io.File(it).let { file -> file.isFile && file.length() > 0L } }
+        } else VideoThumbnailFetcher.currentGeneratedFramePath(
             context = context,
             videoPath = video.filePath,
             thumbnailPath = video.thumbnailPath,
             frameTimeMs = resumeFrameTimeMs,
             durationMs = video.duration,
         )
-    } else {
-        null
-    }
+    } else null
     val thumbnailModel = when (artworkSelection) {
         is VideoArtworkSelection.Poster -> artworkSelection.url
-        is VideoArtworkSelection.GeneratedFrame -> {
-            validGeneratedFramePath ?: if (sourceMatches) {
-                VideoThumbnailFetcher.Model(
-                    path = artworkSelection.videoPath,
-                    frameTimeMs = resumeFrameTimeMs,
-                    durationMs = video.duration,
-                )
-            } else {
-                null
-            }
-        }
-
+        is VideoArtworkSelection.GeneratedFrame -> validGeneratedFramePath ?: if (sourceMatches && video !is RecentVideo) {
+            VideoThumbnailFetcher.Model(artworkSelection.videoPath, resumeFrameTimeMs, video.duration)
+        } else null
         VideoArtworkSelection.Placeholder -> null
     }
     val thumbnailDiskCacheKey = when (artworkSelection) {
@@ -4218,6 +4188,7 @@ fun MainDashboardScreen(
     viewModel: MainDashboardViewModel,
     hasControllerLikeInputDevice: Boolean,
     hasHandTrackingPermission: Boolean,
+    onLayoutReady: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val xrApplication = remember(context) {
@@ -4304,17 +4275,10 @@ fun MainDashboardScreen(
     LaunchedEffect(uiState.selectedServer?.id, uiState.isConnected) {
         showMetadataFoldersDialog = false
     }
-    val density = LocalDensity.current
-    val initialDashboardPanelSize = remember { AppState.dashboardPanelSize.value }
-    var dashboardPanelWidth by remember {
-        mutableStateOf(initialDashboardPanelSize.widthDp.dp)
-    }
-    var dashboardPanelHeight by remember {
-        mutableStateOf(initialDashboardPanelSize.heightDp.dp)
-    }
+    val dashboardPanelSize by AppState.dashboardPanelSize.collectAsStateWithLifecycle()
+    val dashboardPanelWidth = dashboardPanelSize.widthDp.dp
     val useIntegratedSourceRail =
         resolveDashboardWidthClass(dashboardPanelWidth) == DashboardWidthClass.Expanded
-    val initialDashboardPose = remember { AppState.dashboardPanelPose.value?.let { Pose(it) } }
 
     fun requestLocalStorageConnection(forcePicker: Boolean = false) {
         val configuredTreeUri =
@@ -4472,64 +4436,16 @@ fun MainDashboardScreen(
         }
     }
 
-    Subspace {
-        ApplyHandTrackingPreference(
-            isHandTrackingEnabled = uiState.isHandTrackingEnabled,
-            hasHandTrackingPermission = hasHandTrackingPermission,
-            logTag = "MainDashboardScreen",
-        )
-
-        val dashboardPanelModifier =
-            initialDashboardPose?.let { pose ->
-                SubspaceModifier
-                    .width(dashboardPanelWidth)
-                    .height(dashboardPanelHeight)
-                    .offset(
-                        x = with(density) { pose.translation.x.toDp() },
-                        y = with(density) { pose.translation.y.toDp() },
-                        z = with(density) { pose.translation.z.toDp() },
-                    )
-                    .rotate(pose.rotation)
-            } ?: SubspaceModifier
-                .width(dashboardPanelWidth)
-                .height(dashboardPanelHeight)
-
-        SpatialMainPanel(
-            modifier = dashboardPanelModifier
-                .onSubspaceGloballyPositioned { coordinates ->
-                    if (AppState.dashboardPanelPose.value == null) {
-                        AppState.updateDashboardPanelPose(coordinates.poseInRoot)
-                    }
-                }
-                .movable(
-                    movePolicy = MovePolicy.system { event ->
-                        AppState.updateDashboardPanelPose(event.pose)
-                    },
-                )
-                .resizable(
-                    minimumSize = DpVolumeSize(
-                        width = 760.dp,
-                        height = 480.dp,
-                        depth = 0.dp,
-                    ),
-                    resizePolicy = ResizePolicy.custom { event ->
-                        val newSize = event.size
-                        if (newSize.width > 0 && newSize.height > 0) {
-                            dashboardPanelWidth = with(density) { newSize.width.toDp() }
-                            dashboardPanelHeight = with(density) { newSize.height.toDp() }
-                            AppState.updateDashboardPanelSize(
-                                widthDp = dashboardPanelWidth.value,
-                                heightDp = dashboardPanelHeight.value,
-                            )
-                        }
-                    },
-                ),
-        )
-    }
+    ApplyHandTrackingPreference(
+        isHandTrackingEnabled = uiState.isHandTrackingEnabled,
+        hasHandTrackingPermission = hasHandTrackingPermission,
+        logTag = "MainDashboardScreen",
+    )
 
     Box(
         modifier = Modifier
             .fillMaxSize()
+            .onGloballyPositioned { if (it.size.width > 0 && it.size.height > 0) onLayoutReady() }
             .background(
                 brush = Brush.verticalGradient(
                     colors = listOf(
@@ -4573,14 +4489,13 @@ fun MainDashboardScreen(
                             selectedSource = uiState.selectedServer,
                         ),
                         transitionSpec = {
-                            fadeIn(
+                            (fadeIn(
                                 animationSpec = tween(
-                                    durationMillis = 220,
-                                    delayMillis = 60,
+                                    durationMillis = 180,
                                 )
                             ) togetherWith fadeOut(
                                 animationSpec = tween(durationMillis = 140)
-                            )
+                            )).using(null)
                         },
                         label = "dashboard-content",
                         modifier = Modifier
@@ -5470,23 +5385,6 @@ private fun rememberVideoFileMetadata(
     return metadataState.value
 }
 
-@Composable
-private fun rememberVideoFileNfoTitle(
-    viewModel: MainDashboardViewModel,
-    file: SMBFileItem,
-    refreshToken: Long,
-): String? {
-    val title by produceState<String?>(
-        initialValue = null,
-        file.path,
-        file.lastModified,
-        refreshToken,
-    ) {
-        value = viewModel.resolveBrowserFileNfoTitle(file)
-    }
-    return title
-}
-
 internal fun resolveHomeVideoDisplayTitle(
     fileName: String,
     metadataTitle: String?,
@@ -5931,6 +5829,7 @@ private fun FileBrowserPanel(
     }
 
     fun openVirtualGroup(groupKey: String) {
+        if (isLoading) return
         onPreviewFocused(null)
         activeVirtualGroupKey = groupKey
         selectedPaths = emptySet()
@@ -6146,7 +6045,13 @@ private fun FileBrowserPanel(
             HorizontalDivider(color = DividerGray)
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Content
+            Box(Modifier.fillMaxWidth().height(2.dp)) {
+                if (isLoading && displayItems.isNotEmpty()) {
+                    androidx.compose.material3.LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                }
+            }
+
+            // Keep the previous listing while navigating; actions below stay disabled until ready.
             when {
                 !isConnected -> {
                     EmptyState(
@@ -6155,7 +6060,7 @@ private fun FileBrowserPanel(
                     )
                 }
 
-                isLoading -> {
+                isLoading && displayItems.isEmpty() -> {
                     Box(
                         modifier = Modifier.fillMaxSize(),
                         contentAlignment = Alignment.Center
@@ -6286,23 +6191,23 @@ private fun FileBrowserPanel(
                                                 isSelectionMode = isDeleteMode,
                                                 isSelected = isSelected,
                                                 currentPreviewKey = currentPreviewKey,
-                                                onFavoriteToggle = if (isDeleteMode || !isVideoFile) {
+                                                onFavoriteToggle = if (isLoading || isDeleteMode || !isVideoFile) {
                                                     null
                                                 } else {
                                                     { onFavoriteToggle(file, isFavorite) }
                                                 },
                                                 onClick = {
-                                                    if (isDeleteMode) {
+                                                    if (isDeleteMode && !isLoading) {
                                                         toggleSelection(file)
                                                     } else if (!isVideoFile) {
-                                                        onFileClick(file)
+                                                        if (!isLoading) onFileClick(file)
                                                     }
                                                 },
                                                 onPopupClick = {
                                                     if (isVideoFile) {
-                                                        onPlayVideo(file.path, file.name)
+                                                        if (!isLoading) onPlayVideo(file.path, file.name)
                                                     } else {
-                                                        onFileClick(file)
+                                                        if (!isLoading) onFileClick(file)
                                                     }
                                                 },
                                                 onPreviewFocused = onPreviewFocused,
@@ -6388,23 +6293,23 @@ private fun FileBrowserPanel(
                                                 isSelectionMode = isDeleteMode,
                                                 isSelected = isSelected,
                                                 currentPreviewKey = currentPreviewKey,
-                                                onFavoriteToggle = if (isDeleteMode || !isVideoFile) {
+                                                onFavoriteToggle = if (isLoading || isDeleteMode || !isVideoFile) {
                                                     null
                                                 } else {
                                                     { onFavoriteToggle(file, isFavorite) }
                                                 },
                                                 onClick = {
-                                                    if (isDeleteMode) {
+                                                    if (isDeleteMode && !isLoading) {
                                                         toggleSelection(file)
                                                     } else if (!isVideoFile) {
-                                                        onFileClick(file)
+                                                        if (!isLoading) onFileClick(file)
                                                     }
                                                 },
                                                 onPopupClick = {
                                                     if (isVideoFile) {
-                                                        onPlayVideo(file.path, file.name)
+                                                        if (!isLoading) onPlayVideo(file.path, file.name)
                                                     } else {
-                                                        onFileClick(file)
+                                                        if (!isLoading) onFileClick(file)
                                                     }
                                                 },
                                                 onPreviewFocused = onPreviewFocused,

@@ -55,15 +55,12 @@ import blackark.app.vr.utils.DEFAULT_IMMERSIVE_UI_HORIZONTAL_OFFSET_METERS
 import blackark.app.vr.utils.InferredDisplayProfile
 import blackark.app.vr.utils.SeekPreviewFrame
 import blackark.app.vr.utils.SubtitleFontCatalog
-import blackark.app.vr.utils.ThumbnailImageLoaderProvider
 import blackark.app.vr.utils.VideoFramePreviewExtractor
-import blackark.app.vr.utils.VideoThumbnailFetcher
 import blackark.app.vr.remote.RuntimeConfigRegistry
 import blackark.app.vr.utils.inferDisplayProfileFromFrame
 import blackark.app.vr.utils.normalizeImmersiveSubtitleVerticalOffsetMeters
 import blackark.app.vr.utils.normalizeImmersiveUiHorizontalOffsetMeters
 import blackark.app.vr.utils.snapImmersiveSubtitleDistanceMeters
-import coil3.request.ImageRequest
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -220,6 +217,7 @@ data class VideoPlayerState(
     val immersiveUiHorizontalOffsetMeters: Float =
         DEFAULT_IMMERSIVE_UI_HORIZONTAL_OFFSET_METERS,
     val recenterRequestId: Long = 0L,
+    val recenterCountdownSeconds: Int = 0,
     val subtitleCues: List<Cue> = emptyList(),
     val externalSubtitleFileName: String? = null,
     val audioTracks: List<PlayerTrackOption> = emptyList(),
@@ -355,6 +353,7 @@ class VideoPlayerViewModel(
     private var lastPlaybackVerticalDirection = 0
     private var playbackHorizontalRepeatJob: Job? = null
     private var controlsAutoHideJob: Job? = null
+    private var recenterCountdownJob: Job? = null
     private var immersiveUiHorizontalOffsetApplyJob: Job? = null
     private var suppressControlsToggleUntilMs = 0L
     private var pendingInitializationPath: String? = null
@@ -443,12 +442,37 @@ class VideoPlayerViewModel(
     }
 
     fun recenterView() {
-        blackark.app.vr.AppState.resetDashboardPanelPlacement()
+        if (_state.value.navigationExitPending || recenterCountdownJob?.isActive == true) return
+        recenterCountdownJob = viewModelScope.launch {
+            runRecenterCountdown(
+                onTick = { seconds ->
+                    _state.value = _state.value.copy(recenterCountdownSeconds = seconds)
+                    Log.d(PLAYER_LOG_TAG, "$PLAYBACK_CONTROL_LOG_PREFIX recenter countdown=$seconds")
+                },
+                onReady = {
+                    if (!_state.value.navigationExitPending) {
+                        _state.value = _state.value.copy(
+                            recenterCountdownSeconds = 0,
+                            recenterRequestId = _state.value.recenterRequestId + 1L,
+                        )
+                    }
+                },
+            )
+        }
+    }
+
+    private fun cancelRecenterCountdown() {
+        recenterCountdownJob?.cancel()
+        recenterCountdownJob = null
+        _state.value = _state.value.copy(recenterCountdownSeconds = 0)
+    }
+
+    fun applyRecenterAdjustments() {
+        finishSeekPreviewSession(commit = false, restorePlayback = true)
         _state.value = _state.value.copy(
             zoomLevel = 1.0f,
             immersiveViewAnchorElevationDegrees = 0.0f,
             immersiveUiHorizontalOffsetMeters = 0.0f,
-            recenterRequestId = _state.value.recenterRequestId + 1L,
         )
         appContext?.let { context ->
             AppSettingsStore.setImmersiveUiHorizontalOffsetMeters(context, 0.0f)
@@ -1076,6 +1100,7 @@ class VideoPlayerViewModel(
     }
 
     fun requestNavigateBack(source: String = "direct") {
+        cancelRecenterCountdown()
         if (hasDispatchedNavigateBack) {
             Log.d(
                 PLAYER_LOG_TAG,
@@ -1673,6 +1698,7 @@ class VideoPlayerViewModel(
             return false
         }
 
+        cancelRecenterCountdown()
         pendingInitializationPath = requestedPath
         val initializationGeneration = ++playerGeneration
         Log.i(
@@ -1969,6 +1995,20 @@ class VideoPlayerViewModel(
                                 reason: Int,
                             ) {
                                 if (initializationGeneration != playerGeneration) return
+                                if (!playWhenReady && reason == Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST &&
+                                    !_state.value.seekPreviewActive && !_state.value.navigationExitPending
+                                ) {
+                                    val pausedId = currentVideoId
+                                    val pausedPath = _state.value.videoFile?.path
+                                    val pausedPosition = this@apply.currentPosition
+                                    val pausedDuration = this@apply.duration.coerceAtLeast(0L)
+                                    viewModelScope.launch {
+                                        if (pausedId != null) {
+                                            videoRepository.updatePlaybackState(pausedId, pausedPosition, pausedDuration, System.currentTimeMillis())
+                                            scheduleResumeFrameThumbnail(pausedPath, pausedPosition, pausedDuration)
+                                        }
+                                    }
+                                }
                                 Log.i(
                                     PLAYER_LOG_TAG,
                                     "$PLAYBACK_DIAGNOSTIC_LOG_PREFIX event=play-when-ready-changed " +
@@ -3133,11 +3173,13 @@ class VideoPlayerViewModel(
     }
 
     suspend fun releasePlayerBeforeNavigateBack() {
+        cancelRecenterCountdown()
         invalidatePlaybackGeneration(reason = "navigate-back")
         releaseCurrentPlayer(resetUiState = true)
     }
 
     fun releasePlayerAsync() {
+        cancelRecenterCountdown()
         invalidatePlaybackGeneration(reason = "release-async")
         viewModelScope.launch {
             releaseCurrentPlayer(resetUiState = true)
@@ -3150,6 +3192,7 @@ class VideoPlayerViewModel(
     }
 
     private fun releasePlayerOnCleared() {
+        cancelRecenterCountdown()
         invalidatePlaybackGeneration(reason = "view-model-cleared")
         pendingInitializationPath = null
         positionTrackingJob?.cancel()
@@ -3215,40 +3258,14 @@ class VideoPlayerViewModel(
         val context = appContext ?: return
         val path = videoPath?.takeIf { it.isNotBlank() } ?: return
         if (positionMs <= 0L) return
-        if (durationMs > 0L && positionMs >= durationMs * 95L / 100L) return
-
-        val request = ImageRequest.Builder(context)
-            .data(
-                VideoThumbnailFetcher.Model(
-                    path = path,
-                    frameTimeMs = positionMs,
-                    durationMs = durationMs,
-                )
-            )
-            .diskCacheKey(
-                VideoThumbnailFetcher.diskCacheKey(
-                    path = path,
-                    frameTimeMs = positionMs,
-                    durationMs = durationMs,
-                )
-            )
-            .build()
 
         teardownScope.launch {
-            runCatching {
-                ThumbnailImageLoaderProvider.get(context).execute(request)
-            }.onSuccess { result ->
-                Log.d(
-                    PLAYER_LOG_TAG,
-                    "Resume thumbnail request completed path=$path positionMs=$positionMs " +
-                            "result=${result::class.java.simpleName}",
-                )
-            }.onFailure { error ->
-                Log.w(
-                    PLAYER_LOG_TAG,
-                    "Resume thumbnail request failed path=$path positionMs=$positionMs",
-                    error,
-                )
+            try {
+                blackark.app.vr.utils.ResumeThumbnailStore.generate(context, path, positionMs, durationMs)
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                Log.w(PLAYER_LOG_TAG, "Resume thumbnail failed path=$path positionMs=$positionMs", error)
             }
         }
     }

@@ -90,7 +90,7 @@ internal fun generatedFrameFileName(path: String, generation: Int): String {
     return md5Hex(buildGeneratedFrameIdentity(path, generation)) + ".jpg"
 }
 
-private fun generatedResumeFrameFilePrefix(path: String, generation: Int): String {
+internal fun generatedResumeFrameFilePrefix(path: String, generation: Int): String {
     val sourceIdentity = "$THUMBNAIL_CACHE_VERSION:$generation:resume:${normalizedFrameSourcePath(path)}"
     return "resume_${md5Hex(sourceIdentity)}_"
 }
@@ -429,7 +429,6 @@ class VideoThumbnailFetcher(
                 inferredDisplayProfile = inferredDisplayProfile,
             )
             currentCoroutineContext().ensureActive()
-            deleteSupersededResumeFrames(smbUrl, localFile)
 
             SourceFetchResult(
                 source = ImageSource(file = localFile.toOkioPath(), fileSystem = FileSystem.SYSTEM),
@@ -484,26 +483,6 @@ class VideoThumbnailFetcher(
         )
     }
 
-    private fun deleteSupersededResumeFrames(
-        videoPath: String,
-        currentFile: java.io.File,
-    ) {
-        if (requestedFrameTimeMs == null) return
-        val generation = ImageCacheVersionStore.thumbnailGeneration(options.context)
-        val filePrefix = generatedResumeFrameFilePrefix(videoPath, generation)
-        currentFile.parentFile
-            ?.listFiles { candidate ->
-                candidate.isFile &&
-                        candidate.name.startsWith(filePrefix) &&
-                        candidate.absolutePath != currentFile.absolutePath
-            }
-            ?.forEach { previousFile ->
-                if (!previousFile.delete()) {
-                    Log.w(tag, "Could not delete superseded resume frame ${previousFile.absolutePath}")
-                }
-            }
-    }
-
     private suspend fun cachedGeneratedFrameResult(
         videoPath: String,
         localFile: java.io.File,
@@ -538,7 +517,6 @@ class VideoThumbnailFetcher(
             inferredDisplayProfile = inferredDisplayProfile,
         )
         currentCoroutineContext().ensureActive()
-        deleteSupersededResumeFrames(videoPath, localFile)
         return SourceFetchResult(
             source = ImageSource(file = localFile.toOkioPath(), fileSystem = FileSystem.SYSTEM),
             mimeType = "image/jpeg",
@@ -552,6 +530,9 @@ class VideoThumbnailFetcher(
         resolvedTitle: String? = null,
         inferredDisplayProfile: InferredDisplayProfile? = null,
     ) {
+        // Resume frames belong to one file and one saved position. The coordinator publishes them
+        // after generation; never spread them to multipart/asset-linked videos or favorites.
+        if (requestedFrameTimeMs != null) return
         try {
             currentCoroutineContext().ensureActive()
             val db = AppDatabase.getDatabase(options.context)

@@ -1,5 +1,9 @@
 package blackark.app.vr
 
+import androidx.compose.runtime.setValue
+
+import androidx.compose.runtime.getValue
+
 import android.annotation.SuppressLint
 import android.hardware.input.InputManager
 import android.os.Bundle
@@ -14,10 +18,8 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
 import androidx.navigation.compose.rememberNavController
 import blackark.app.vr.ui.navigation.AppNavigation
@@ -359,6 +361,10 @@ class MainActivity : ComponentActivity() {
             MotionEvent.AXIS_RZ,
             MotionEvent.AXIS_RX,
             MotionEvent.AXIS_RY,
+            MotionEvent.AXIS_LTRIGGER,
+            MotionEvent.AXIS_RTRIGGER,
+            MotionEvent.AXIS_BRAKE,
+            MotionEvent.AXIS_GAS,
             MotionEvent.AXIS_HSCROLL,
             MotionEvent.AXIS_VSCROLL,
         ).joinToString(separator = ",") { axis ->
@@ -373,7 +379,8 @@ class MainActivity : ComponentActivity() {
             "motion-raw reason=$reason action=${MotionEvent.actionToString(event.action)} " +
                 "deviceId=${event.deviceId} name=${event.device?.name.orEmpty()} " +
                 "source=0x${event.source.toString(16)} pointers=${event.pointerCount} " +
-                "history=${event.historySize} axes={$axes} ranges={$ranges}",
+                "history=${event.historySize} buttonState=0x${event.buttonState.toString(16)} " +
+                "actionButton=0x${event.actionButton.toString(16)} axes={$axes} ranges={$ranges}",
         )
     }
 

@@ -26,6 +26,7 @@ data class LocalNfoMetadataResult(
     val metadata: JvrMovieMetadata?,
     val posterUrl: String?,
     val nfoPath: String?,
+    val readSuccessful: Boolean = true,
 )
 
 internal data class NfoArtworkReferences(
@@ -169,22 +170,47 @@ class LocalNfoMetadataResolver(
     private val localClient: LocalFileClient?,
     private val localRootTreeUri: String?,
 ) {
+    private val siblingCache = mutableMapOf<String, Result<List<SMBFileItem>>>()
+    private val textCache = mutableMapOf<String, Result<String>>()
+
     suspend fun resolve(
         video: SMBFileItem,
         fallbackCode: String,
         preferredBaseName: String? = null,
+        strict: Boolean = false,
     ): LocalNfoMetadataResult =
         withContext(Dispatchers.IO) {
-            val siblingFiles = listSiblingFiles(video).getOrElse { error ->
+            val siblingKey = if (localClient != null) {
+                LocalFileClient.resolveParentDirectoryUri(localRootTreeUri.orEmpty(), video.path)
+            } else video.path.substringBeforeLast('/', "")
+            val siblingResult = siblingCache.getOrPut(siblingKey ?: video.path) { listSiblingFiles(video, strict) }
+            var readSuccessful = true
+            val siblingFiles = siblingResult.getOrElse { error ->
+                if (error is kotlinx.coroutines.CancellationException) throw error
+                if (strict) throw error
+                readSuccessful = false
                 Log.d(TAG, "Failed to list siblings for ${video.path}: ${error.message}")
                 emptyList()
             }
             val nfoItem = findNfoCandidate(video.name, siblingFiles, preferredBaseName)
             val nfoText = nfoItem?.let { item ->
-                readText(item.path).getOrElse { error ->
+                textCache.getOrPut(item.path) { readText(item.path) }.getOrElse { error ->
+                    if (error is kotlinx.coroutines.CancellationException) throw error
+                    if (strict) throw error
+                    readSuccessful = false
                     Log.w(TAG, "Failed to read NFO ${item.path}: ${error.message}")
                     null
                 }
+            }
+            if (strict && nfoText != null) {
+                val factory = javax.xml.parsers.DocumentBuilderFactory.newInstance().apply {
+                    setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
+                    setFeature("http://xml.org/sax/features/external-general-entities", false)
+                    setFeature("http://xml.org/sax/features/external-parameter-entities", false)
+                    isXIncludeAware = false
+                    isExpandEntityReferences = false
+                }
+                factory.newDocumentBuilder().parse(org.xml.sax.InputSource(java.io.StringReader(nfoText)))
             }
             val nfoArtwork = nfoText?.let(::extractNfoArtworkReferences)
                 ?: NfoArtworkReferences(emptyList(), emptyList(), emptyList())
@@ -240,17 +266,18 @@ class LocalNfoMetadataResolver(
                 metadata = metadata,
                 posterUrl = posterUrl,
                 nfoPath = nfoItem?.path,
+                readSuccessful = readSuccessful,
             )
         }
 
-    private suspend fun listSiblingFiles(video: SMBFileItem): Result<List<SMBFileItem>> {
+    private suspend fun listSiblingFiles(video: SMBFileItem, strict: Boolean): Result<List<SMBFileItem>> {
         val local = localClient
         val smb = smbClient
         return when {
             local != null -> {
                 val rootTreeUri = localRootTreeUri.orEmpty()
                 val parentUri = LocalFileClient.resolveParentDirectoryUri(rootTreeUri, video.path)
-                    ?: return Result.success(emptyList())
+                    ?: return Result.failure(IllegalStateException("Cannot resolve NFO parent"))
                 local.listFiles(parentUri)
             }
 
@@ -271,6 +298,7 @@ class LocalNfoMetadataResolver(
                                     lastModified = file.lastModified(),
                                 )
                             } catch (e: Exception) {
+                                if (e is kotlinx.coroutines.CancellationException || strict) throw e
                                 Log.d(TAG, "Skipping sibling ${file.path}: ${e.message}")
                                 null
                             }
@@ -286,6 +314,8 @@ class LocalNfoMetadataResolver(
     private suspend fun readText(path: String): Result<String> {
         return try {
             Result.success(openInputStream(path).bufferedReader(Charsets.UTF_8).use { it.readText() })
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
         } catch (utf8Error: Exception) {
             try {
                 val fallbackText = openInputStream(path)
@@ -293,6 +323,8 @@ class LocalNfoMetadataResolver(
                     .use { it.readText() }
                 Log.d(TAG, "Read NFO with ISO-8859-1 fallback for $path: ${utf8Error.message}")
                 Result.success(fallbackText)
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
             } catch (fallbackError: Exception) {
                 Result.failure(fallbackError)
             }
