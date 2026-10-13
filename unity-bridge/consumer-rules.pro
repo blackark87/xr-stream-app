@@ -1,0 +1,2 @@
+-keep class blackark.app.vr.unity.UnityBridge { public static *; }
+-keep class blackark.app.vr.unity.LocalFolderPickerActivity { *; }

@@ -24,3 +24,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "XR Stream"
 include(":app")
+include(":unity-bridge")
